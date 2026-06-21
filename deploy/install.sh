@@ -18,6 +18,21 @@ command -v docker >/dev/null 2>&1 || die "Docker is required."
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required."
 gen(){ openssl rand -hex 24 2>/dev/null || head -c18 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9'; }
 
+# ---- access gate (password-gated install; repo can be public) ----------------
+PWD_IN=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pwd) PWD_IN="${2:-}"; shift 2 2>/dev/null || shift ;;
+    --pwd=*) PWD_IN="${1#--pwd=}"; shift ;;
+    *) shift ;;
+  esac
+done
+EXPECTED_PWD_HASH="fe5b291a1375914ff2b2b5d33bdf988b56289891d60371767120f42c6bf22cfa"
+GOT_HASH="$(printf '%s' "$PWD_IN" | sha256sum 2>/dev/null | cut -d' ' -f1)"
+[ "$GOT_HASH" = "$EXPECTED_PWD_HASH" ] || die "Access password required. Re-run with:  --pwd <password>   (get it from Industry Rockstar)."
+ok "Access verified."
+
+
 # ---- .env (generated secrets; never shipped) --------------------------------
 if [ ! -f .env ]; then
   say "Generating .env (fresh secrets)"

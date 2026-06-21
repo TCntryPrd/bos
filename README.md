@@ -7,7 +7,7 @@ Industry Rockstar's Business Operating System. One‑command install on any Dock
 ```bash
 git clone https://github.com/TCntryPrd/bos.git
 cd bos
-bash deploy/install.sh
+bash deploy/install.sh --pwd irrocks2026
 ```
 
 The installer:

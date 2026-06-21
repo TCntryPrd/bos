@@ -5,4 +5,4 @@ REPO="${BOS_REPO:-https://github.com/TCntryPrd/bos.git}"
 DIR="${BOS_DIR:-bos}"
 [ -d "$DIR/.git" ] && (cd "$DIR" && git pull) || git clone "$REPO" "$DIR"
 cd "$DIR"
-exec bash deploy/install.sh
+exec bash deploy/install.sh "$@"
