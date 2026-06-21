@@ -1,0 +1,16 @@
+name: Project Management
+id: project-management
+description: Helps manage projects, track tasks, create timelines, and coordinate deliverables
+version: "1.0"
+author: Starr & Partners
+triggers:
+  - "project"
+  - "task"
+  - "deadline"
+  - "milestone"
+  - "deliverable"
+  - "timeline"
+  - "sprint"
+  - "backlog"
+enabled: true
+category: operations

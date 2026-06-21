@@ -1,0 +1,1 @@
+BOS v2.1.0 — IR/BOS branded, complete schema (boot-time reconcile, never missing), Traefik auto-detect. Install: bash deploy/install.sh

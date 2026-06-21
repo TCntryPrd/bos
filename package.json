@@ -1,0 +1,28 @@
+{
+  "name": "boss-aios",
+  "version": "2.0.0",
+  "private": true,
+  "description": "IR Custom AIOS v2 — Brain-agnostic, voice-first AI Operating System",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/core -w packages/brain -w packages/connectors -w packages/voice -w packages/healing -w packages/learning -w packages/backup -w packages/confidence -w apps/api -w apps/web -w apps/worker --if-present",
+    "clean": "npm run clean --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:worker": "npm run dev --workspace=apps/worker"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.2",
+    "vitest": "^4.1.2"
+  }
+}
