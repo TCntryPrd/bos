@@ -1,58 +1,25 @@
-# IR Custom AIOS - IR White-Label
+# BOS — Business Operating System
 
-Industry Rockstarr white-label deployment of IR Custom AIOS.
+Industry Rockstar's Business Operating System. One‑command install on any Docker host.
 
-## Quick Start
-
-```bash
-# 1. Configure environment
-cp .env.example .env
-nano .env  # Add your credentials
-
-# 2. Generate encryption keys
-echo "BOSS_TOKEN_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> .env
-echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
-echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" >> .env
-
-# 3. Start services
-docker compose up -d
-
-# 4. Visit installation page
-# https://ircustomdashboards.tech/install
-```
-
-## Services
-
-- **Web**: React frontend (IR themed)
-- **API**: Fastify backend
-- **Postgres**: PostgreSQL 16 database
-- **Redis**: Cache and streams
-- **Weaviate**: Vector database
-- **STT**: Speech-to-text (faster-whisper)
-- **TTS**: Text-to-speech (edge-tts)
-- **OpenWA**: WhatsApp integration
-- **Worker**: Background job processor
-
-## Updates
-
-Pull updates from main IR Custom AIOS:
+## Install
 
 ```bash
-git pull upstream main
-docker compose build
-docker compose up -d
+git clone https://github.com/TCntryPrd/bos.git
+cd bos
+bash deploy/install.sh
 ```
 
-## First Install
+The installer:
+- **Detects Traefik** → serves over HTTPS through it (asks for your domain); otherwise launches the web UI directly on a port.
+- **Applies the complete schema on every boot** (idempotent reconcile init‑service) — never "missing tables", repairs partial installs, and **verifies the table count, failing loudly** if anything's short.
+- Seeds the Employee Agents.
 
-1. Visit `/install` page
-2. Create your account
-3. Complete onboarding wizard
-4. Connect services (Gmail, Calendar, WhatsApp)
-5. Enable agents
+Brain runs on Gemini out of the box; run `bash deploy/claude-login.sh` to upgrade to Claude.
 
----
+## Update an existing install
 
-**Deployment**: ircustomdashboards.tech  
-**Mode**: Multi-tenant  
-**Theme**: Light, joyful, energetic
+```bash
+cd bos && git pull && docker compose build && docker compose up -d
+```
+The schema reconciles automatically on `up` — no manual migration.
