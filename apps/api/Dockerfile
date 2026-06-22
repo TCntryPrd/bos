@@ -62,7 +62,7 @@ RUN ln -sf /usr/lib/node_modules/@openai/codex/bin/codex.js /usr/bin/codex
 # Claude Code CLI — invoked as a subprocess from the rascal-workspace
 # routes (v1.6.4). Pinned to the host's installed version so deploys
 # don't drift behind subscription auth changes.
-RUN npm install -g @anthropic-ai/claude-code@2.1.119
+RUN npm install -g @anthropic-ai/claude-code@2.1.185
 
 # Google CLI (gemini) — powers the Hermes agent on the tenant's Gemini key
 RUN npm install -g @google/gemini-cli@0.46.0

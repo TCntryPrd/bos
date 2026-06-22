@@ -15,6 +15,7 @@
  */
 
 import crypto from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { getPool } from '../db.js';
 import { getRegistry, getUsageRollup } from '../lib/google-registry.js';
 import { executeWeaviateTool } from './weaviate.js';
@@ -4631,10 +4632,26 @@ async function handleWebFetch(args: Record<string, unknown>): Promise<string> {
 // These give BOS the ability to modify, build, test, and version its own code.
 // Restricted to admin trust tier. All changes go to boss-dev directory.
 
-// Source paths — adapt to runtime mode
-const BOSS_SRC = IS_DOCKER ? '/data/home/boss-dev' : '/home/boss/boss-dev';
-const HOST_BOSS_SRC = IS_DOCKER ? '/data/home/boss-dev' : '/home/boss/boss-dev';
-const DOCKER_COMPOSE_DIR = IS_DOCKER ? '/data/home/boss-dev' : '/home/boss/boss-dev';
+// Source paths — the repo is mounted at /home/boss/boss-dev in docker (see
+// docker-compose.bos.yml). Resolve to a directory that actually EXISTS so
+// boss_bash (and self-mod) never fail with `spawnSync /bin/sh ENOENT` when the
+// mount path differs. Picks the first existing candidate, else /tmp.
+function resolveBossSrc(): string {
+  const candidates = [
+    process.env.BOSS_SRC_DIR,
+    '/home/boss/boss-dev',
+    '/data/home/boss-dev',
+    '/app',
+    process.env.HOME,
+  ];
+  for (const c of candidates) {
+    if (c) { try { if (existsSync(c)) return c; } catch { /* ignore */ } }
+  }
+  return '/tmp';
+}
+const BOSS_SRC = resolveBossSrc();
+const HOST_BOSS_SRC = BOSS_SRC;
+const DOCKER_COMPOSE_DIR = BOSS_SRC;
 
 // Blocked patterns for shell safety
 const BLOCKED_COMMANDS = [
