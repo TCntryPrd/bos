@@ -32,6 +32,13 @@ GOT_HASH="$(printf '%s' "$PWD_IN" | sha256sum 2>/dev/null | cut -d' ' -f1)"
 [ "$GOT_HASH" = "$EXPECTED_PWD_HASH" ] || die "Access password required. Re-run with:  --pwd <password>   (get it from Industry Rockstar)."
 ok "Access verified."
 
+# ---- account setup — the email you enter here IS your login ------------------
+say "Account setup (the email you enter is your login)"
+read -rp "  Your login email: " ADMIN_EMAIL
+[ -n "${ADMIN_EMAIL:-}" ] || die "An email is required — it is your login."
+read -rp "  Your name [${ADMIN_EMAIL%%@*}]: " ADMIN_NAME; ADMIN_NAME="${ADMIN_NAME:-${ADMIN_EMAIL%%@*}}"
+ADMIN_PW=""; while [ -z "${ADMIN_PW}" ]; do read -rsp "  Choose a password: " ADMIN_PW; echo; done
+ADMIN_HASH="$(printf '%s' "$ADMIN_PW" | sha256sum | cut -d' ' -f1)"
 
 # ---- .env (generated secrets; never shipped) --------------------------------
 if [ ! -f .env ]; then
@@ -87,6 +94,19 @@ say "Seeding Employee Agents"
 docker compose exec -T postgres psql -U boss -d boss_ir < deploy/seed-agents.sql >/dev/null 2>&1 || true
 [ -f deploy/seed.sql ] && docker compose exec -T postgres psql -U boss -d boss_ir < deploy/seed.sql >/dev/null 2>&1 || true
 
+# ---- owner account — login = the email entered at setup (no generic admin@) --
+say "Creating your account (${ADMIN_EMAIL})"
+TID="$(grep -E '^DEFAULT_TENANT_ID=' .env | cut -d= -f2-)"
+docker compose exec -T postgres psql -U boss -d boss_ir -v ON_ERROR_STOP=0 \
+  -v tid="$TID" -v aemail="$ADMIN_EMAIL" -v aname="$ADMIN_NAME" -v ahash="$ADMIN_HASH" <<'SQL' >/dev/null 2>&1
+INSERT INTO tenants (id, name, slug)
+  SELECT :'tid', 'BOS', 'bos' WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE id = :'tid');
+INSERT INTO users (tenant_id, username, email, display_name, password_hash, role, onboarding_wizard_complete)
+  SELECT :'tid', :'aemail', :'aemail', :'aname', :'ahash', 'admin', false
+  WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = :'aemail');
+SQL
+ok "Account ready — your login is ${ADMIN_EMAIL}"
+
 # ---- VERIFY schema (the gate that ends the "still no schema" era) ------------
 say "Verifying schema completeness"
 TC="$(docker compose exec -T postgres psql -U boss -d boss_ir -tAc "SELECT count(*) FROM pg_tables WHERE schemaname='public'" | tr -d '[:space:]')"
@@ -95,5 +115,6 @@ ok "Schema complete: ${TC} tables"
 
 printf '\n\033[1;32m════════════════════════════════════════════\033[0m\n'
 ok "BOS is installed and running."
-printf '   Open:  %s\n' "$ACCESS"
+printf '   Open:   %s\n' "$ACCESS"
+printf '   Log in: %s  (with the password you set)\n' "$ADMIN_EMAIL"
 printf '   Brain runs on Gemini out of the box; run deploy/claude-login.sh to upgrade to Claude.\n\n'
