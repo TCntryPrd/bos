@@ -6,7 +6,7 @@
 #         BOS_BRANCH=fusion-cos-p0p1 bash deploy/update.sh
 set -uo pipefail
 cd "$(dirname "$0")/.."
-BRANCH="${BOS_BRANCH:-main}"
+BRANCH="${BOS_BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo release)}"
 log(){ echo "[update] $*"; }
 log "fetch origin/$BRANCH"; git fetch --quiet origin "$BRANCH" || { log "fetch FAILED"; exit 1; }
 BEFORE=$(git rev-parse HEAD)
