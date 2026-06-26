@@ -1,1 +1,1 @@
-BOS v2.1.3 — IR/BOS branded, complete schema (boot reconcile), Traefik auto-detect, COO runtime map. + Installer now creates your owner account with YOUR email as the login (prompted at setup), no generic admin@. Install: bash deploy/install.sh --pwd <password>
+BOS v2.2.0 — Advisory Board (roundtable + advisor memory + factory) + Fusion Command Center tiles (Dashboard of Life / Daily Brief / Needs Your OK / Spend / Integration Health) + OTA (deploy/update.sh). Install: bash deploy/install.sh --pwd <password>
