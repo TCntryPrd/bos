@@ -1,0 +1,11 @@
+-- 001_tenant_resolver.sql  (P0 — Fusion CoS pre-work)
+-- Rollback: none (marker only; performs no DDL).
+--
+-- DECISION (locked P0): all fusion control-plane tables use `tenant_id TEXT NOT NULL`
+-- (app-seeded from DEFAULT_TENANT_ID — d05cde41 on last-castle; 'default' dev fallback),
+-- with NO hard FK to tenants(id) until the ghost-tenant backfill lands. This prevents
+-- new rows stranding on a tenant id that may not yet exist in tenants on a given deploy.
+-- Resolution lives in app code (apps/api/src/lib/tenant.ts -> currentTenantId()).
+--
+-- This migration records the decision in the ledger; it intentionally does no DDL.
+SELECT 1;

@@ -1,0 +1,17 @@
+name: Client Communications
+id: client-communications
+description: Maintains professional tone, tracks CRM context, manages follow-up cadence with clients
+version: "1.0"
+author: Starr & Partners
+triggers:
+  - "client"
+  - "proposal"
+  - "contract"
+  - "onboarding"
+  - "relationship"
+  - "follow up"
+  - "crm"
+  - "customer"
+  - "prospect"
+enabled: true
+category: communication

@@ -1,0 +1,147 @@
+@import './styles/tokens-ir-whitelabel.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    /* color-scheme is now per-theme (see token blocks) so Light renders native
+       controls/scrollbars correctly instead of being forced dark. */
+    /* ICP: larger root for 40-60yo eyes — 19px root → 18px+ body floor. */
+    font-size: 118.75%;
+  }
+
+  body {
+    background: var(--v-base-bg, var(--v-base));
+    background-color: var(--v-base);
+    color: var(--v-text);
+    /* ICP: humanist, high-x-height sans (Inter preferred) reads better than the
+       geometric Space Grotesk for sustained reading; system-ui is a humanist
+       fallback until Inter is bundled. */
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 1rem;        /* ≥18px given the 118.75% root */
+    line-height: 1.55;      /* ICP: ≥1.5 */
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: 0;
+    min-height: 100vh;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  /* IR (Industry Rockstar) badge is black artwork: invert to white on the dark
+     theme (default), keep black on the light theme. */
+  .ir-mark { filter: invert(1); }
+  [data-theme='light'] .ir-mark { filter: invert(0); }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-1;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border-strong rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-text-muted;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface-2 border border-border rounded-xl;
+  }
+
+  .card-header {
+    @apply px-5 py-4 border-b border-border;
+  }
+
+  .card-body {
+    @apply p-5;
+  }
+
+  .btn {
+    @apply inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium
+           transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-accent/50
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent hover:bg-accent-hover text-white;
+  }
+
+  .btn-secondary {
+    @apply btn bg-surface-3 hover:bg-surface-4 text-text-primary border border-border;
+  }
+
+  .btn-ghost {
+    @apply btn hover:bg-surface-3 text-text-secondary hover:text-text-primary;
+  }
+
+  .btn-danger {
+    @apply btn bg-danger/10 hover:bg-danger/20 text-danger border border-danger/30;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-success/10 text-success;
+  }
+
+  .badge-warning {
+    @apply badge bg-warning/10 text-warning;
+  }
+
+  .badge-danger {
+    @apply badge bg-danger/10 text-danger;
+  }
+
+  .badge-info {
+    @apply badge bg-info/10 text-info;
+  }
+
+  .badge-neutral {
+    @apply badge bg-surface-3 text-text-secondary;
+  }
+
+  .input {
+    @apply w-full bg-surface-3 border border-border rounded-lg px-3.5 py-2
+           text-sm text-text-primary placeholder-text-muted
+           focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent/50
+           transition-colors duration-150;
+  }
+
+  .select {
+    @apply input appearance-none cursor-pointer;
+  }
+
+  .status-dot {
+    @apply inline-block w-2 h-2 rounded-full flex-shrink-0;
+  }
+
+  .status-dot-healthy {
+    @apply status-dot bg-success;
+  }
+
+  .status-dot-degraded {
+    @apply status-dot bg-warning animate-pulse-slow;
+  }
+
+  .status-dot-unhealthy {
+    @apply status-dot bg-danger animate-pulse;
+  }
+
+  .status-dot-unknown {
+    @apply status-dot bg-text-muted;
+  }
+}

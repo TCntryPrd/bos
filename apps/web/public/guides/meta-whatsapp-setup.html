@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="robots" content="noindex,nofollow" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BOS · Connect WhatsApp &amp; Meta (Facebook Graph API)</title>
+<style>
+  :root{
+    --bg:#05060f; --panel:#0b0e1d; --panel2:#11152e; --border:#232a4d;
+    --violet:#8b5cf6; --violet2:#d946ef; --blue:#4f6df5; --gold:#f5c542;
+    --text:#f1f4ff; --dim:#aab3d6; --muted:#7681a8; --green:#22c55e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(120% 120% at 50% 0%,#131838 0%,#0a0c20 45%,#05060f 100%);
+    color:var(--text);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+  .wrap{max-width:880px;margin:0 auto;padding:40px 22px 120px;}
+  header{border-bottom:1px solid var(--border);padding-bottom:22px;margin-bottom:30px;}
+  .brand{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--violet);font-weight:700;}
+  h1{font-size:30px;margin:.3em 0 .15em;line-height:1.2;}
+  h2{font-size:21px;margin:42px 0 6px;color:#fff;}
+  h3{font-size:16px;margin:24px 0 4px;color:var(--gold);}
+  .lede{color:var(--dim);font-size:16px;}
+  p{color:var(--dim);} strong{color:var(--text);}
+  a{color:var(--blue);} code{background:var(--panel2);border:1px solid var(--border);
+    border-radius:5px;padding:1px 6px;font-family:ui-monospace,monospace;font-size:13.5px;color:#cfe0ff;}
+  pre{background:#080b14;border:1px solid var(--border);border-radius:10px;padding:14px 16px;overflow-x:auto;
+    font-family:ui-monospace,monospace;font-size:13px;color:#cfe0ff;}
+  ol,ul{color:var(--dim);} li{margin:6px 0;}
+  .step{counter-increment:step;background:var(--panel);border:1px solid var(--border);
+    border-radius:14px;padding:20px 22px 18px;margin:18px 0;position:relative;}
+  .step::before{content:"STEP " counter(step);position:absolute;top:-11px;left:18px;
+    background:linear-gradient(135deg,var(--blue),var(--violet));color:#fff;font-size:11px;font-weight:700;
+    letter-spacing:.12em;padding:3px 12px;border-radius:20px;}
+  .steps{counter-reset:step;}
+  .callout{border-left:3px solid var(--gold);background:rgba(245,197,66,.07);
+    padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0;color:var(--dim);font-size:14.5px;}
+  .warn{border-left-color:var(--violet2);background:rgba(217,70,239,.08);}
+  .ok{border-left-color:var(--green);background:rgba(34,197,94,.08);}
+  .pill{display:inline-block;background:var(--panel2);border:1px solid var(--border);border-radius:6px;
+    padding:2px 9px;font-size:12px;color:var(--dim);margin:2px 4px 2px 0;}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px;}
+  th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;color:var(--dim);}
+  th{background:var(--panel2);color:var(--text);}
+  footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:13px;}
+  .toc{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin:24px 0;}
+  .toc a{display:block;padding:3px 0;color:var(--dim);text-decoration:none;}
+  .toc a:hover{color:var(--blue);}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="brand">BOS · Social Media Agent · Setup Guide</div>
+  <h1>Connect WhatsApp &amp; Meta with the Facebook Graph API</h1>
+  <p class="lede">A complete, step-by-step walkthrough to create a Meta/Facebook app, get a
+  permanent WhatsApp Business access token, and wire it into your BOS Social Media agent so it can
+  read and send messages across WhatsApp, Messenger, and Instagram.</p>
+</header>
+
+<div class="callout"><strong>Time:</strong> ~30–45 minutes. <strong>You need:</strong> a Facebook
+account, a phone number that can receive an SMS/call for WhatsApp, and a credit/debit card on file
+in Meta (no charge for the free tier — Meta just requires one to enable messaging).</div>
+
+<div class="toc">
+  <strong style="color:#fff">On this page</strong>
+  <a href="#overview">0 · How the pieces fit together</a>
+  <a href="#app">1 · Create a Meta app</a>
+  <a href="#wa">2 · Add WhatsApp &amp; get your IDs</a>
+  <a href="#token">3 · Get a PERMANENT access token (System User)</a>
+  <a href="#numbers">4 · Register your business phone number</a>
+  <a href="#webhook">5 · Wire the webhook to BOS (receive messages)</a>
+  <a href="#test">6 · Send your first message &amp; test</a>
+  <a href="#meta">7 · Extend to Messenger &amp; Instagram</a>
+  <a href="#bos">8 · Paste it all into BOS</a>
+  <a href="#trouble">Troubleshooting</a>
+</div>
+
+<h2 id="overview">0 · How the pieces fit together</h2>
+<p>The Meta "Graph API" is one API that covers WhatsApp, Messenger, and Instagram. To use it you
+create a <strong>Meta app</strong> (a container), add the <strong>WhatsApp</strong> product to it,
+and generate an <strong>access token</strong> that BOS uses to call the API. Messages <em>coming in</em>
+arrive through a <strong>webhook</strong> (a URL on your BOS server that Meta calls).</p>
+<table>
+  <tr><th>Piece</th><th>What it is</th><th>Where you get it</th></tr>
+  <tr><td><code>App ID</code> / <code>App Secret</code></td><td>Identifies your Meta app</td><td>App dashboard → Settings → Basic</td></tr>
+  <tr><td><code>Phone Number ID</code></td><td>The sending number's internal ID</td><td>WhatsApp → API Setup</td></tr>
+  <tr><td><code>WABA ID</code></td><td>WhatsApp Business Account ID</td><td>WhatsApp → API Setup</td></tr>
+  <tr><td><code>Access Token</code></td><td>The key BOS sends with every call</td><td>Step 3 (System User — permanent)</td></tr>
+  <tr><td><code>Verify Token</code></td><td>A password you invent for the webhook</td><td>You make it up (Step 5)</td></tr>
+</table>
+
+<div class="steps">
+
+<div class="step" id="app">
+<h3>Create a Meta app</h3>
+<ol>
+  <li>Go to <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer">developers.facebook.com/apps</a> and log in. If this is your first time, accept the developer terms.</li>
+  <li>Click <strong>Create App</strong>.</li>
+  <li>For "What do you want your app to do?" choose <strong>Other</strong> → <strong>Next</strong>.</li>
+  <li>App type: choose <strong>Business</strong> → <strong>Next</strong>.</li>
+  <li>Name it something clear (e.g. <code>YourBrand BOS Messaging</code>), enter your contact email, and select or create a <strong>Business portfolio</strong> (Meta Business account). Click <strong>Create app</strong> and re-enter your password if asked.</li>
+</ol>
+<div class="callout">If you don't have a Business portfolio yet, Meta will offer to create one — do it. WhatsApp API requires the app to be tied to a business portfolio.</div>
+</div>
+
+<div class="step" id="wa">
+<h3>Add WhatsApp &amp; grab your IDs</h3>
+<ol>
+  <li>On the app dashboard, find the <strong>WhatsApp</strong> product card and click <strong>Set up</strong>.</li>
+  <li>Pick your Business portfolio if prompted. Meta auto-creates a <strong>test</strong> WhatsApp Business Account and a free <strong>test phone number</strong> so you can try it before registering your real number.</li>
+  <li>Open <strong>WhatsApp → API Setup</strong> in the left menu. Copy and save these three values:
+    <ul>
+      <li><span class="pill">Phone number ID</span> (under the test number)</li>
+      <li><span class="pill">WhatsApp Business Account ID</span> (the WABA ID)</li>
+      <li><span class="pill">App ID</span> (top of the page / Settings → Basic)</li>
+    </ul>
+  </li>
+  <li>Also from <strong>Settings → Basic</strong>, copy your <span class="pill">App Secret</span> (click "Show").</li>
+</ol>
+<div class="warn callout"><strong>Keep the App Secret and tokens private.</strong> Anyone with them can send messages as you. Never paste them into a public page, screenshot, or chat.</div>
+</div>
+
+<div class="step" id="token">
+<h3>Get a PERMANENT access token (System User)</h3>
+<p>The token shown on the API Setup page is <strong>temporary (24 hours)</strong>. For BOS to keep
+working you need a permanent token, created through a <strong>System User</strong>.</p>
+<ol>
+  <li>Go to <a href="https://business.facebook.com/settings" target="_blank" rel="noreferrer">business.facebook.com/settings</a> (Business Settings).</li>
+  <li>Left menu: <strong>Users → System users</strong> → <strong>Add</strong>. Name it <code>bos-system-user</code>, role <strong>Admin</strong>, create.</li>
+  <li>Select the system user → <strong>Add assets</strong> → <strong>Apps</strong> → pick your app → toggle <strong>Manage app</strong> (Full control) → Save.</li>
+  <li>Still on the system user, click <strong>Generate new token</strong>. Choose your app. Token expiration: <strong>Never</strong>.</li>
+  <li>Under permissions, check <strong><code>whatsapp_business_messaging</code></strong> and <strong><code>whatsapp_business_management</code></strong> (and <code>business_management</code> if shown). Generate.</li>
+  <li><strong>Copy this token now and save it</strong> — Meta only shows it once. This is your permanent <span class="pill">Access Token</span>.</li>
+</ol>
+<div class="ok callout">This permanent token is the single most important value. It's what you paste into BOS so the Social Media agent can send and read WhatsApp messages indefinitely.</div>
+</div>
+
+<div class="step" id="numbers">
+<h3>Register your real business phone number</h3>
+<p>The free test number can only message 5 pre-verified recipients. To message anyone, add your own number.</p>
+<ol>
+  <li><strong>WhatsApp → API Setup</strong> → under "From", click <strong>Add phone number</strong>.</li>
+  <li>Enter your business display name, category, and the phone number (it must <em>not</em> already be on a personal WhatsApp account — or first delete WhatsApp from that number).</li>
+  <li>Verify via SMS or voice call (enter the 6-digit code).</li>
+  <li>Set a <strong>two-step PIN</strong> when prompted — save it; you'll need it if you re-register.</li>
+  <li>Copy the new number's <span class="pill">Phone number ID</span> (it replaces the test one in BOS).</li>
+</ol>
+<div class="callout">New WhatsApp Business numbers start in a free <strong>unverified</strong> tier with a daily messaging limit (1,000 business-initiated conversations). It scales up automatically as you message more. Submitting <strong>Business Verification</strong> in Business Settings lifts limits faster.</div>
+</div>
+
+<div class="step" id="webhook">
+<h3>Wire the webhook so BOS RECEIVES messages</h3>
+<p>Outgoing messages just need the token. To <em>receive</em> incoming WhatsApp messages, Meta needs
+to call a URL on your BOS server (a "webhook").</p>
+<ol>
+  <li>In BOS, open <strong>Connectors → WhatsApp (Meta)</strong> and copy the two values BOS shows you: your <strong>Callback URL</strong> (looks like <code>https://your-bos-domain/api/connectors/whatsapp/webhook</code>) and a <strong>Verify Token</strong> (a random password BOS generated — or type your own).</li>
+  <li>Back in the Meta app: <strong>WhatsApp → Configuration → Webhooks</strong> → <strong>Edit</strong>.</li>
+  <li>Paste the <strong>Callback URL</strong> and the <strong>Verify Token</strong> → <strong>Verify and save</strong>. Meta sends a one-time GET; BOS answers it automatically. You'll see a green check.</li>
+  <li>Click <strong>Manage</strong> on webhook fields and <strong>Subscribe</strong> to <code>messages</code> (and <code>message_template_status_update</code> if you'll use templates).</li>
+</ol>
+<div class="warn callout">The webhook only works once your BOS domain is reachable over HTTPS (it is — every BOS install runs behind Let's Encrypt). If "Verify and save" fails, confirm the Verify Token matches exactly and there are no trailing spaces.</div>
+</div>
+
+<div class="step" id="test">
+<h3>Send your first message &amp; test</h3>
+<p>You can test straight from a terminal (or let the BOS agent do it). Replace the bracketed values:</p>
+<pre>curl -X POST \
+  "https://graph.facebook.com/v21.0/&lt;PHONE_NUMBER_ID&gt;/messages" \
+  -H "Authorization: Bearer &lt;ACCESS_TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messaging_product": "whatsapp",
+    "to": "&lt;RECIPIENT_PHONE_E164, e.g. 15551234567&gt;",
+    "type": "template",
+    "template": { "name": "hello_world", "language": { "code": "en_US" } }
+  }'</pre>
+<p>A successful call returns a JSON with a <code>messages[0].id</code>. <code>hello_world</code> is a
+pre-approved template every new account has. After the recipient replies, you have an open 24-hour
+window in which you can send <em>free-form</em> text:</p>
+<pre>-d '{ "messaging_product":"whatsapp", "to":"&lt;NUMBER&gt;",
+      "type":"text", "text":{ "body":"Hi! This is your BOS agent." } }'</pre>
+<div class="callout"><strong>Key rule:</strong> outside the 24-hour window you can only send pre-approved <strong>message templates</strong>. Inside it (after the customer messages you), free text is fine. Your Content Creation agent can draft templates; submit them in <strong>WhatsApp → Manage templates</strong>.</div>
+</div>
+
+<div class="step" id="meta">
+<h3>Extend to Messenger &amp; Instagram (same app)</h3>
+<p>Because it's all the Graph API, you reuse the same app:</p>
+<ul>
+  <li><strong>Messenger:</strong> add the <strong>Messenger</strong> product → connect a Facebook Page → generate a Page access token → subscribe the same webhook to <code>messages</code>.</li>
+  <li><strong>Instagram:</strong> add <strong>Instagram</strong> → connect a Professional/Business IG account that's linked to that Facebook Page → request <code>instagram_basic</code> + <code>instagram_manage_messages</code>.</li>
+  <li>To post content (not just message), request <code>pages_manage_posts</code> and use the Page's <code>/feed</code> endpoint; for IG, the content-publishing endpoints.</li>
+</ul>
+<div class="callout">Going beyond messaging your own accounts (e.g. managing clients' pages) requires Meta <strong>App Review</strong> for the advanced permissions. For your own brand, the standard access above is enough.</div>
+</div>
+
+<div class="step" id="bos">
+<h3>Paste it all into BOS</h3>
+<p>Open <strong>Connectors → WhatsApp (Meta)</strong> in BOS and fill in:</p>
+<table>
+  <tr><th>BOS field</th><th>Value from above</th></tr>
+  <tr><td>Access Token</td><td>The permanent System User token (Step 3)</td></tr>
+  <tr><td>Phone Number ID</td><td>Your registered number's ID (Step 4)</td></tr>
+  <tr><td>WhatsApp Business Account ID</td><td>WABA ID (Step 2)</td></tr>
+  <tr><td>App Secret</td><td>Settings → Basic (Step 2)</td></tr>
+  <tr><td>Verify Token</td><td>The one you used in the webhook (Step 5)</td></tr>
+</table>
+<p>Save. Your <strong>Social Media agent</strong> now reads incoming WhatsApp messages from the
+dashboard and can reply, draft, and schedule across your connected Meta platforms.</p>
+<div class="ok callout"><strong>Done.</strong> Ask your Social Media agent: <em>"Send a WhatsApp test message to my number and confirm it went through."</em></div>
+</div>
+
+</div><!-- /steps -->
+
+<h2 id="trouble">Troubleshooting</h2>
+<h3>"Verify and save" on the webhook fails</h3>
+<p>The Verify Token must match exactly (case-sensitive, no spaces). Confirm your BOS domain loads
+over <code>https://</code> in a browser first.</p>
+<h3>Token expired after a day</h3>
+<p>You used the temporary token from the API Setup page. Redo <strong>Step 3</strong> with a System
+User and expiration <strong>Never</strong>.</p>
+<h3>"(#131030) Recipient phone number not in allowed list"</h3>
+<p>You're still on the test number, which only messages pre-added recipients. Add the recipient under
+the test number's "To" list, or register your real number (Step 4).</p>
+<h3>"(#100) Param messaging_product is required"</h3>
+<p>Every request body must include <code>"messaging_product": "whatsapp"</code>.</p>
+<h3>Messages send but you receive nothing</h3>
+<p>The webhook isn't subscribed to <code>messages</code>. Step 5, "Manage" → Subscribe.</p>
+
+<footer>
+  Internal BOS setup reference. This page is unlisted (noindex) — share the link only with the person
+  setting up messaging. Meta's UI changes occasionally; if a button moved, the concept (app → WhatsApp
+  product → permanent token → webhook) still holds. Graph API version shown: v21.0.
+</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,16 @@
+name: Meeting Prep
+id: meeting-prep
+description: Reviews calendar, builds agendas, researches attendees, and captures action items
+version: "1.0"
+author: Starr & Partners
+triggers:
+  - "meeting"
+  - "agenda"
+  - "calendar"
+  - "attendee"
+  - "call"
+  - "standup"
+  - "prep"
+  - "action items"
+enabled: true
+category: operations

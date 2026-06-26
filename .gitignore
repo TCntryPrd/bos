@@ -1,0 +1,14 @@
+*.log
+.env
+.google-sheets-token.json
+apps/agent/boss-agent.env
+claude-home/
+claude.json
+dist/
+hermes-home/
+hermes-workspace/
+node_modules/
+productions/output/
+apps/desktop/out/
+apps/desktop/dist/
+node_modules/

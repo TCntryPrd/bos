@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello World Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            transition: background 0.5s ease;
+        }
+
+        .container {
+            background: white;
+            padding: 3rem;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+        }
+
+        h1 {
+            color: #333;
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        p {
+            color: #666;
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+        }
+
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        button {
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: white;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .counter-btn {
+            background: #4CAF50;
+        }
+
+        .counter-btn:hover {
+            background: #45a049;
+        }
+
+        .color-btn {
+            background: #2196F3;
+        }
+
+        .color-btn:hover {
+            background: #0b7dda;
+        }
+
+        .alert-btn {
+            background: #ff9800;
+        }
+
+        .alert-btn:hover {
+            background: #e68900;
+        }
+
+        #counter-display {
+            font-size: 1.5rem;
+            color: #4CAF50;
+            font-weight: bold;
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hello World!</h1>
+        <p>Welcome to the interactive demo page</p>
+
+        <div class="button-group">
+            <button class="counter-btn" onclick="incrementCounter()">
+                Click Counter
+            </button>
+            <div id="counter-display">Clicks: 0</div>
+
+            <button class="color-btn" onclick="changeColor()">
+                Change Background Color
+            </button>
+
+            <button class="alert-btn" onclick="showAlert()">
+                Show Alert
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let clickCount = 0;
+
+        function incrementCounter() {
+            clickCount++;
+            document.getElementById('counter-display').textContent = `Clicks: ${clickCount}`;
+        }
+
+        function changeColor() {
+            const colors = [
+                'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+                'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+                'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
+                'linear-gradient(135deg, #30cfd0 0%, #330867 100%)',
+                'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
+                'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)'
+            ];
+
+            const randomColor = colors[Math.floor(Math.random() * colors.length)];
+            document.body.style.background = randomColor;
+        }
+
+        function showAlert() {
+            alert('👋 Hello from the demo app! This is an interactive JavaScript alert.');
+        }
+    </script>
+</body>
+</html>

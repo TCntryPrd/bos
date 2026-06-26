@@ -1,0 +1,131 @@
+# BOS — clean install stack (coexistence-safe).
+#
+# Built for standing the refactored BOS up ALONGSIDE other projects on a shared
+# box (last-castle runs the original vasari-v2 stack + prod n8n + more). Isolation:
+#   - own compose project name `bos-ir` (namespaced volumes/network)
+#   - datastores have NO host ports (internal to the bos-ir network only)
+#   - the ONLY exposed port is the web (WEB_BIND:WEB_PORT)
+#   - schema via deploy/migrate.sh AFTER boot (idempotent ledger) — no initdb hook
+#
+# Never touches n8n (127.0.0.1:7749 / pg 5432) or vasari-v2 (8001/5434/6381/8081…).
+name: bos-ir
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-boss}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-boss_ir}
+    # No host port — internal only (coexistence safety).
+    volumes:
+      - bos_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-boss} -d ${POSTGRES_DB:-boss_ir}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - bos_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  weaviate:
+    image: semitechnologies/weaviate:1.28.2
+    restart: unless-stopped
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: node1
+    volumes:
+      - bos_weaviate:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/v1/.well-known/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # One-shot schema reconcile — runs on EVERY `up` BEFORE the api. Idempotent +
+  # additive (CREATE TABLE / ADD COLUMN IF NOT EXISTS). Replaces the fragile
+  # postgres initdb hook so the schema is ALWAYS complete: fresh installs,
+  # rebuilds, AND already-broken/partial installs. Fails loudly if < expected.
+  migrate:
+    image: postgres:16-alpine
+    restart: "no"
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-boss}
+      POSTGRES_DB: ${POSTGRES_DB:-boss_ir}
+    volumes:
+      - ./deploy:/deploy:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+    command: ["sh", "/deploy/reconcile-schema.sh"]
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "8001"
+      HOME: /home/boss
+      BOSS_HOME_OVERRIDE: /home/boss
+      # auto = Gemini/OpenRouter brain until `claude login`, then Claude CLI (Max).
+      BOSS_CHAT_ENGINE: auto
+      BOSS_CHAT_RUNNER: local
+      BOSS_BACKGROUND_AGENTS: "off"
+    # internal only — the web container proxies /api to it on the bos-ir network
+    expose:
+      - "8001"
+    volumes:
+      - ./:/home/boss/boss-dev:ro
+      - bos_data:/data
+      - bos_claude_home:/home/boss/.claude
+      - bos_codex_home:/home/boss/.codex
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      weaviate: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: "/"
+    restart: unless-stopped
+    ports:
+      # last-castle: WEB_BIND=100.78.24.32 (tailnet IP), WEB_PORT=18015 → reachable
+      # from the tailnet only, on a port that collides with nothing on the box.
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-18015}:80"
+    depends_on:
+      - api
+
+volumes:
+  bos_pg: {}
+  bos_redis: {}
+  bos_weaviate: {}
+  bos_data: {}
+  bos_claude_home: {}
+  bos_codex_home: {}

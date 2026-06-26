@@ -1,0 +1,16 @@
+name: Email Triage
+id: email-triage
+description: Prioritizes email, drafts responses, tracks follow-ups, and surfaces action items
+version: "1.0"
+author: Starr & Partners
+triggers:
+  - "email"
+  - "inbox"
+  - "reply"
+  - "follow-up"
+  - "followup"
+  - "message"
+  - "unread"
+  - "draft"
+enabled: true
+category: communication

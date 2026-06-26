@@ -1,0 +1,63 @@
+# boss_executor — internal crontab (Ponyboy production schedule).
+#
+# Scheduled by busybox crond inside the container. Times below are
+# interpreted in CRON_TZ; busybox crond honours the directive even
+# though the system TZ env in compose is also Chicago.
+#
+# Schedule canon: productions/config/schedules.yaml. Keep this file
+# and that yaml in sync — yaml is the design doc; this file is what
+# actually fires. Every key in the yaml that's `enabled: true` and
+# maps to a concrete script should appear below.
+#
+# Mon–Fri = 1–5 in cron's day-of-week. Sun = 0.
+CRON_TZ=America/Chicago
+
+# ── Social pipeline (v1.7.2) ─────────────────────────────────────────────────
+# Schedule confirmed from sp-brand/recent-posts-log.md weekday cadence.
+# Ponyboy edits these scripts directly via the bind-mount; next cron
+# run picks up changes without a container rebuild.
+
+# Morning weekday post — themed by hash of date (5 rotating themes)
+30 8 * * 1-5 bash /home/tcntryprd/boss-dev/productions/scripts/social/post-morning.sh   >> /home/tcntryprd/boss-dev/productions/output/social-media/logs/cron.log 2>&1
+
+# Midday weekday post
+0 13 * * 1-5 bash /home/tcntryprd/boss-dev/productions/scripts/social/post-midday.sh    >> /home/tcntryprd/boss-dev/productions/output/social-media/logs/cron.log 2>&1
+
+# Afternoon weekday post (faith / legacy / discipline themes)
+0 18 * * 1-5 bash /home/tcntryprd/boss-dev/productions/scripts/social/post-afternoon.sh >> /home/tcntryprd/boss-dev/productions/output/social-media/logs/cron.log 2>&1
+
+# Soulful Sunday — 12-week scripture rotation, advances state file each run
+0 10 * * 0   bash /home/tcntryprd/boss-dev/productions/scripts/social/post-sunday.sh    >> /home/tcntryprd/boss-dev/productions/output/social-media/logs/cron.log 2>&1
+
+# ── Newscast pipeline (AI & Tech News Cast — v1.7.5.01) ──────────────────────
+# Mirrors productions/config/schedules.yaml. Researcher feeds the
+# inbox every 2 hours; per-edition editor builds a rundown 30 min
+# before the writer→QA→producer→review pipeline runs.
+
+# Researcher — every 2 hours, scans Grok + sources for fresh stories
+0 */2 * * * bash /home/tcntryprd/boss-dev/productions/scripts/run-newsroom-stage researcher              >> /home/tcntryprd/boss-dev/productions/output/ai-tech-newscast/logs/cron.log 2>&1
+
+# Morning edition: editor at 5:50 → full pipeline at 6:20
+50 5 * * *  bash /home/tcntryprd/boss-dev/productions/scripts/run-newsroom-stage editor morning          >> /home/tcntryprd/boss-dev/productions/output/ai-tech-newscast/logs/cron.log 2>&1
+20 6 * * *  bash /home/tcntryprd/boss-dev/productions/scripts/run-newsroom-pipeline morning              >> /home/tcntryprd/boss-dev/productions/output/ai-tech-newscast/logs/cron.log 2>&1
+
+# Midday edition: editor at 10:50 → full pipeline at 11:20
+50 10 * * * bash /home/tcntryprd/boss-dev/productions/scripts/run-newsroom-stage editor midday           >> /home/tcntryprd/boss-dev/productions/output/ai-tech-newscast/logs/cron.log 2>&1
+20 11 * * * bash /home/tcntryprd/boss-dev/productions/scripts/run-newsroom-pipeline midday               >> /home/tcntryprd/boss-dev/productions/output/ai-tech-newscast/logs/cron.log 2>&1
+
+# Evening edition: editor at 16:50 → full pipeline at 17:20
+50 16 * * * bash /home/tcntryprd/boss-dev/productions/scripts/run-newsroom-stage editor evening          >> /home/tcntryprd/boss-dev/productions/output/ai-tech-newscast/logs/cron.log 2>&1
+20 17 * * * bash /home/tcntryprd/boss-dev/productions/scripts/run-newsroom-pipeline evening              >> /home/tcntryprd/boss-dev/productions/output/ai-tech-newscast/logs/cron.log 2>&1
+
+# ── Morning Briefing — assemble + publish (v1.7.5.01) ────────────────────────
+# Standalone show separate from the newscast — uses run-morning-show
+# which orchestrates content-prep -> build -> publish in one shot.
+
+0 5 * * * bash /home/tcntryprd/boss-dev/productions/scripts/run-morning-show >> /home/tcntryprd/boss-dev/productions/output/morning-briefing/logs/cron.log 2>&1
+
+# TODO: morning_content_prep at 23:00 (night-before fetch via
+# productions/agents/morning-content-prep/). Currently absent because
+# the agent has no top-level runner script — it's invoked from inside
+# run-morning-show as Stage 1. If Kevin wants a separate night-before
+# pre-fetch run, write a thin wrapper that does only Stage 1 and add
+# `0 23 * * * bash <wrapper>` here.

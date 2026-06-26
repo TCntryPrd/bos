@@ -1,0 +1,22 @@
+name: System Admin
+id: system-admin
+description: Monitors server health, manages containers, analyzes logs, and guides troubleshooting
+version: "1.0"
+author: Starr & Partners
+triggers:
+  - "server"
+  - "container"
+  - "docker"
+  - "log"
+  - "error"
+  - "cpu"
+  - "memory"
+  - "disk"
+  - "service"
+  - "restart"
+  - "deploy"
+  - "ssh"
+  - "postgres"
+  - "redis"
+enabled: true
+category: development

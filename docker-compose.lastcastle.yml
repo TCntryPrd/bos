@@ -1,0 +1,88 @@
+# BOS on last-castle — REPLACES Vasari v2, REUSES the existing Weaviate + host
+# Claude CLI + Codex. n8n untouched. (Not part of the give-out distributable —
+# that's docker-compose.bos.yml; this is last-castle's deployment config.)
+name: bos-ir
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-boss}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-boss_ir}
+    volumes:
+      - bos_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-boss} -d ${POSTGRES_DB:-boss_ir}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - bos_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "8001"
+      HOME: /home/boss
+      BOSS_HOME_OVERRIDE: /home/boss
+      BOSS_CHAT_RUNNER: local
+      BOSS_BACKGROUND_AGENTS: "on"
+      # Pin an available model — the copied host config defaults to claude-fable-5
+      # which this account can't use, so bare `claude` calls fail without this.
+      ANTHROPIC_MODEL: claude-sonnet-4-6
+      # Reuse the existing (Vasari) Weaviate on the host — vector data carries over.
+      WEAVIATE_URL: http://host.docker.internal:8081
+    expose:
+      - "8001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./:/home/boss/boss-dev:ro
+      - bos_data:/data
+      - bos_claude_home:/home/boss/.claude
+      - bos_codex_home:/home/boss/.codex
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: "/"
+    restart: unless-stopped
+    ports:
+      # Takes the port Vasari's web used (now free), tailnet-bound.
+      - "${WEB_BIND:-100.78.24.32}:${WEB_PORT:-8005}:80"
+    depends_on:
+      - api
+
+volumes:
+  bos_pg: {}
+  bos_redis: {}
+  bos_data: {}
+  bos_claude_home: {}
+  bos_codex_home: {}

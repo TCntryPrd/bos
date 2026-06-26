@@ -1,0 +1,133 @@
+/* IR White-Label — Light, Joyful, Energetic Design Tokens
+ * Replaces dark Boss theme with bright, friendly palette.
+ * Color psychology: Coral (energy), Turquoise (fresh), Yellow (joy).
+ */
+
+:root {
+  /* Primary accent palette — energetic and friendly */
+  --v-purple: #FF6B6B;  /* Coral Red - energetic, warm */
+  --v-pink:   #FF8E53;  /* Sunset Orange - enthusiastic */
+  --v-green:  #48BB78;  /* Success Green - positive */
+  --v-blue:   #4ECDC4;  /* Turquoise - fresh, modern */
+  --v-amber:  #FFE66D;  /* Sunny Yellow - joyful */
+
+  --v-purple-dim: rgba(255, 107, 107, 0.12);
+  --v-pink-dim:   rgba(255, 142,  83, 0.12);
+  --v-green-dim:  rgba( 72, 187, 120, 0.12);
+  --v-blue-dim:   rgba( 78, 205, 196, 0.12);
+  --v-amber-dim:  rgba(255, 230, 109, 0.12);
+
+  /* Light surfaces — soft grays and whites */
+  --v-base:      #F7F9FC;  /* Soft Gray-Blue background */
+  --v-null:      #FFFFFF;  /* Pure white for emphasis */
+  --v-surface-1: #FFFFFF;  /* White cards */
+  --v-surface-2: #F0F4F8;  /* Very light gray */
+  --v-surface-3: #E2E8F0;  /* Light gray for depth */
+
+  /* Borders — subtle but visible */
+  --v-hairline:        rgba(45, 55, 72, 0.08);
+  --v-hairline-strong: rgba(45, 55, 72, 0.15);
+
+  /* Text — dark on light */
+  --v-text:       #2D3748;  /* Dark slate - primary text */
+  --v-text-muted: #718096;  /* Medium gray - secondary */
+  --v-text-dim:   #A0AEC0;  /* Light gray - tertiary */
+
+  /* Gradients — vibrant and joyful */
+  --grad-cool: linear-gradient(135deg, #4ECDC4 0%, #44A08D 100%);
+  --grad-warm: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
+  --grad-lime: linear-gradient(135deg, #FFE66D 0%, #4ECDC4 100%);
+  --grad-quad: conic-gradient(from 200deg at 50% 50%, #FF6B6B, #FF8E53, #FFE66D, #4ECDC4, #FF6B6B);
+}
+
+/* Mono helper for status lines and metadata chips. */
+.vs-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0;
+}
+
+/* Glow pills — softer shadows for light theme */
+.vs-glow-purple { box-shadow: 0 0 0 1px rgba(255,107,107,0.25), 0 0 16px rgba(255,107,107,0.15); }
+.vs-glow-pink   { box-shadow: 0 0 0 1px rgba(255,142, 83,0.25), 0 0 16px rgba(255,142, 83,0.15); }
+.vs-glow-green  { box-shadow: 0 0 0 1px rgba( 72,187,120,0.25), 0 0 16px rgba( 72,187,120,0.15); }
+.vs-glow-blue   { box-shadow: 0 0 0 1px rgba( 78,205,196,0.25), 0 0 16px rgba( 78,205,196,0.15); }
+
+/* Chip — compact mono-font capsule used for metadata */
+.vs-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border-radius: 999px;
+  font-size: 11px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.02em;
+  background: rgba(45,55,72,0.04);
+  border: 1px solid var(--v-hairline);
+  color: #4A5568;
+}
+.vs-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: #48BB78; box-shadow: 0 0 6px #48BB78; }
+.vs-chip.purple { color: #C53030; border-color: rgba(255,107,107,0.35); background: var(--v-purple-dim); }
+.vs-chip.pink   { color: #DD6B20; border-color: rgba(255,142, 83,0.35); background: var(--v-pink-dim); }
+.vs-chip.green  { color: #2F855A; border-color: rgba( 72,187,120,0.35); background: var(--v-green-dim); }
+.vs-chip.blue   { color: #2C7A7B; border-color: rgba( 78,205,196,0.35); background: var(--v-blue-dim); }
+.vs-chip.amber  { color: #D69E2E; border-color: rgba(255,230,109,0.35); background: var(--v-amber-dim); }
+
+/* Gradient text for titles */
+.vs-gt      { background: var(--grad-cool); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.vs-gt-warm { background: var(--grad-warm); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* Divider */
+.vs-divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(45,55,72,0.12), transparent); }
+
+/* Ambient aurora background — lighter, softer for light theme */
+.vs-aurora { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }
+.vs-aurora::before, .vs-aurora::after {
+  content: ''; position: absolute; width: 520px; height: 520px; border-radius: 50%;
+  filter: blur(100px); opacity: 0.15;
+}
+.vs-aurora::before { background: radial-gradient(circle, #4ECDC4 0%, transparent 60%); top: -180px; left: -100px; }
+.vs-aurora::after  { background: radial-gradient(circle, #FF8E53 0%, transparent 60%); bottom: -220px; right: -120px; }
+.vs-aurora .acc3 {
+  position: absolute; width: 380px; height: 380px; border-radius: 50%;
+  background: radial-gradient(circle, #FFE66D 0%, transparent 60%);
+  filter: blur(100px); opacity: 0.12; top: 40%; left: 40%;
+}
+
+/* Nav tab — shared rail item primitive */
+.vs-tab {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 8px; cursor: pointer;
+  font-size: 13px; color: #718096;
+  position: relative; transition: color .12s, background .12s;
+}
+.vs-tab:hover        { color: #2D3748; background: rgba(45,55,72,0.04); }
+.vs-tab.active       { color: #1A202C; background: rgba(45,55,72,0.06); }
+.vs-tab.active::before {
+  content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+  background: var(--grad-cool); border-radius: 2px;
+  box-shadow: 0 0 8px rgba(78,205,196,0.4);
+}
+.vs-tab .ico { width: 16px; height: 16px; color: currentColor; opacity: 0.85; flex-shrink: 0; }
+.vs-tab.k-kanban.active::before { background: var(--grad-warm); box-shadow: 0 0 8px rgba(255,107,107,0.4); }
+.vs-tab.k-miro.active::before   { background: var(--grad-lime); box-shadow: 0 0 8px rgba(255,230,109,0.4); }
+
+/* Kanban card primitive (used by the boards surface) */
+.vs-card {
+  background: #FFFFFF; border: 1px solid rgba(45,55,72,0.10);
+  border-radius: 10px; padding: 10px; position: relative;
+  transition: transform .12s, box-shadow .12s, border-color .12s;
+  box-shadow: 0 1px 3px rgba(45,55,72,0.04);
+}
+.vs-card:hover   { border-color: rgba(45,55,72,0.20); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(45,55,72,0.08); }
+.vs-card.dragging { opacity: 0.50; }
+.vs-card.preview  { border-style: dashed; background: rgba(45,55,72,0.02); }
+.vs-card .accent  { position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; }
+
+/* Agent avatar — single-letter glyph on hue gradient */
+.vs-avatar {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  color: #FFFFFF; border: 1.5px solid rgba(255,255,255,0.9);
+}
+
+/* Keyframes used across surfaces */
+@keyframes vs-pulse      { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+@keyframes vs-slide-scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(400%); } }
+@keyframes vs-rot        { to { transform: rotate(360deg); } }

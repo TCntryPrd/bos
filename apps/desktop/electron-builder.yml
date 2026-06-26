@@ -1,0 +1,62 @@
+appId: com.boss.aios
+productName: BOS
+copyright: Copyright (c) 2026 Starr & Partners LLC
+
+directories:
+  output: out
+  buildResources: resources
+
+files:
+  - dist/**/*
+  - resources/**/*
+  - "!node_modules/**/*.{ts,map,md}"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+  artifactName: "BOSAIOS-${version}-Setup.${ext}"
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  installerHeaderIcon: resources/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: BOS
+  runAfterFinish: true
+  perMachine: false
+  allowElevation: true
+  include: resources/installer.nsh
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  icon: resources/icon.png
+  category: Utility
+  artifactName: "BOSAIOS-${version}.${ext}"
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: resources/icon.icns
+  category: public.app-category.productivity
+  artifactName: "BOSAIOS-${version}-mac.${ext}"
+
+publish:
+  provider: github
+  owner: TCntryPrd
+  repo: boss-dev
+  releaseType: release

@@ -1,0 +1,129 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: boss_ir_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: boss
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: boss_ir
+    ports:
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/postgres/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U boss -d boss_ir"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: boss_ir_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "127.0.0.1:6382:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  weaviate:
+    image: semitechnologies/weaviate:1.28.2
+    container_name: boss_ir_weaviate
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8082:8080"
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: node1
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/v1/.well-known/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  stt:
+    build:
+      context: services/stt
+      dockerfile: Dockerfile
+    container_name: boss_ir_stt
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8012:8000"
+    volumes:
+      - stt_models:/app/models
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  tts:
+    build:
+      context: services/tts
+      dockerfile: Dockerfile
+    container_name: boss_ir_tts
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8013:8000"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: boss_ir_api
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8011:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: https://ircustomdashboards.tech
+    container_name: boss_ir_web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8015:80"
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.boss-ir-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.boss-ir-redirect.redirectscheme.permanent=true
+      - traefik.http.routers.boss-ir-http.rule=Host(`ircustomdashboards.tech`)
+      - traefik.http.routers.boss-ir-http.entrypoints=web
+      - traefik.http.routers.boss-ir-http.middlewares=boss-ir-redirect
+      - traefik.http.routers.boss-ir.rule=Host(`ircustomdashboards.tech`)
+      - traefik.http.routers.boss-ir.entrypoints=websecure
+      - traefik.http.routers.boss-ir.tls.certresolver=letsencrypt
+      - traefik.http.services.boss-ir.loadbalancer.server.port=80
+
+volumes:
+  postgres_data:
+  redis_data:
+  weaviate_data:
+  stt_models:
