@@ -49,6 +49,10 @@ import { revenueRoutes } from './routes/revenue.js';
 import employeeAgentsRoutes from './routes/employee-agents.js';
 import financeRoutes from './routes/finance.js';
 import approvalsRoutes from './routes/approvals.js';
+import healthDataRoutes from './health/routes.js';
+import { mcpRoutes } from './routes/mcp.js';
+import { unipileRoutes } from './routes/unipile.js';
+import { linkedinSystemRoutes } from './routes/linkedin-system.js';
 import lifeRoutes from './routes/life.js';
 import boardRoutes from './routes/board.js';
 import crmRoutes from './routes/crm.js';
@@ -272,6 +276,12 @@ export async function buildServer() {
   await server.register(employeeAgentsRoutes, { prefix: '/api/employee-agents' });
   await server.register(financeRoutes, { prefix: '/api/finance' });
   await server.register(approvalsRoutes, { prefix: '/api/approvals' });
+
+  // Health data — Health Connect bridge ingest + tile/page reads.
+  await server.register(healthDataRoutes, { prefix: '/api/health' });
+  await server.register(mcpRoutes, { prefix: '/api/mcp' });
+  await server.register(unipileRoutes, { prefix: '/api/unipile' });
+  await server.register(linkedinSystemRoutes, { prefix: '/api/linkedin-system' });
   await server.register(lifeRoutes, { prefix: '/api/life' });
   await server.register(boardRoutes, { prefix: '/api/board' });
   await server.register(crmRoutes, { prefix: '/api/crm' });

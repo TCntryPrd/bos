@@ -12,7 +12,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getPool } from '../db.js';
 import { executeTool } from '../tools/executor.js';
-import { audit } from '../tools/risk.js';
+import { audit, recordApprovalOutcome } from '../tools/risk.js';
 import { currentTenantId } from '../lib/tenant.js';
 
 interface ApprovalRow {
@@ -64,6 +64,7 @@ export async function approvalsRoutes(server: FastifyInstance): Promise<void> {
     if (decision === 'deny') {
       await pool.query(`UPDATE boss_approvals SET status='denied', decided_by=$2, decided_at=now() WHERE id=$1`, [id, decidedBy]);
       await audit(a.tenant_id, decidedBy, 'approval.denied', { id, toolName: a.tool_name });
+      void recordApprovalOutcome(a.tenant_id, a.tool_name, false); // learn: denial re-gates this tool
       return reply.send({ ok: true, status: 'denied' });
     }
 
@@ -90,6 +91,7 @@ export async function approvalsRoutes(server: FastifyInstance): Promise<void> {
     }
     await pool.query(`UPDATE boss_approvals SET status='executed', result=$2 WHERE id=$1`, [id, result]);
     await audit(a.tenant_id, decidedBy, 'tool.executed', { id, toolName: a.tool_name });
+    void recordApprovalOutcome(a.tenant_id, a.tool_name, true); // learn: enough OKs -> auto-approve next time
     return reply.send({ ok: true, status: 'executed', result });
   });
 }

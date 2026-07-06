@@ -3,6 +3,7 @@ import { startEmailTriage, stopEmailTriage } from './agents/email-triage.js';
 import { startTelegramBot, stopTelegramBot } from './agents/telegram-bot.js';
 import { startKevinIntel, stopKevinIntel } from './agents/kevin-intel.js';
 import { startScheduler, stopScheduler } from './agents/persistent-scheduler.js';
+import { startHealthAlertConsumer, stopHealthAlertConsumer } from './health/consumer.js';
 import { autoStartBrainSession } from './brain/cli-adapter.js';
 import { ensureHermesDashboard } from './routes/gw-auth.js';
 
@@ -29,6 +30,10 @@ async function main() {
       if (process.env.BOSS_SCHEDULER === 'on') {
         server.log.warn('BOSS_SCHEDULER=on — starting persistent-agent scheduler only (Employee Agents)');
         startScheduler();
+
+    // Health threshold alerts (owner-authorized, outbound-only; self-guarded
+    // by REDIS_URL / HEALTH_ALERTS_ENABLED — no-ops unless configured).
+    startHealthAlertConsumer();
       }
     } else {
       void startTelegramBot();
@@ -46,6 +51,7 @@ async function main() {
     stopTelegramBot();
     stopKevinIntel();
     stopScheduler();
+    stopHealthAlertConsumer();
     void server.close();
   };
   process.on('SIGTERM', shutdown);

@@ -15,7 +15,6 @@
  */
 
 import crypto from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { getPool } from '../db.js';
 import { gateToolCall, recordExecuted, type ToolCtx } from './risk.js';
 import { getRegistry, getUsageRollup } from '../lib/google-registry.js';
@@ -4633,26 +4632,10 @@ async function handleWebFetch(args: Record<string, unknown>): Promise<string> {
 // These give BOS the ability to modify, build, test, and version its own code.
 // Restricted to admin trust tier. All changes go to boss-dev directory.
 
-// Source paths — the repo is mounted at /home/boss/boss-dev in docker (see
-// docker-compose.bos.yml). Resolve to a directory that actually EXISTS so
-// boss_bash (and self-mod) never fail with `spawnSync /bin/sh ENOENT` when the
-// mount path differs. Picks the first existing candidate, else /tmp.
-function resolveBossSrc(): string {
-  const candidates = [
-    process.env.BOSS_SRC_DIR,
-    '/home/boss/boss-dev',
-    '/data/home/boss-dev',
-    '/app',
-    process.env.HOME,
-  ];
-  for (const c of candidates) {
-    if (c) { try { if (existsSync(c)) return c; } catch { /* ignore */ } }
-  }
-  return '/tmp';
-}
-const BOSS_SRC = resolveBossSrc();
-const HOST_BOSS_SRC = BOSS_SRC;
-const DOCKER_COMPOSE_DIR = BOSS_SRC;
+// Source paths — adapt to runtime mode
+const BOSS_SRC = IS_DOCKER ? '/data/home/boss-dev' : '/home/boss/boss-dev';
+const HOST_BOSS_SRC = IS_DOCKER ? '/data/home/boss-dev' : '/home/boss/boss-dev';
+const DOCKER_COMPOSE_DIR = IS_DOCKER ? '/data/home/boss-dev' : '/home/boss/boss-dev';
 
 // Blocked patterns for shell safety
 const BLOCKED_COMMANDS = [
@@ -5863,7 +5846,21 @@ async function handleEmailLogWrite(args: Record<string, unknown>): Promise<strin
   return `Logged email ${messageId} (${args.category}${args.needs_attention === true ? ', needs attention' : ''}).`;
 }
 
+import { handleHealthBrief, handleHealthSummary } from './health.js';
+import { VALIDATOR_TOOL_HANDLERS } from './validator.js';
+import { TRIAGE_TOOL_HANDLERS } from './triage-reason.js';
+import { FINANCIAL_TOOL_HANDLERS } from './financial-reason.js';
+import { AGENT_EVAL_TOOL_HANDLERS } from './agent-evals.js';
+import { CLIENT_ROUTING_TOOL_HANDLERS } from './client-routing.js';
 const TOOL_HANDLERS: Record<string, ToolHandler> = {
+  // Health (read-only brief + daily summary over health_daily)
+  boss_health_brief: handleHealthBrief,
+  boss_health_summary: handleHealthSummary,
+  ...VALIDATOR_TOOL_HANDLERS,
+  ...TRIAGE_TOOL_HANDLERS,
+  ...FINANCIAL_TOOL_HANDLERS,
+  ...AGENT_EVAL_TOOL_HANDLERS,
+  ...CLIENT_ROUTING_TOOL_HANDLERS,
   // ── Google Workspace ──────────────────────────────────────────────────────
   boss_calendar_today: handleCalendarToday,
   boss_calendar_upcoming: handleCalendarUpcoming,
@@ -6111,15 +6108,11 @@ export async function executeTool(
   args: Record<string, unknown>,
   ctxOrTenant: string | ToolCtx,
 ): Promise<string> {
-  // Back-compat: callers may pass a bare tenantId string OR a richer ToolCtx.
   const ctx: ToolCtx = typeof ctxOrTenant === 'string' ? { tenantId: ctxOrTenant } : ctxOrTenant;
   const handler = TOOL_HANDLERS[toolName];
   if (!handler) {
     return `Unknown tool: "${toolName}". Available tools: ${Object.keys(TOOL_HANDLERS).join(', ')}`;
   }
-  // ── RISK GATE (orthogonal to trust) — high-risk tools above the autonomy ceiling are
-  //    queued for human approval instead of executing. Defense-in-depth: covers every
-  //    executeTool path (brain loops, persistent-agent runner, kevin-intel).
   const gate = await gateToolCall(toolName, args, ctx);
   if (!gate.allow) return gate.pendingResult ?? '⏸ Queued for your approval.';
   const t0 = Date.now();

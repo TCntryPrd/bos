@@ -14,7 +14,7 @@ import crypto from 'node:crypto';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
 /** Routes that skip authentication entirely. */
-const PUBLIC_PATHS = ['/health', '/health/full', '/connectors/oauth', '/api/connectors/oauth', '/api/webhooks/', '/api/gw/check', '/api/board/rtc/guest', '/api/board/portrait/'];
+const PUBLIC_PATHS = ['/health', '/health/full', '/connectors/oauth', '/api/connectors/oauth', '/api/webhooks/', '/api/gw/check', '/api/board/portrait/', '/api/board/rtc/guest'];
 
 /**
  * IPs trusted to make internal-service-call auth bypasses when they also

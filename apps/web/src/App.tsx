@@ -43,6 +43,7 @@ const COO          = lazy(() => import('./pages/COO'));
 const AgentWorkspace = lazy(() => import('./pages/AgentWorkspace').then((m) => ({ default: m.OutsiderWorkspace })));
 const RascalWorkspace = lazy(() => import('./pages/AgentWorkspace').then((m) => ({ default: m.RascalWorkspace })));
 const EmployeeAgents = lazy(() => import('./pages/EmployeeAgents').then((m) => ({ default: m.EmployeeAgents })));
+const Health = lazy(() => import('./pages/Health'));
 
 function getUser(): { role: string } | null {
   try {
@@ -140,6 +141,7 @@ export default function App() {
 
           {/* Admin-only system routes */}
           <Route element={<RequireAdmin />}>
+            <Route path="/health"            element={<Health />} />
             <Route path="/agents"            element={<EmployeeAgents />} />
             <Route path="/agents/:handle"    element={<AgentWorkspace />} />
             <Route path="/hermes"            element={<ChiefOfStaff />} />

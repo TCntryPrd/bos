@@ -38,6 +38,9 @@ const TIER_RANK: Record<TrustTier, number> = {
 // or they will be observer-gated by default.
 
 const TOOL_MIN_TRUST: Record<string, TrustTier> = {
+  // Health (personal health data — read-only)
+  boss_health_brief:   'assistant',
+  boss_health_summary: 'assistant',
   // ── Google: Calendar ────────────────────────────────────────────────────
   boss_calendar_today:    'observer',
   boss_calendar_upcoming: 'observer',

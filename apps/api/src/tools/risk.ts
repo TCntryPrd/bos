@@ -34,6 +34,9 @@ export interface ToolCtx {
   agentName?: string;
   /** When set, this call is executing an ALREADY-approved tool — the gate is bypassed. */
   approvedApprovalId?: string;
+  /** Autonomous-agent call (scheduler / self-healing): never hard-queues (that would hang ops);
+   *  it runs AND feeds the learning so its patterns become auto-approved everywhere over time. */
+  autonomous?: boolean;
 }
 
 export interface GateResult {
@@ -159,6 +162,42 @@ export function recordExecuted(toolName: string, tier: RiskTier, ctx: ToolCtx, l
   ).catch(() => { /* forensics best-effort */ });
 }
 
+// ── Learning: tools the principal keeps approving become auto-approved (smoother over time) ──
+const LEARN_THRESHOLD = Number(process.env.BOSS_LEARN_THRESHOLD ?? '3') || 3;
+const learnCache = new Map<string, true>();
+let learnAt = 0;
+async function isLearnedAutoApprove(tenantId: string, toolName: string): Promise<boolean> {
+  const t = currentTenantId(tenantId);
+  if (Date.now() - learnAt > 60_000) {
+    learnAt = Date.now();
+    learnCache.clear();
+    try {
+      const { rows } = await getPool().query<{ tenant_id: string; tool_name: string }>(
+        `SELECT tenant_id, tool_name FROM boss_approval_learning WHERE auto_approve = true`);
+      for (const r of rows) learnCache.set(`${r.tenant_id}::${r.tool_name}`, true); // key is tenant-scoped
+    } catch { /* table may not exist yet */ }
+  }
+  return learnCache.get(`${t}::${toolName}`) === true;
+}
+
+/** Record an approve/deny outcome; auto_approve flips ON after LEARN_THRESHOLD approvals with no denials,
+ *  and OFF on any denial. Both the principal's approvals AND autonomous-agent runs feed it. */
+export async function recordApprovalOutcome(tenantId: string, toolName: string, approved: boolean): Promise<void> {
+  if (!toolName) return;
+  try {
+    await getPool().query(
+      `INSERT INTO boss_approval_learning (tenant_id, tool_name, approvals, denials, auto_approve)
+       VALUES ($1,$2,$3,$4,false)
+       ON CONFLICT (tenant_id, tool_name) DO UPDATE SET
+         approvals    = boss_approval_learning.approvals + $3,
+         denials      = boss_approval_learning.denials + $4,
+         auto_approve = (boss_approval_learning.denials + $4 = 0 AND boss_approval_learning.approvals + $3 >= $5),
+         updated_at   = now()`,
+      [currentTenantId(tenantId), toolName, approved ? 1 : 0, approved ? 0 : 1, LEARN_THRESHOLD]);
+    learnAt = 0; // bust cache so the new state takes effect promptly
+  } catch { /* learning is best-effort */ }
+}
+
 /**
  * The gate. Called by executeTool before dispatching a handler.
  * Returns { allow:true } to execute, or { allow:false, pendingResult } when an approval
@@ -169,8 +208,23 @@ export async function gateToolCall(toolName: string, args: Record<string, unknow
   const tier = effectiveTier(toolName, args);
   if (ctx.approvedApprovalId) return { allow: true, tier };      // executing an approved action
   if (!(await gateEnabled())) return { allow: true, tier };      // infra not migrated yet -> pre-fusion behavior
+  // Autonomous agents (scheduler/self-healing) run ungated so ops don't hang — but they must NOT
+  // write the principal's learning store (an agent repeating a tool could escalate it to
+  // auto-approved for the principal, who never OK'd it). High-tier autonomous actions are audited
+  // for visibility instead.
+  if (ctx.autonomous) {
+    if (tier >= 3) void audit(currentTenantId(ctx.tenantId), ctx.agentName ?? 'agent', 'autonomous.high_risk', { toolName, tier });
+    return { allow: true, tier };
+  }
   const ceiling = await autonomyCeiling(ctx.tenantId);
   if (tier <= ceiling) return { allow: true, tier };
+  // Learned auto-approve — ONLY for non-critical tools (tier <= 2). Critical tier-3 tools
+  // (boss_bash, self_patch, ...) ALWAYS require explicit approval: their risk depends entirely on
+  // their args, so a tool-name-level learned approval must never blanket-allow them.
+  if (tier <= 2 && await isLearnedAutoApprove(ctx.tenantId, toolName)) {
+    void audit(currentTenantId(ctx.tenantId), 'system', 'auto.learned', { toolName, tier });
+    return { allow: true, tier };
+  }
 
   // Above ceiling -> queue for human approval, do NOT execute.
   const message = commitMessage(toolName, args);

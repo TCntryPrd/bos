@@ -18,6 +18,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { healthDataApi, fmtHm, fmtInt, sparkPoints, HEALTH_COLORS } from '../lib/healthData';
+import type { HealthOverview } from '../lib/healthData';
 import {
   Bolt,
   Columns3,
@@ -36,6 +38,7 @@ import {
   Users,
   Linkedin,
   Send,
+  Heart,
 } from 'lucide-react';
 import { AgentAvatar } from '../components/AgentAvatar';
 
@@ -2697,11 +2700,140 @@ function greetingFor(d: Date): string {
 // show… a pop-up gallery to pick and choose." Selection persists per browser.
 // ──────────────────────────────────────────────────────────────────────
 
-type WidgetId = 'agents' | 'tasks' | 'activity' | 'inbox' | 'slack' | 'slack_sales' | 'social_stats' | 'social_feed' | 'linkedin' | 'linkedin_posts' | 'email_drafts' | 'whatsapp' | 'timeline' | 'finance' | 'crm' | 'revenue' | 'email' | 'health' | 'csat' | 'approvals' | 'life' | 'brief' | 'spend' | 'integrations';
+
+// ──────────────────────────────────────────────────────────────────────
+// Personal health tile — Health Connect bridge data (spec 2026-07-01).
+// Owner/admin only: reads /api/health/overview and deep-links to /health.
+// ──────────────────────────────────────────────────────────────────────
+
+function isOwnerRole(): boolean {
+  try {
+    const u = JSON.parse(localStorage.getItem('boss_user') ?? 'null') as { role?: string } | null;
+    return u?.role === 'admin' || u?.role === 'owner';
+  } catch {
+    return false;
+  }
+}
+
+interface HealthState { data: HealthOverview | null; loaded: boolean }
+
+function useHealthOverview(enabled: boolean): HealthState {
+  const [state, setState] = useState<HealthState>({ data: null, loaded: false });
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    const load = () =>
+      healthDataApi.overview()
+        .then((data) => { if (alive) setState({ data, loaded: true }); })
+        .catch(() => { if (alive) setState({ data: null, loaded: true }); });
+    void load();
+    const t = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [enabled]);
+  return state;
+}
+
+function HealthSpark({ values, color }: { values: number[]; color: string }) {
+  const pts = sparkPoints(values, 48, 22);
+  if (!pts) return null;
+  return (
+    <svg width="48" height="22" viewBox="0 0 48 22" fill="none" className="block">
+      <polyline points={pts} stroke={color} strokeWidth="1.3" fill="none"
+        strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function HealthMini({ label, value, sub, spark, color }: {
+  label: string; value: string; sub?: string; spark?: number[]; color: string;
+}) {
+  return (
+    <div className="rounded-[10px] px-3 py-2.5"
+      style={{ background: DASH.panel3, border: `1px solid ${DASH.borderSoft}` }}>
+      <div className="flex items-center">
+        <div className="vs-mono text-[9.5px] tracking-[0.2em]" style={{ color: DASH.textMuted }}>
+          {label}
+        </div>
+        {spark && <div className="ml-auto"><HealthSpark values={spark} color={color} /></div>}
+      </div>
+      <div className="text-[22px] font-semibold leading-tight mt-1" style={{ color: DASH.text }}>
+        {value}
+      </div>
+      {sub && <div className="text-[11px] mt-0.5" style={{ color: DASH.textDim }}>{sub}</div>}
+    </div>
+  );
+}
+
+function agoLabel(iso: string | null): string {
+  if (!iso) return 'never synced';
+  const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
+  if (mins < 60) return `synced ${mins}m ago`;
+  if (mins < 60 * 24) return `synced ${Math.round(mins / 60)}h ago`;
+  return `synced ${Math.round(mins / (60 * 24))}d ago`;
+}
+
+function HealthPanel({ state }: { state: HealthState }) {
+  const navigate = useNavigate();
+  const { data, loaded } = state;
+  const stale = !!data?.last_sync_at &&
+    Date.now() - Date.parse(data.last_sync_at) > 24 * 60 * 60 * 1000;
+  const dot = !data?.paired ? DASH.textMuted : stale ? DASH.yellow : DASH.green;
+  return (
+    <Panel
+      title="Health"
+      icon={<Heart size={14} />}
+      accent={`linear-gradient(135deg, ${HEALTH_COLORS.activity}, ${DASH.blue})`}
+      meta={
+        <span className="flex items-center gap-1.5 text-[10.5px]" style={{ color: DASH.textMuted }}>
+          <span className="inline-block w-[7px] h-[7px] rounded-full" style={{ background: dot }} />
+          {data?.paired ? agoLabel(data.last_sync_at) : 'no device'}
+        </span>
+      }
+    >
+      <div className="px-3.5 py-3">
+        {!loaded && <div className="text-[12px]" style={{ color: DASH.textDim }}>Loading…</div>}
+        {loaded && !data?.paired && (
+          <button className="btn-secondary w-full justify-center" onClick={() => navigate('/health')}>
+            Pair your phone to start syncing
+          </button>
+        )}
+        {loaded && data?.paired && (
+          <>
+            <div className="grid grid-cols-2 gap-2.5">
+              <HealthMini label="STEPS" color={HEALTH_COLORS.activity}
+                value={data.today.steps != null ? fmtInt(data.today.steps) : '—'}
+                spark={data.spark.steps} />
+              <HealthMini label="SLEEP" color={HEALTH_COLORS.sleepDeep}
+                value={data.today.sleep_minutes != null ? fmtHm(data.today.sleep_minutes) : '—'}
+                spark={data.spark.sleep_minutes} />
+              <HealthMini label="RESTING HR" color={HEALTH_COLORS.heart}
+                value={data.today.resting_hr != null ? `${Math.round(data.today.resting_hr)}` : '—'}
+                sub="bpm" spark={data.spark.resting_hr} />
+              <HealthMini label="ACTIVE" color={HEALTH_COLORS.body}
+                value={data.today.active_kcal != null ? fmtInt(data.today.active_kcal) : '—'}
+                sub={data.today.exercise_minutes != null
+                  ? `kcal · ${Math.round(data.today.exercise_minutes)} min exercise` : 'kcal'}
+                spark={data.spark.active_kcal} />
+            </div>
+            <button
+              className="mt-2.5 text-[11.5px] flex items-center gap-1"
+              style={{ color: DASH.blue }}
+              onClick={() => navigate('/health')}
+            >
+              Open health <ArrowRight size={12} />
+            </button>
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+type WidgetId = 'agents' | 'tasks' | 'activity' | 'inbox' | 'slack' | 'slack_sales' | 'social_stats' | 'social_feed' | 'linkedin' | 'linkedin_posts' | 'email_drafts' | 'whatsapp' | 'timeline' | 'finance' | 'crm' | 'revenue' | 'email' | 'health' | 'health_data' | 'csat' | 'approvals' | 'life' | 'brief' | 'spend' | 'integrations';
 
 // Brand-new widgets that must be force-added to existing saved layouts (which
 // predate them) on load — see useDashWidgets / useDashOrder migration below.
-const NEW_WIDGETS: WidgetId[] = ['life', 'brief', 'approvals', 'spend', 'integrations', 'social_stats', 'social_feed', 'linkedin', 'linkedin_posts', 'email_drafts'];
+const NEW_WIDGETS: WidgetId[] = ['life', 'brief', 'approvals', 'spend', 'integrations', 'social_stats', 'social_feed', 'linkedin', 'linkedin_posts', 'email_drafts', 'health_data'];
 
 const WIDGET_CATALOG: { id: WidgetId; label: string; blurb: string; span?: 1 | 2 | 3 }[] = [
   { id: 'life',     label: 'Dashboard of Life', blurb: 'Your whole operation at a glance — wealth, work, energy', span: 3 },
@@ -2717,6 +2849,7 @@ const WIDGET_CATALOG: { id: WidgetId; label: string; blurb: string; span?: 1 | 2
   { id: 'revenue',  label: 'Revenue',          blurb: 'This month vs last (live Stripe)' },
   { id: 'email',    label: 'Email Agent',      blurb: 'Processed / drafts / attention today' },
   { id: 'health',   label: 'Ops Health',       blurb: 'Live score: agents + tasks + attention' },
+  { id: 'health_data', label: 'Health',        blurb: 'Steps, sleep, heart rate — synced from your phone', span: 2 },
   { id: 'csat',     label: 'Client Satisfaction', blurb: 'Trustpilot / Google review rating' },
   { id: 'activity', label: 'Live Activity',    blurb: 'Recent work your agents completed', span: 2 },
   { id: 'slack',    label: 'Slack @ Mentions', blurb: '@-mentions and DMs that need a reply' },
@@ -2730,7 +2863,7 @@ const WIDGET_CATALOG: { id: WidgetId; label: string; blurb: string; span?: 1 | 2
   { id: 'timeline', label: "Today's Timeline", blurb: 'Your calendar, stacked by hour', span: 3 },
 ];
 
-const DEFAULT_WIDGETS: WidgetId[] = ['life', 'brief', 'approvals', 'spend', 'integrations', 'finance', 'crm', 'agents', 'tasks', 'health', 'revenue', 'slack_sales', 'social_stats', 'social_feed', 'linkedin', 'linkedin_posts', 'email_drafts', 'inbox', 'email', 'slack', 'whatsapp', 'activity', 'csat', 'timeline'];
+const DEFAULT_WIDGETS: WidgetId[] = ['life', 'brief', 'approvals', 'spend', 'integrations', 'finance', 'crm', 'agents', 'tasks', 'health', 'health_data', 'revenue', 'slack_sales', 'social_stats', 'social_feed', 'linkedin', 'linkedin_posts', 'email_drafts', 'inbox', 'email', 'slack', 'whatsapp', 'activity', 'csat', 'timeline'];
 const WIDGETS_KEY = 'boss_dash_widgets_v2';
 
 function useDashWidgets(): { enabled: Set<WidgetId>; toggle: (id: WidgetId) => void } {
@@ -3468,6 +3601,8 @@ export default function Dashboard() {
   const calendarState = useCalendarToday();
   const whatsappState = useWhatsApp();
   const auth = useAuthHealth();
+  const healthEnabled = isOwnerRole();
+  const healthState = useHealthOverview(healthEnabled);
   const { enabled: enabledWidgets, toggle: toggleWidget } = useDashWidgets();
   const { order, reorder } = useDashOrder();
   const [dragId, setDragId] = useState<WidgetId | null>(null);
@@ -3543,10 +3678,13 @@ export default function Dashboard() {
     revenue:  <RevenueWidget />,
     email:    <EmailWidget />,
     health:   <OpsHealthWidget />,
+    health_data: <HealthPanel state={healthState} />,
     csat:     <CsatWidget />,
   };
   const orderRank = (id: WidgetId) => { const i = order.indexOf(id); return i === -1 ? 999 : i; };
-  const activeWidgets = WIDGET_CATALOG.filter((w) => enabledWidgets.has(w.id)).sort((a, b) => orderRank(a.id) - orderRank(b.id));
+  const activeWidgets = WIDGET_CATALOG.filter((w) => enabledWidgets.has(w.id))
+    .filter((w) => w.id !== 'health_data' || healthEnabled)
+    .sort((a, b) => orderRank(a.id) - orderRank(b.id));
 
   const displayName = useMemo(getDisplayName, []);
   const dateLabel = useMemo(

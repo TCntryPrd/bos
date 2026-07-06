@@ -33,6 +33,12 @@ import { ALL_MAKE_TOOLS } from './make.js';
 import { ALL_STRIPE_TOOLS } from './stripe.js';
 import { ALL_ERA_TOOLS } from './era.js';
 import { ALL_FINANCE_TOOLS } from './finance.js';
+import { ALL_HEALTH_TOOLS } from './health.js';
+import { ALL_VALIDATOR_TOOLS } from './validator.js';
+import { ALL_TRIAGE_TOOLS } from './triage-reason.js';
+import { ALL_FINANCIAL_TOOLS } from './financial-reason.js';
+import { ALL_AGENT_EVAL_TOOLS } from './agent-evals.js';
+import { ALL_CLIENT_ROUTING_TOOLS } from './client-routing.js';
 import { ALL_CRM_SNAPSHOT_TOOLS } from './crm-snapshot.js';
 import { ALL_CRM_SYNC_TOOLS } from './crm-sync.js';
 import { ALL_AGENT_TOOLS } from './agents.js';
@@ -196,6 +202,14 @@ export async function getAvailableTools(
 
   // ── Finance snapshot (always available — writes internal Postgres) ───────────
   tools.push(...ALL_FINANCE_TOOLS);
+
+  // Health (always available — reads internal Postgres health_daily)
+  tools.push(...ALL_HEALTH_TOOLS);
+  tools.push(...ALL_VALIDATOR_TOOLS);
+  tools.push(...ALL_TRIAGE_TOOLS);
+  tools.push(...ALL_FINANCIAL_TOOLS);
+  tools.push(...ALL_AGENT_EVAL_TOOLS);
+  tools.push(...ALL_CLIENT_ROUTING_TOOLS);
 
   // ── CTO / Chief Engineer — incident response + cost remediation ──────────────
   tools.push(...ALL_CTO_TOOLS);

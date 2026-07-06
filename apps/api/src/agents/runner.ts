@@ -129,7 +129,7 @@ async function _executeAgent(
           continue;
         }
 
-        const result = await executeTool(toolCall.name, toolCall.arguments, 'default');
+        const result = await executeTool(toolCall.name, toolCall.arguments, { tenantId: 'default', autonomous: true });
         toolResults.push(`${toolCall.name}:\n${result}`);
 
         if (!toolsUsed.includes(toolCall.name)) {

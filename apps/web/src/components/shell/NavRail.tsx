@@ -17,6 +17,7 @@ import {
   Terminal,
   Settings as SettingsIcon,
   Plug,
+  HeartPulse,
 } from 'lucide-react';
 import { BossLogo } from './BossLogo';
 import { NavTab } from './NavTab';
@@ -142,6 +143,7 @@ export function NavRail({ collapsed, onCollapseToggle, onNavClick }: NavRailProp
           <NavTab to="/crm"      icon={UserCheck} label="CRM"      collapsed={collapsed} onNavClick={onNavClick} />
           <NavTab to="/whatsapp" icon={MessageCircle} label="WhatsApp" collapsed={collapsed} onNavClick={onNavClick} />
           <NavTab to="/rascals" icon={Users} label="Your Team" collapsed={collapsed} onNavClick={onNavClick} />
+            <NavTab to="/health" icon={HeartPulse} label="Health" collapsed={collapsed} onNavClick={onNavClick} />
 
 
           {/* Connections — expandable list with per-connector hue dots */}

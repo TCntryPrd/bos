@@ -391,6 +391,7 @@ export async function connectorRoutes(server: FastifyInstance) {
     n8n: 'N8N_BASE_URL',
     homeassistant: 'HA_BASE_URL',
     airtable: 'AIRTABLE_BASE_URL',
+    unipile: 'UNIPILE_DSN',
   };
 
   /** Full integration catalog — Google and Microsoft are OAuth-based, the rest use API keys. */
@@ -409,6 +410,9 @@ export async function connectorRoutes(server: FastifyInstance) {
     { id: 'telegram',      name: 'Telegram',         type: 'apikey', envVar: 'TELEGRAM_BOT_TOKEN' },
     { id: 'make',          name: 'Make',             type: 'apikey', envVar: 'MAKE_API_KEY' },
     { id: 'stripe',        name: 'Stripe',           type: 'apikey', envVar: 'STRIPE_SECRET_KEY' },
+    { id: 'nim',           name: 'NVIDIA NIM',       type: 'apikey', envVar: 'NVIDIA_NIM_API_KEY' },
+    { id: 'unipile',       name: 'Unipile (LinkedIn/WhatsApp)', type: 'apikey', envVar: 'UNIPILE_API_KEY' },
+    { id: 'linkedin-gpt',  name: 'LinkedIn GPT Action', type: 'apikey', envVar: 'LINKEDIN_GPT_ACTION_KEY' },
     { id: 'homeassistant', name: 'Home Assistant',   type: 'apikey', envVar: 'HA_ACCESS_TOKEN' },
     { id: 'gemini',        name: 'Gemini',           type: 'apikey', envVar: 'GEMINI_API_KEY' },
     { id: 'github',        name: 'GitHub',           type: 'apikey', envVar: 'GITHUB_TOKEN' },

@@ -12,3 +12,7 @@ productions/output/
 apps/desktop/out/
 apps/desktop/dist/
 node_modules/
+
+*.bak
+*.bak-*
+*.bak_*
