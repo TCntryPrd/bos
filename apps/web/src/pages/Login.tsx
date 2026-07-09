@@ -1,7 +1,7 @@
 /**
  * Login — credential-based authentication for returning users.
  *
- * Shows a "Set up Vasari" link below the form when onboarding has not
+ * Shows a "Set up BOS" link below the form when onboarding has not
  * been completed yet (boss_onboarding_complete !== 'true').
  */
 
@@ -180,7 +180,7 @@ export function Login() {
                 onClick={() => navigate('/onboarding')}
                 className="text-sm text-accent hover:text-accent/80 transition-colors"
               >
-                First time? Set up Vasari →
+                First time? Set up BOS →
               </button>
             </div>
           </div>

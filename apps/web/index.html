@@ -4,29 +4,25 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/customaios.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Vasari — Your AI Operating System" />
-    <title>Vasari</title>
+    <meta name="description" content="BOS — Business Operating System" />
+    <meta name="aios-name" content="" />
+    <title>BOS — Business Operating System</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <!-- No-flash theme bootstrap: set <html data-theme> before first paint.
-         Default Dark (locked); "system" follows the OS. Mirrors src/lib/theme.ts. -->
+    <!-- No-flash mode bootstrap: set <html data-theme> before first paint.
+         Executive -> dark tokens, Plain -> plain tokens. Mirrors src/lib/theme.ts. -->
     <script>
       (function () {
         try {
-          var p = localStorage.getItem('boss_theme') || 'dark';
-          var t =
-            p === 'system'
-              ? window.matchMedia('(prefers-color-scheme: light)').matches
-                ? 'light'
-                : 'dark'
-              : p === 'light'
-                ? 'light'
-                : 'dark';
-          document.documentElement.setAttribute('data-theme', t);
+          var m = localStorage.getItem('boss_mode');
+          if (m !== 'executive' && m !== 'plain') {
+            m = localStorage.getItem('boss_theme') === 'light' ? 'plain' : 'executive';
+          }
+          document.documentElement.setAttribute('data-theme', m === 'plain' ? 'plain' : 'dark');
         } catch (e) {
           document.documentElement.setAttribute('data-theme', 'dark');
         }

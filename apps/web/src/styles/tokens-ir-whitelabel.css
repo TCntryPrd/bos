@@ -122,6 +122,72 @@
   --grad-quad: conic-gradient(from 200deg at 50% 50%, #2F5FD0, #6D4FD0, #B23F94, #A9791C, #2F5FD0);
 }
 
+/* -- PLAIN mode --------------------------------------------------------------
+ * A deliberately quiet, flat operations look: warm paper surfaces, slate ink,
+ * ONE restrained slate-blue accent, hairline borders. No gradients, no glow --
+ * "spreadsheet-grade clarity" for the executive who wants only the numbers.
+ * Reuses every token name so the whole app re-skins with no component changes.
+ */
+[data-theme='plain'] {
+  color-scheme: light;
+  --c-base: 245 244 241;
+  --c-surface-1: 255 255 255;
+  --c-surface-2: 250 249 246;
+  --c-surface-3: 242 241 237;
+  --c-surface-4: 233 232 227;
+  --c-border: 226 224 218;
+  --c-border-strong: 200 197 189;
+  --c-text: 30 35 41;
+  --c-text-secondary: 74 81 91;
+  --c-text-muted: 107 114 124;
+  --c-accent: 51 86 110;
+
+  /* Single restrained accent; success/warning stay legible. No spectrum. */
+  --v-purple: #33566E;
+  --v-pink:   #33566E;
+  --v-green:  #2F6B4F;
+  --v-blue:   #33566E;
+  --v-amber:  #8A6D2F;
+
+  --v-purple-dim: rgba(51, 86, 110, 0.10);
+  --v-pink-dim:   rgba(51, 86, 110, 0.10);
+  --v-green-dim:  rgba(47, 107, 79, 0.10);
+  --v-blue-dim:   rgba(51, 86, 110, 0.10);
+  --v-amber-dim:  rgba(138, 109, 47, 0.10);
+
+  --v-base:      #F5F4F1;
+  --v-base-bg:   #F5F4F1;
+  --v-nav-bg:    #FFFFFF;
+  --v-nav-text:  #1E2329;
+  --v-nav-muted: #4A515B;
+  --v-nav-dim:   #6B727C;
+  --v-null:      #FFFFFF;
+  --v-surface-1: #FFFFFF;
+  --v-surface-2: #FAF9F6;
+  --v-surface-3: #F2F1ED;
+
+  --v-hairline:        rgba(30, 35, 41, 0.10);
+  --v-hairline-strong: rgba(30, 35, 41, 0.16);
+
+  --v-text:       #1E2329;
+  --v-text-muted: #4A515B;
+  --v-text-dim:   #6B727C;
+
+  /* Gradients collapse to the single flat accent (gradient text/fills -> solid). */
+  --grad-cool: #33566E;
+  --grad-warm: #33566E;
+  --grad-lime: #2F6B4F;
+  --grad-quad: #33566E;
+}
+
+/* Strip the neon glow pills down to a plain hairline in Plain mode. */
+[data-theme='plain'] .vs-glow-purple,
+[data-theme='plain'] .vs-glow-pink,
+[data-theme='plain'] .vs-glow-green,
+[data-theme='plain'] .vs-glow-blue {
+  box-shadow: inset 0 0 0 1px var(--v-hairline-strong);
+}
+
 /* Mono helper for status lines and metadata chips. */
 .vs-mono {
   font-family: 'JetBrains Mono', ui-monospace, monospace;

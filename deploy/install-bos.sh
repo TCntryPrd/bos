@@ -37,6 +37,13 @@ fi
 cd "$INSTALL_DIR"
 git init -q 2>/dev/null || true
 
+# Brand the AIOS name into the web lockup (optional; blank -> plain "BOS").
+AIOS_NAME="${AIOS_NAME:-}"
+if [ -n "$AIOS_NAME" ]; then
+  say "Branding AIOS name: $AIOS_NAME"
+  sed -i "s|<meta name=\"aios-name\" content=\"\"|<meta name=\"aios-name\" content=\"$AIOS_NAME\"|" apps/web/index.html || true
+fi
+
 # ── 2. Generate .env (unique secrets per install) ────────────────────────
 say "Generating .env with fresh secrets"
 rnd() { head -c 32 /dev/urandom | base64 | tr -d '=+/' | cut -c1-40; }

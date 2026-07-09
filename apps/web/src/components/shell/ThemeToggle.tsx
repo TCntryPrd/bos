@@ -1,40 +1,36 @@
-import { useEffect, useState } from 'react';
-import { getStoredPref, setThemePref, initThemeSync, type ThemePref } from '../../lib/theme';
+import { useState } from 'react';
+import { getStoredMode, setBossMode, type BossMode } from '../../lib/theme';
 
-// Header theme control (LOCKED): Dark · Light · Follow System — plainly labeled,
-// persisted per browser. Status is conveyed by icon + label (not color alone).
-const OPTIONS: { value: ThemePref; label: string; icon: string }[] = [
-  { value: 'light', label: 'Light', icon: '☀' },
-  { value: 'dark', label: 'Dark', icon: '☾' },
-  { value: 'system', label: 'System', icon: '🖥' },
+// Header display-mode control: Executive · Plain. Executive is the full themed
+// identity; Plain is the flat, quiet operations look. Conveyed by icon + label
+// (not color alone), persisted per browser.
+const OPTIONS: { value: BossMode; label: string; icon: string }[] = [
+  { value: 'executive', label: 'Executive', icon: '◆' },
+  { value: 'plain', label: 'Plain', icon: '▭' },
 ];
 
 export function ThemeToggle() {
-  const [pref, setPref] = useState<ThemePref>(getStoredPref);
+  const [mode, setMode] = useState<BossMode>(getStoredMode);
 
-  useEffect(() => {
-    initThemeSync();
-  }, []);
-
-  function choose(p: ThemePref) {
-    setThemePref(p);
-    setPref(p);
+  function choose(m: BossMode) {
+    setBossMode(m);
+    setMode(m);
   }
 
   return (
     <div
       role="group"
-      aria-label="Theme"
+      aria-label="Display mode"
       className="inline-flex items-center rounded-md border border-border overflow-hidden"
     >
       {OPTIONS.map((o) => {
-        const active = pref === o.value;
+        const active = mode === o.value;
         return (
           <button
             key={o.value}
             type="button"
             aria-pressed={active}
-            title={`${o.label} theme`}
+            title={`${o.label} mode`}
             onClick={() => choose(o.value)}
             className={`px-2 py-1 text-xs flex items-center gap-1 transition-colors ${
               active

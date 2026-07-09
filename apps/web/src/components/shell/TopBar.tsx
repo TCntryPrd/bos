@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Menu } from 'lucide-react';
 import { AdminOverlay } from './AdminOverlay';
 import { ThemeToggle } from './ThemeToggle';
+import { getAiosName } from '../../lib/theme';
 
 function getUser(): { name: string; role: string } {
   try {
@@ -23,6 +24,7 @@ export function TopBar({ pageTitle, onMobileMenu }: TopBarProps) {
   const { name, role } = getUser();
   const isAdmin = role === 'admin' || role === 'owner';
   const [adminOpen, setAdminOpen] = useState(false);
+  const aiosName = getAiosName();
 
   return (
     <header
@@ -40,7 +42,7 @@ export function TopBar({ pageTitle, onMobileMenu }: TopBarProps) {
         </button>
       )}
       <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">
-        BOS
+        BOS{aiosName ? <span className="text-text-muted/70"> · {aiosName}</span> : null}
       </div>
       <div className="text-text-muted/60 select-none" aria-hidden>
         /
