@@ -59,8 +59,9 @@ export class OpenAIAdapter implements BrainAdapter {
   async execute(request: BrainRequest): Promise<BrainResponse> {
     const start = Date.now();
     const messages = this.buildMessages(request);
+    const model = this.resolveModel(request);
     const body: Record<string, unknown> = {
-      model: this.model,
+      model,
       max_tokens: this.maxTokens,
       messages,
     };
@@ -112,6 +113,7 @@ export class OpenAIAdapter implements BrainAdapter {
 
   async *stream(request: BrainRequest): AsyncIterable<BrainStreamChunk> {
     const messages = this.buildMessages(request);
+    const model = this.resolveModel(request);
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -120,7 +122,7 @@ export class OpenAIAdapter implements BrainAdapter {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: this.model,
+        model,
         max_tokens: this.maxTokens,
         messages,
         stream: true,
@@ -191,6 +193,10 @@ export class OpenAIAdapter implements BrainAdapter {
     }
     messages.push({ role: 'user', content: request.prompt });
     return messages;
+  }
+
+  private resolveModel(request: BrainRequest): string {
+    return request.model || this.model;
   }
 }
 

@@ -122,7 +122,7 @@ export async function sheetsRoutes(server: FastifyInstance) {
    * Read cell values from a Google Sheet range.
    *
    * Query params:
-   *   account       — Google account email (e.g. d.caine@dcaine.com)
+   *   account       — Google account email (e.g. user@example.com)
    *   spreadsheetId — Sheet ID
    *   range         — A1 notation range (e.g. Sheet1!A1:Z100)
    *
@@ -192,7 +192,7 @@ export async function sheetsRoutes(server: FastifyInstance) {
    *
    * Example request:
    *   {
-   *     "account": "d.caine@dcaine.com",
+   *     "account": "user@example.com",
    *     "spreadsheetId": "1Z1ZReCWmFr8e_OgrlUZ_Ee1c86B69AEXjGcp2fd3gjU",
    *     "updates": [
    *       { "range": "Sheet1!S42", "values": [["2026-04-05"]] },

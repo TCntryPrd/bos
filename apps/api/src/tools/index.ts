@@ -12,9 +12,12 @@
  *   - Slack tools: SLACK_BOT_TOKEN env var must be set
  *   - Telegram tools: TELEGRAM_BOT_TOKEN env var must be set
  *   - Notion tools: NOTION_API_KEY env var must be set
+ *   - Miro tools: MIRO_ACCESS_TOKEN env var must be set
  *   - Airtable tools: AIRTABLE_API_KEY env var must be set
  *   - Make.com tools: MAKE_API_KEY env var must be set
  *   - Stripe tools: STRIPE_SECRET_KEY env var must be set
+ *   - QuickBooks tools: QB_CLIENT_ID/QB_CLIENT_SECRET set + company connected
+ *     (OAuth refresh token + realm ID in runtime_config)
  *   - Gemini tools: GEMINI_API_KEY env var must be set
  *   - Agent tools: always available; gated by trust tier (operator minimum)
  */
@@ -28,11 +31,15 @@ import { ALL_HA_TOOLS } from './homeassistant.js';
 import { ALL_SLACK_TOOLS } from './slack.js';
 import { ALL_TELEGRAM_TOOLS } from './telegram.js';
 import { ALL_NOTION_TOOLS } from './notion.js';
+import { ALL_MIRO_TOOLS } from './miro.js';
 import { ALL_AIRTABLE_TOOLS } from './airtable.js';
 import { ALL_MAKE_TOOLS } from './make.js';
 import { ALL_STRIPE_TOOLS } from './stripe.js';
+import { ALL_QBO_TOOLS } from './quickbooks.js';
+import { qboConfigured, qboConnected } from './quickbooks-auth.js';
 import { ALL_ERA_TOOLS } from './era.js';
 import { ALL_FINANCE_TOOLS } from './finance.js';
+import { ALL_HEALTH_TOOLS } from './health.js';
 import { ALL_CRM_SNAPSHOT_TOOLS } from './crm-snapshot.js';
 import { ALL_CRM_SYNC_TOOLS } from './crm-sync.js';
 import { ALL_AGENT_TOOLS } from './agents.js';
@@ -58,10 +65,16 @@ import { ALL_WEB_TOOLS } from './web-search.js';
 import { ALL_CRM_TOOLS } from './crm.js';
 import { ALL_VOICE_AGENT_TOOLS } from './voice-agents.js';
 import { ALL_PIPELINE_TOOLS } from './pipeline.js';
-import { ALL_META_TOOLS } from './meta.js';
+import { ALL_META_TOOLS, ALL_WHATSAPP_TOOLS } from './meta.js';
 import { ALL_LINKEDIN_TOOLS } from './linkedin.js';
 import { ALL_EMAIL_DRAFT_TOOLS } from './email-drafts.js';
+import { ALL_VALIDATOR_TOOLS } from './validator.js';
+import { ALL_TRIAGE_TOOLS } from './triage-reason.js';
+import { ALL_FINANCIAL_TOOLS } from './financial-reason.js';
+import { ALL_AGENT_EVAL_TOOLS } from './agent-evals.js';
+import { ALL_CLIENT_ROUTING_TOOLS } from './client-routing.js';
 import { filterToolsByTrust, type TrustTier } from './trust.js';
+import { getUnipileConnectionStatus, isUnipileConfigured } from '../lib/unipile.js';
 
 // Passkey management is CLI-only — no brain tools. Admin uses terminal.
 
@@ -114,26 +127,47 @@ export async function getAvailableTools(
     tools.push(...ALL_SLACK_TOOLS);
   }
 
-  // ── Meta (Facebook / Instagram / Threads / WhatsApp Cloud / Ads) ────────────
+  // ── Meta (Facebook / Instagram / Threads / legacy WhatsApp Cloud / Ads) ─────
   // Available once credentials are registered (boss_meta_credentials.app_id set).
+  let metaToolsAdded = false;
   try {
     const metaCount = await getPool().query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM boss_meta_credentials WHERE app_id IS NOT NULL`,
     );
     if (parseInt(metaCount.rows[0]?.count ?? '0', 10) > 0) {
       tools.push(...ALL_META_TOOLS);
+      metaToolsAdded = true;
     }
   } catch {
     // boss_meta_credentials not present yet — skip silently
   }
 
+  if (!metaToolsAdded && isUnipileConfigured()) {
+    try {
+      const whatsapp = await getUnipileConnectionStatus('WHATSAPP');
+      if (whatsapp.connected) tools.push(...ALL_WHATSAPP_TOOLS);
+    } catch {
+      // no Unipile WhatsApp account yet — skip silently
+    }
+  }
+
   // ── LinkedIn ──────────────────────────────────────────────────────────────
-  // Available once a linkedin OAuth token is stored (Share scope grants posting).
+  // Available once Unipile LinkedIn is connected, or old OAuth exists.
+  if (isUnipileConfigured()) {
+    try {
+      const linkedin = await getUnipileConnectionStatus('LINKEDIN');
+      if (linkedin.connected) {
+        tools.push(...ALL_LINKEDIN_TOOLS);
+      }
+    } catch {
+      // no Unipile LinkedIn account yet — fall through to old OAuth check
+    }
+  }
   try {
     const liCount = await getPool().query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM boss_oauth_tokens WHERE provider = 'linkedin'`,
     );
-    if (parseInt(liCount.rows[0]?.count ?? '0', 10) > 0) {
+    if (parseInt(liCount.rows[0]?.count ?? '0', 10) > 0 && !tools.some((tool) => tool.name === 'boss_linkedin_post')) {
       tools.push(...ALL_LINKEDIN_TOOLS);
     }
   } catch {
@@ -143,6 +177,11 @@ export async function getAvailableTools(
   // ── Email draft rating + learning ─────────────────────────────────────────
   // Always available: the Email Agent records drafts for rating + reads feedback.
   tools.push(...ALL_EMAIL_DRAFT_TOOLS);
+  tools.push(...ALL_VALIDATOR_TOOLS);
+  tools.push(...ALL_TRIAGE_TOOLS);
+  tools.push(...ALL_FINANCIAL_TOOLS);
+  tools.push(...ALL_AGENT_EVAL_TOOLS);
+  tools.push(...ALL_CLIENT_ROUTING_TOOLS);
 
   // ── Telegram ─────────────────────────────────────────────────────────────
   // Available whenever TELEGRAM_BOT_TOKEN is configured.
@@ -154,6 +193,12 @@ export async function getAvailableTools(
   // Available whenever NOTION_API_KEY (integration secret) is configured.
   if (process.env.NOTION_API_KEY) {
     tools.push(...ALL_NOTION_TOOLS);
+  }
+
+  // ── Miro ──────────────────────────────────────────────────────────────────
+  // Available whenever MIRO_ACCESS_TOKEN is configured.
+  if (process.env.MIRO_ACCESS_TOKEN) {
+    tools.push(...ALL_MIRO_TOOLS);
   }
 
   // ── Airtable ──────────────────────────────────────────────────────────────
@@ -172,6 +217,17 @@ export async function getAvailableTools(
   // Available whenever STRIPE_SECRET_KEY is configured.
   if (process.env.STRIPE_SECRET_KEY) {
     tools.push(...ALL_STRIPE_TOOLS);
+  }
+
+  // ── QuickBooks Online ─────────────────────────────────────────────────────
+  // Requires app credentials (QB_CLIENT_ID/QB_CLIENT_SECRET) AND a connected
+  // company (OAuth refresh token + realm ID in runtime_config).
+  try {
+    if (qboConfigured() && (await qboConnected())) {
+      tools.push(...ALL_QBO_TOOLS);
+    }
+  } catch {
+    // DB not yet available — skip silently, same as the Google gate above
   }
 
   // ── ERA Context (personal finance — CFO agent) ─────────────────────────────
@@ -196,6 +252,9 @@ export async function getAvailableTools(
 
   // ── Finance snapshot (always available — writes internal Postgres) ───────────
   tools.push(...ALL_FINANCE_TOOLS);
+
+  // ── Health (always available — reads internal Postgres health_daily) ─────────
+  tools.push(...ALL_HEALTH_TOOLS);
 
   // ── CTO / Chief Engineer — incident response + cost remediation ──────────────
   tools.push(...ALL_CTO_TOOLS);
@@ -288,9 +347,11 @@ export { ALL_HA_TOOLS } from './homeassistant.js';
 export { ALL_SLACK_TOOLS } from './slack.js';
 export { ALL_TELEGRAM_TOOLS } from './telegram.js';
 export { ALL_NOTION_TOOLS } from './notion.js';
+export { ALL_MIRO_TOOLS } from './miro.js';
 export { ALL_AIRTABLE_TOOLS } from './airtable.js';
 export { ALL_MAKE_TOOLS } from './make.js';
 export { ALL_STRIPE_TOOLS } from './stripe.js';
+export { ALL_QBO_TOOLS } from './quickbooks.js';
 export { ALL_AGENT_TOOLS } from './agents.js';
 export { ALL_GEMINI_TOOLS } from './gemini.js';
 export { ALL_EMAIL_AGENT_TOOLS } from './email-agent.js';

@@ -237,7 +237,7 @@ export const weaviateKnowledgeIngestTool: BrainTool = {
     properties: {
       text: { type: 'string', description: 'The full text content to store and index.' },
       title: { type: 'string', description: 'A short title / subject for the entry.' },
-      source: { type: 'string', description: 'Where it came from, e.g. "email:d.caine@dcaine.com" or "meeting-notes".' },
+      source: { type: 'string', description: 'Where it came from, e.g. "email:user@example.com" or "meeting-notes".' },
       project: { type: 'string', description: 'Optional project/client tag for later filtering.' },
     },
     required: ['text', 'title'],

@@ -1,0 +1,59 @@
+---
+version: '1.0'
+runtime: nodejs
+project: boss-voice-action
+manifest:
+  displayName: IR Custom AIOS Voice Assistant
+  invocationName: IR Custom AIOS
+  category: PRODUCTIVITY
+  pronunciation: IR Custom AIOS
+  description: Your AI assistant for business operations
+  privacyPolicyUrl: https://example.com/privacy
+  termsOfServiceUrl: https://example.com/terms
+
+actions:
+- name: MAIN
+  description: Main invocation for IR Custom AIOS
+  initialTrigger:
+    intent: actions.intent.MAIN
+  httpExecution:
+    url: https://last-castle.daggertooth-larch.ts.net/google/webhook
+
+intents:
+- name: boss.query
+  autoTriggered: false
+  httpExecution:
+    url: https://last-castle.daggertooth-larch.ts.net/google/webhook
+  parameters:
+  - name: query
+    type: string
+    isRequired: true
+    entityMatchType: REGULAR
+  triggerPhrases:
+  - "Ask IR Custom AIOS $boss.query"
+  - "Tell IR Custom AIOS $boss.query"
+  - "IR Custom AIOS, $boss.query"
+
+- name: boss.email
+  autoTriggered: false
+  httpExecution:
+    url: https://last-castle.daggertooth-larch.ts.net/google/webhook
+  triggerPhrases:
+  - "Ask IR Custom AIOS to check my email"
+  - "Tell IR Custom AIOS to check my email"
+  - "IR Custom AIOS, check my email"
+
+- name: boss.briefing
+  autoTriggered: false
+  httpExecution:
+    url: https://last-castle.daggertooth-larch.ts.net/google/webhook
+  triggerPhrases:
+  - "Ask IR Custom AIOS for my daily briefing"
+  - "Tell IR Custom AIOS to give me my briefing"
+  - "IR Custom AIOS, what's my daily briefing"
+
+entities: []
+
+synonymEntities: []
+
+scenes: []

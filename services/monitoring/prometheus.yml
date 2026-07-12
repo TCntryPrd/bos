@@ -1,0 +1,153 @@
+# IR Custom AIOS v2 — Prometheus Scrape Configuration
+#
+# Scrapes:
+#   - IR Custom AIOS API          /metrics    (Fastify prom-client metrics)
+#   - IR Custom AIOS Worker       /metrics    (job queue depth, processing latency)
+#   - Node Exporter       /metrics    (host CPU, memory, disk, network)
+#   - Redis Exporter      /metrics    (Redis streams, memory, keyspace)
+#   - Postgres Exporter   /metrics    (query time, connections, table sizes)
+#   - Weaviate            /metrics    (vector query latency, object counts)
+#   - Prometheus itself   /metrics    (meta-monitoring)
+#
+# All scrape intervals default to 15s. The voice pipeline uses a tighter
+# 10s interval because latency spikes are time-sensitive for alerting.
+#
+# When running inside Docker Compose, service names resolve via Docker DNS.
+# Adjust targets if running Prometheus outside the compose network.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  # Attach these labels to all time series collected by this Prometheus.
+  # Useful when federating or shipping to a remote Thanos/Cortex instance.
+  external_labels:
+    deployment: boss-v2
+    environment: production
+
+# ---------------------------------------------------------------------------
+# Alerting rules — loaded from the alerts/ directory
+# ---------------------------------------------------------------------------
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+# ---------------------------------------------------------------------------
+# Alertmanager integration (optional)
+# Uncomment and configure if you run Alertmanager alongside Prometheus.
+# ---------------------------------------------------------------------------
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# ---------------------------------------------------------------------------
+# Scrape jobs
+# ---------------------------------------------------------------------------
+scrape_configs:
+
+  # ── Prometheus self-monitoring ──────────────────────────────────────────
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  # ── IR Custom AIOS API (Fastify) ────────────────────────────────────────────────
+  # Requires prom-client installed in apps/api and a /metrics endpoint.
+  # Expected metrics:
+  #   http_request_duration_seconds  (histogram)
+  #   http_requests_total            (counter, labels: method, route, status)
+  #   brain_request_duration_seconds (histogram, labels: provider)
+  #   brain_requests_total           (counter, labels: provider, status)
+  #   voice_pipeline_duration_seconds (histogram, labels: stage)
+  #   active_ws_connections          (gauge, labels: type)
+  - job_name: boss-api
+    scrape_interval: 10s
+    static_configs:
+      - targets:
+          - api:8001
+    metrics_path: /metrics
+    # Relabel to add a service tag on all metrics from this job
+    relabel_configs:
+      - target_label: service
+        replacement: boss-api
+
+  # ── IR Custom AIOS Worker ───────────────────────────────────────────────────────
+  # Background job processor (Redis Stream consumer).
+  # Expected metrics:
+  #   job_queue_depth                (gauge, labels: stream)
+  #   job_processing_duration_seconds (histogram, labels: job_type)
+  #   jobs_processed_total           (counter, labels: job_type, status)
+  #   self_heal_attempts_total       (counter, labels: service, outcome)
+  #   playbook_hits_total            (counter, labels: service)
+  #   backup_last_success_timestamp  (gauge)
+  #   backup_duration_seconds        (histogram)
+  - job_name: boss-worker
+    static_configs:
+      - targets:
+          - worker:8003
+    metrics_path: /metrics
+    relabel_configs:
+      - target_label: service
+        replacement: boss-worker
+
+  # ── Node Exporter (host metrics) ────────────────────────────────────────
+  # Run node-exporter as a separate container or system service.
+  # docker run -d --net="host" --pid="host" -v "/:/host:ro,rslave" \
+  #   prom/node-exporter:latest --path.rootfs=/host
+  - job_name: node-exporter
+    static_configs:
+      - targets:
+          - node-exporter:9100
+    relabel_configs:
+      - target_label: service
+        replacement: host
+
+  # ── Redis Exporter ──────────────────────────────────────────────────────
+  # docker run -d -p 9121:9121 \
+  #   -e REDIS_ADDR=redis://boss_redis:6379 \
+  #   oliver006/redis_exporter:latest
+  - job_name: redis
+    static_configs:
+      - targets:
+          - redis-exporter:9121
+    relabel_configs:
+      - target_label: service
+        replacement: redis
+
+  # ── Postgres Exporter ───────────────────────────────────────────────────
+  # docker run -d -p 9187:9187 \
+  #   -e DATA_SOURCE_NAME="postgresql://boss:pass@boss_postgres:5432/boss_db?sslmode=disable" \
+  #   prometheuscommunity/postgres-exporter:latest
+  - job_name: postgres
+    static_configs:
+      - targets:
+          - postgres-exporter:9187
+    relabel_configs:
+      - target_label: service
+        replacement: postgres
+
+  # ── Weaviate ────────────────────────────────────────────────────────────
+  # Weaviate exposes Prometheus metrics natively at /metrics
+  - job_name: weaviate
+    static_configs:
+      - targets:
+          - weaviate:2112
+    metrics_path: /metrics
+    relabel_configs:
+      - target_label: service
+        replacement: weaviate
+
+  # ── STT Service (faster-whisper FastAPI) ────────────────────────────────
+  # Requires prometheus-fastapi-instrumentator in the STT service.
+  # Expected metrics:
+  #   stt_transcription_duration_seconds (histogram, labels: model)
+  #   stt_requests_total                 (counter, labels: status)
+  - job_name: boss-stt
+    scrape_interval: 10s
+    static_configs:
+      - targets:
+          - stt:8000
+    metrics_path: /metrics
+    relabel_configs:
+      - target_label: service
+        replacement: boss-stt

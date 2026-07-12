@@ -49,9 +49,9 @@ async function fetchGooglePlace(): Promise<{ rating: number | null; count: numbe
 }
 
 const REVIEW_QUERY =
-  'Find the customer review ratings for D. Caine Solutions (website dcaine.com), a US ' +
+  (process.env.REVIEW_QUERY_INTRO || 'Find the customer review ratings for ' + (process.env.REVIEW_BUSINESS_NAME || 'this business') + ', a US ') +
   'business-automation consulting firm run by Kevin Starr. Check BOTH its Google Business ' +
-  'Profile / Google Maps listing AND Trustpilot (trustpilot.com/review/dcaine.com). ' +
+  ('Profile / Google Maps listing AND Trustpilot' + (process.env.REVIEW_TRUSTPILOT_SLUG ? ' (trustpilot.com/review/' + process.env.REVIEW_TRUSTPILOT_SLUG + ')' : '') + '. ') +
   'Reply ONLY with compact JSON, no prose: ' +
   '{"overall_rating":number_or_null,"total_reviews":number,' +
   '"sources":[{"name":string,"rating":number_or_null,"count":number}],"summary":"one sentence"}';

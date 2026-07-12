@@ -15,7 +15,7 @@
  *   POST /agent/stop           — stop current agent
  *   GET  /agent/status         — {active, agent, projectDir, busy, sessionId, uptime}
  *   POST /send                 — send message to active agent or general brain
- *   GET  /projects             — list projects from /home/boss/clients/
+ *   GET  /projects             — list projects from /home/tcntryprd/clients/
  *   GET  /projects/:name/files — file tree for a project
  *   GET  /projects/:name/file  — read a file (?path=relative/path)
  */
@@ -36,13 +36,13 @@ import {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const CLIENTS_DIR = '/home/boss/clients';
+const CLIENTS_DIR = '/home/tcntryprd/clients';
 const BRAIN_API_URL = 'http://localhost:8010/api/brain/chat/stream';
 const MAX_BUFFER = 200;
 
 // Additional project directories beyond clients/
 const EXTRA_PROJECTS: Array<{ name: string; displayName: string; path: string }> = [
-  { name: 'boss-main', displayName: 'BOS Main', path: '/home/boss/sp-hub' },
+  { name: 'boss-main', displayName: 'BOS Main', path: '/home/tcntryprd/sp-hub' },
 ];
 
 /** Resolve project name to directory — checks extras first, then clients */
@@ -167,7 +167,7 @@ function sendToOllama(message: string) {
 
 // ── Session Recap (BOS Main) ──────────────────────────────────────────────
 
-const RECAP_FILE = '/home/boss/sp-hub/.boss-session-recap.json';
+const RECAP_FILE = '/home/tcntryprd/sp-hub/.boss-session-recap.json';
 const RECAP_EXCHANGE_COUNT = 4;
 
 interface RecapExchange {
@@ -178,7 +178,7 @@ interface RecapExchange {
 
 /** Check if a project is BOS Main (no auto-resume, uses recap) */
 function isBossMain(projectDir: string): boolean {
-  return projectDir === '/home/boss/sp-hub';
+  return projectDir === '/home/tcntryprd/sp-hub';
 }
 
 /** Read saved recap exchanges */
@@ -224,7 +224,7 @@ function buildRecapPrompt(): string | null {
   const parts: string[] = [];
 
   // 1. Live session context from the tmux lead engineer
-  const ctxFile = '/home/boss/sp-hub/BOSS_SESSION_CONTEXT.md';
+  const ctxFile = '/home/tcntryprd/sp-hub/BOSS_SESSION_CONTEXT.md';
   try {
     if (existsSync(ctxFile)) {
       const ctx = readFileSync(ctxFile, 'utf8').trim();
@@ -233,7 +233,7 @@ function buildRecapPrompt(): string | null {
   } catch { /* no context file */ }
 
   // 2. Memory index
-  const memFile = '/home/boss/.claude/projects/-home-tcntryprd-sp-hub/memory/MEMORY.md';
+  const memFile = '/home/tcntryprd/.claude/projects/-home-tcntryprd-sp-hub/memory/MEMORY.md';
   try {
     if (existsSync(memFile)) {
       const mem = readFileSync(memFile, 'utf8').trim();
@@ -263,7 +263,7 @@ function saveRecapFromSession(sessionId: string, projectDir: string): void {
   if (!isBossMain(projectDir)) return;
 
   const claudeProjectDir = join(
-    process.env.HOME || '/home/boss',
+    process.env.HOME || '/home/tcntryprd',
     '.claude/projects',
     projectDir.replace(/\//g, '-'),
   );
@@ -432,7 +432,7 @@ function startAgent(projectDir: string, model?: string): AgentState {
   if (!bossMain) {
     try {
       const claudeProjectDir = join(
-        process.env.HOME || '/home/boss',
+        process.env.HOME || '/home/tcntryprd',
         '.claude/projects',
         projectDir.replace(/\//g, '-')
       );
@@ -840,7 +840,7 @@ export async function codeRoutes(server: FastifyInstance) {
 
       // Resolve and validate the path stays within allowed roots
       const resolved = resolve(projectDir);
-      const allowedRoots = [CLIENTS_DIR, '/home/boss/boss-dev', '/home/boss/sp-hub'];
+      const allowedRoots = [CLIENTS_DIR, '/home/tcntryprd/boss-dev', '/home/tcntryprd/sp-hub'];
       if (!allowedRoots.some((root) => resolved.startsWith(root))) {
         return reply.status(400).send({ error: 'projectDir must be under an allowed root' });
       }

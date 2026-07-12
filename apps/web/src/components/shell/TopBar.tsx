@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Menu } from 'lucide-react';
-import { AdminOverlay } from './AdminOverlay';
 import { ThemeToggle } from './ThemeToggle';
 import { getAiosName } from '../../lib/theme';
 
@@ -18,18 +18,19 @@ function getUser(): { name: string; role: string } {
 interface TopBarProps {
   pageTitle: string;
   onMobileMenu?: () => void;
+  immersive?: boolean;
 }
 
-export function TopBar({ pageTitle, onMobileMenu }: TopBarProps) {
+export function TopBar({ pageTitle, onMobileMenu, immersive = false }: TopBarProps) {
   const { name, role } = getUser();
   const isAdmin = role === 'admin' || role === 'owner';
-  const [adminOpen, setAdminOpen] = useState(false);
+  const navigate = useNavigate();
   const aiosName = getAiosName();
 
   return (
     <header
-      className="boss-nav-surface flex-shrink-0 h-10 border-b border-border flex items-center px-4 gap-3"
-      style={{ background: 'var(--v-nav-bg)' }}
+      className={`boss-nav-surface flex-shrink-0 h-10 border-b border-border flex items-center px-4 gap-3 ${immersive ? 'backdrop-blur-xl shadow-lg' : ''}`}
+      style={{ background: immersive ? 'rgba(5, 8, 15, 0.34)' : 'var(--v-nav-bg)' }}
       aria-label="Top bar"
     >
       {onMobileMenu && (
@@ -51,20 +52,21 @@ export function TopBar({ pageTitle, onMobileMenu }: TopBarProps) {
         {pageTitle}
       </h1>
 
-      {/* Theme toggle + user pill — far right of the header. */}
-      <div className="ml-auto flex items-center gap-3">
+      {/* User pill — far right of the header (moved here from the nav rail). */}
+      <div className="ml-auto flex items-center gap-2">
         <ThemeToggle />
-        <button
+      </div>
+      <button
         type="button"
-        onClick={() => { if (isAdmin) setAdminOpen(true); }}
-        className={`flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors ${isAdmin ? 'hover:bg-accent/10 cursor-pointer' : 'cursor-default'}`}
-        aria-label={isAdmin ? 'Open admin overlay' : 'User'}
-        title={isAdmin ? 'Admin' : name}
+        onClick={() => { if (isAdmin) navigate('/settings'); }}
+        className={`ml-auto flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors ${isAdmin ? 'hover:bg-accent/10 cursor-pointer' : 'cursor-default'}`}
+        aria-label={isAdmin ? 'Open Settings' : 'User'}
+        title={isAdmin ? 'Settings' : name}
       >
         <span className="leading-tight text-right hidden sm:block">
           <span className="block text-[12px] text-text-primary truncate max-w-[160px]">{name}</span>
           <span className="vs-mono block text-[9px] tracking-[0.14em] uppercase text-accent">
-            {role}{isAdmin ? ' ⌥' : ''}
+            {role}
           </span>
         </span>
         <span
@@ -74,10 +76,7 @@ export function TopBar({ pageTitle, onMobileMenu }: TopBarProps) {
         >
           {name.slice(0, 1).toUpperCase()}
         </span>
-        </button>
-      </div>
-
-      <AdminOverlay open={adminOpen} onClose={() => setAdminOpen(false)} />
+      </button>
     </header>
   );
 }

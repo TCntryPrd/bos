@@ -58,8 +58,8 @@ interface TriageDecision {
 }
 
 // Account-specific rules
-const PERSONAL_ACCOUNTS = ['absoluterecoverybureau@gmail.com', 'travelcraft.dc@gmail.com'];
-const BUSINESS_ACCOUNTS = ['kevin@starrpartners.ai', 'd.caine@dcaine.com'];
+const PERSONAL_ACCOUNTS = (process.env.BOSS_PERSONAL_ACCOUNTS || '').split(',').map(s => s.trim()).filter(Boolean);
+const BUSINESS_ACCOUNTS = (process.env.BOSS_BUSINESS_ACCOUNTS || '').split(',').map(s => s.trim()).filter(Boolean);
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
 // ── Classification — priority-based triage ───────────────────────────────────
@@ -70,7 +70,7 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 // AUTOMATED:       Receipts, confirmations, shipping, system notifications → archive
 // PROMO:           Marketing, newsletters, sales pitches → archive (immediate for ARB/TC)
 //
-// Kevin's directive: only active reply conversations stay in inbox.
+// Policy: only active reply conversations stay in inbox.
 // Everything else gets read, logged, and archived.
 
 function classifyEmail(email: ParsedEmail, accountEmail: string): TriageDecision {
@@ -83,7 +83,7 @@ function classifyEmail(email: ParsedEmail, accountEmail: string): TriageDecision
   //
   // CONTENT FIRST, SENDER SECOND.
   // The same person can be a friend, colleague, competitor, client, and project partner.
-  // What matters is what the EMAIL is asking Kevin to DO, not who sent it.
+  // What matters is what the EMAIL is asking the principal to DO, not who sent it.
 
   // ── CONTENT-BASED ACTION DETECTION (fires first, overrides sender logic) ────
 
@@ -124,7 +124,7 @@ function classifyEmail(email: ParsedEmail, accountEmail: string): TriageDecision
   ];
   const hasDeadline = deadlinePatterns.some(p => subject.includes(p) || body.slice(0, 500).includes(p));
 
-  // Payment/money incoming — someone paying Kevin or discussing payment
+  // Payment/money incoming — someone paying the principal or discussing payment
   const paymentPatterns = [
     'payment sent', 'wire transfer', 'ach transfer', 'zelle',
     'venmo', 'paypal', 'paid you', 'check is in', 'check mailed',
@@ -774,7 +774,7 @@ async function runTriage(): Promise<void> {
             golden_nugget, invoice_amount, invoice_due_date, boss_notes
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [
-            logId, msgId, accountEmail || 'd.caine@dcaine.com', email.from, email.subject,
+            logId, msgId, accountEmail || 'unknown', email.from, email.subject,
             safeParseDate(email.date),
             decision.category, decision.needsAttention,
             decision.action === 'archive' ? 'archived' : decision.action === 'flag_attention' ? 'forwarded_to_brain' : 'compiled',

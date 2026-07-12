@@ -3,6 +3,8 @@ import { startEmailTriage, stopEmailTriage } from './agents/email-triage.js';
 import { startTelegramBot, stopTelegramBot } from './agents/telegram-bot.js';
 import { startKevinIntel, stopKevinIntel } from './agents/kevin-intel.js';
 import { startScheduler, stopScheduler } from './agents/persistent-scheduler.js';
+import { startHealthAlertConsumer, stopHealthAlertConsumer } from './health/consumer.js';
+import { startHealthMonitor, stopHealthMonitor } from './health/monitor.js';
 import { autoStartBrainSession } from './brain/cli-adapter.js';
 import { ensureHermesDashboard } from './routes/gw-auth.js';
 
@@ -35,6 +37,12 @@ async function main() {
       startKevinIntel();
       startScheduler();
     }
+
+    // Health threshold alerts run in BOTH modes (owner-authorized, outbound-only,
+    // self-guarded by REDIS_URL / HEALTH_ALERTS_ENABLED) — unlike the polling
+    // bot/intel agents that isolated mode deliberately suppresses.
+    startHealthAlertConsumer();
+    startHealthMonitor();
   } catch (err) {
     server.log.error(err);
     process.exit(1);
@@ -46,6 +54,8 @@ async function main() {
     stopTelegramBot();
     stopKevinIntel();
     stopScheduler();
+    stopHealthAlertConsumer();
+    stopHealthMonitor();
     void server.close();
   };
   process.on('SIGTERM', shutdown);

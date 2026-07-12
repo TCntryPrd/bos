@@ -28,6 +28,7 @@ import {
   type Task,
   type TaskStatus,
 } from '../lib/pipeline-engine.js';
+import { emitTaskChanged } from '../lib/emitTaskChanged.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -207,6 +208,11 @@ export async function handleTaskCreate(
       ],
     );
     const id = rows[0].id;
+    const { rows: newRows } = await getPool().query(
+      `SELECT * FROM boss_tasks WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, id],
+    );
+    if (newRows[0]) emitTaskChanged({ id, tenantId, task: newRows[0] });
     return `Task created: "${title}"\n  id=${id}  pipeline=none  stage=Initiated  status=pending\n  assigned_agent=${agent ?? '(unassigned)'}  client=${client ?? '(none)'}`;
   }
 
@@ -243,6 +249,11 @@ export async function handleTaskCreate(
   );
 
   const id = rows[0].id;
+  const { rows: pNewRows } = await getPool().query(
+    `SELECT * FROM boss_tasks WHERE tenant_id = $1 AND id = $2`,
+    [tenantId, id],
+  );
+  if (pNewRows[0]) emitTaskChanged({ id, tenantId, task: pNewRows[0] });
   return `Task created: "${title}"\n  id=${id}  pipeline="${pipeline.name}"  first_stage=${pipeline.stages[0].name}  status=pending\n  assigned_agent=${agent ?? '(unassigned)'}  client=${client ?? '(none)'}`;
 }
 
@@ -260,7 +271,27 @@ export async function handleTaskAdvance(
   }
   const task = await loadTask(tenantId, taskId);
   if (!task) return `ERROR: task ${taskId} not found.`;
-  if (!task.pipeline_id) return `ERROR: task ${taskId} has no pipeline.`;
+  // Standalone tasks (no pipeline) — mark done directly
+  if (!task.pipeline_id) {
+    await getPool().query(
+      `UPDATE boss_tasks SET status = 'done', current_stage = 'Done'
+         WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, taskId],
+    );
+    await getPool().query(
+      `INSERT INTO boss_stage_log
+         (tenant_id, task_id, stage, agent, started_at, completed_at, output, notes, status)
+       VALUES ($1, $2, 'Done', $3, now(), now(), $4, 'standalone complete', 'done')`,
+      [tenantId, taskId, task.assigned_agent, output || null],
+    );
+    const { rows: doneRows } = await getPool().query(
+      `SELECT * FROM boss_tasks WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, taskId],
+    );
+    if (doneRows[0]) emitTaskChanged({ id: taskId, tenantId, task: doneRows[0] });
+    return `Task ${taskId} → DONE.`;
+  }
+
   const pipeline = await loadPipelineById(tenantId, task.pipeline_id);
   if (!pipeline) return `ERROR: pipeline ${task.pipeline_id} not found.`;
 

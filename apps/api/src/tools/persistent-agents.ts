@@ -61,7 +61,7 @@ export const employeeAgentsReportTool: BrainTool = {
   description:
     'Get an operations + COST report on the Employee Agents (headless persistent agents like the Email and CFO agents). ' +
     "Returns each agent's status, schedule, model, last run time, run/error counts, last report summary, and cost/usage rolled up over 24h and 7d. " +
-    'As the COO, use this to see what each Employee Agent is doing and what it costs, then decide whether to adjust its schedule, model, or instructions (via boss_update_persistent_agent) — e.g. pause an erroring agent or move an expensive one to a cheaper model.',
+    'As the COO, use this to see what each Employee Agent is doing and what it costs, then decide whether to adjust its schedule or instructions (via boss_update_persistent_agent) — e.g. pause an erroring agent, reduce its heartbeat, or tighten its brief. Employee Agents run on Codex CLI; do not move them to Claude or other providers.',
   parameters: { type: 'object', properties: {}, required: [] },
 };
 

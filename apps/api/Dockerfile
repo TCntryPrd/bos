@@ -56,16 +56,16 @@ FROM node:22-alpine AS runner
 # - jq: JSON wrangling on the command line
 RUN apk add --no-cache docker-cli git ripgrep bash openssh-client curl python3 jq chromium
 
-RUN npm install -g @openai/codex@0.138.0
+RUN npm install -g @openai/codex@0.142.5
 RUN ln -sf /usr/lib/node_modules/@openai/codex/bin/codex.js /usr/bin/codex
 
 # Claude Code CLI — invoked as a subprocess from the rascal-workspace
 # routes (v1.6.4). Pinned to the host's installed version so deploys
 # don't drift behind subscription auth changes.
-RUN npm install -g @anthropic-ai/claude-code@2.1.185
+RUN npm install -g @anthropic-ai/claude-code@2.1.119
 
 # Google CLI (gemini) — powers the Hermes agent on the tenant's Gemini key
-RUN npm install -g @google/gemini-cli@0.46.0
+RUN npm install -g @google/gemini-cli
 
 # Security: run as non-root. The `user: 1000:1000` override in
 # docker-compose.yml is what actually pins the runtime uid/gid so

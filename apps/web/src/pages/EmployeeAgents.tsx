@@ -35,12 +35,12 @@ function iconFor(a: EmployeeAgentRow): typeof Wallet {
 function statusStyle(status: string): string {
   if (status === 'active') return 'bg-green-500/15 text-green-400 border-green-500/30';
   if (status === 'paused') return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
-  return 'bg-surface-2 text-text-muted border-border';
+  return 'bg-surface-2/70 text-text-muted border-border';
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-surface-2/60 border border-border py-2">
+    <div className="aios-stat py-2">
       <div className="text-[13px] font-semibold text-text-secondary">{value}</div>
       <div className="vs-mono text-[9px] uppercase tracking-wide text-text-muted mt-0.5">{label}</div>
     </div>
@@ -51,9 +51,9 @@ function AgentCard({ a }: { a: EmployeeAgentRow }) {
   const Icon = iconFor(a);
   const errored = a.last_status === 'error';
   return (
-    <div className="rounded-xl border border-border bg-surface-1 p-4 flex flex-col gap-3" data-testid="employee-agent-card">
+    <div className="aios-panel p-4 flex flex-col gap-3" data-testid="employee-agent-card">
       <div className="flex items-start gap-3">
-        <span className="w-11 h-11 rounded-full grid place-items-center flex-shrink-0 text-accent bg-surface-2 border border-border" aria-hidden>
+        <span className="w-11 h-11 rounded-lg grid place-items-center flex-shrink-0 text-info bg-info/10 border border-info/25" aria-hidden>
           <Icon className="w-5 h-5" />
         </span>
         <div className="flex-1 min-w-0">
@@ -116,8 +116,8 @@ export function EmployeeAgents() {
   }, [load]);
 
   return (
-    <div className="px-6 py-5" data-testid="employee-agents-page">
-      <header className="mb-5 flex items-start justify-between gap-3">
+    <div className="aios-page aios-page-pad min-h-full" data-testid="employee-agents-page">
+      <header className="aios-command-hero mb-4 flex flex-wrap items-start justify-between gap-3 px-4 py-3">
         <div>
           <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">Your Team</div>
           <h1 className="text-2xl font-semibold mt-1 flex items-center gap-2">
@@ -125,12 +125,12 @@ export function EmployeeAgents() {
             Employee Agents
           </h1>
           <p className="text-[12px] text-text-muted mt-1 max-w-2xl">
-            Headless AI staff that run on a heartbeat and report to the COO + dashboard. Distinct from your
-            Rascals &amp; Outsiders (which live on the <span className="text-text-secondary">Rascals</span> surface).
+            Heartbeat AI staff with costs, runs, and last reports in one executive staff view.
           </p>
         </div>
-        <button onClick={() => void load()} className="text-text-muted hover:text-text-secondary transition mt-1" title="Refresh" aria-label="Refresh">
+        <button onClick={() => void load()} className="btn-secondary text-xs" title="Refresh" aria-label="Refresh">
           <RefreshCw className="w-4 h-4" />
+          Refresh
         </button>
       </header>
 

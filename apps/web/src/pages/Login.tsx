@@ -10,9 +10,10 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, LogIn } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { BossMark } from '../components/shell/BossLogo';
+import entranceElevatorScene from '../assets/entrance-elevator-scene.png';
 
 const INPUT_CLASS =
-  'w-full px-3 py-2.5 rounded-lg bg-surface-3 border border-border text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent';
+  'w-full px-3 py-2.5 rounded-lg bg-white/72 border border-slate-300/70 text-slate-950 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-500';
 
 export function Login() {
   const navigate = useNavigate();
@@ -72,14 +73,23 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-surface-1 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
+    <div className="login-entrance-page relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-100 p-4">
+      <img
+        src={entranceElevatorScene}
+        alt=""
+        className="absolute inset-0 h-full w-full object-cover opacity-100"
+        style={{ filter: 'brightness(1.12) saturate(1.08) contrast(1.02)' }}
+        aria-hidden="true"
+      />
+      <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,0.62),rgba(255,255,255,0.16),rgba(15,23,42,0.18))]" aria-hidden="true" />
+      <div className="aios-atmosphere-grid absolute inset-0" aria-hidden="true" />
+      <div className="login-access-panel relative w-full max-w-sm p-6">
         {/* Hero */}
         <div className="text-center mb-8">
           <div className="flex justify-center mb-6">
             <BossMark scale={2.4} />
           </div>
-          <p className="text-sm text-text-muted mt-1">Sign in to your account</p>
+          <p className="text-sm font-medium text-slate-600 mt-1">Executive access</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
@@ -90,7 +100,7 @@ export function Login() {
           )}
 
           <div className="space-y-1.5">
-            <label htmlFor="login-email" className="block text-xs font-medium text-text-secondary">
+              <label htmlFor="login-email" className="block text-xs font-medium text-slate-700">
               Email
             </label>
             <input
@@ -106,7 +116,7 @@ export function Login() {
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="login-password" className="block text-xs font-medium text-text-secondary">
+              <label htmlFor="login-password" className="block text-xs font-medium text-slate-700">
               Password
             </label>
             <div className="relative">
@@ -122,7 +132,7 @@ export function Login() {
               />
               <button
                 type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
                 onClick={() => setShowPassword(!showPassword)}
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
@@ -133,7 +143,7 @@ export function Login() {
 
           {needs2fa && (
             <div className="space-y-1.5">
-              <label htmlFor="login-2fa" className="block text-xs font-medium text-text-secondary">
+              <label htmlFor="login-2fa" className="block text-xs font-medium text-slate-700">
                 Authenticator Code
               </label>
               <input
@@ -169,10 +179,10 @@ export function Login() {
 
         {!onboardingComplete && (
           <div className="mt-6">
-            <div className="flex items-center gap-3 text-text-muted text-xs">
-              <span className="flex-1 border-t border-border" />
+            <div className="flex items-center gap-3 text-slate-500 text-xs">
+              <span className="flex-1 border-t border-slate-300/70" />
               <span>or</span>
-              <span className="flex-1 border-t border-border" />
+              <span className="flex-1 border-t border-slate-300/70" />
             </div>
             <div className="mt-4 text-center">
               <button

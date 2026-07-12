@@ -93,7 +93,7 @@ export function NewWoDialog({ scope, onClose, onCreated }: Props) {
         <div className="space-y-3 text-sm">
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="block text-xs text-muted mb-1">Rascal / agent handle</span>
+              <span className="block text-xs text-muted mb-1">Client manager / agent handle</span>
               <input
                 autoFocus
                 value={handle}
@@ -133,7 +133,7 @@ export function NewWoDialog({ scope, onClose, onCreated }: Props) {
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={3}
-              placeholder="What you need the rascal to do"
+              placeholder="What you need the client manager to do"
               className="w-full bg-background border border-border rounded px-2 py-1.5 resize-y"
             />
           </label>

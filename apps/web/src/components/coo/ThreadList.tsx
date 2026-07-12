@@ -20,7 +20,7 @@ export function ThreadList({ threads, activeId, isLoading, onPick, onRename, onD
   const atCap = threads.length >= MAX_THREADS;
 
   return (
-    <aside className="rounded-xl bg-surface-1/70 border border-border backdrop-blur-md p-2 flex flex-col gap-1 overflow-y-auto">
+    <aside className="aios-panel p-2 flex flex-col gap-1 overflow-y-auto">
       <div className="flex items-center justify-between px-2 pt-1 pb-2">
         <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-info">
           Threads <span className="text-text-muted">{threads.length}/{MAX_THREADS}</span>
@@ -40,7 +40,7 @@ export function ThreadList({ threads, activeId, isLoading, onPick, onRename, onD
       )}
       {!isLoading && threads.length === 0 && (
         <div className="vs-mono text-[10px] text-text-muted px-2 leading-relaxed">
-          No threads yet. Click NEW to start.
+          No threads yet.
         </div>
       )}
       {threads.map((t) => {

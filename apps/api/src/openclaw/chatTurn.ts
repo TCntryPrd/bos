@@ -8,8 +8,10 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { spawnBridgeCommand } from '../agents/host-bridge.js';
 
 const CODEX_BIN      = process.env.BOSS_GIO_BIN ?? 'codex';
-const GIO_WORKSPACE = process.env.BOSS_GIO_WORKSPACE ?? '/home/boss/outsiders/gio';
+const GIO_WORKSPACE = process.env.BOSS_GIO_WORKSPACE ?? '/home/tcntryprd/outsiders/gio';
+const CODEX_HOME     = process.env.CODEX_HOME ?? '/home/boss/.codex';
 const USE_HOST_BRIDGE = process.env.BOSS_GIO_HOST_BRIDGE === 'true';
+const GIO_GRANTED_TOOLS = process.env.BOSS_GIO_GRANTED_TOOLS ?? process.env.BOSS_EMPLOYEE_AGENT_GRANTED_TOOLS ?? '["*"]';
 
 export interface ChatTurnEvent {
   type: 'message' | 'interject' | 'error' | 'done';
@@ -36,6 +38,7 @@ interface CodexEvent {
   item?: {
     type?: string;
     text?: string;
+    message?: string;
     name?: string;
     command?: string;
     call_id?: string;
@@ -50,12 +53,32 @@ interface CodexEvent {
 
 // ---- Implementations -------------------------------------------------------
 
+function codexSubscriptionEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    CODEX_HOME,
+    BOSS_EMPLOYEE_AGENT_ID: process.env.BOSS_EMPLOYEE_AGENT_ID ?? 'gio-office',
+    BOSS_EMPLOYEE_AGENT_NAME: process.env.BOSS_EMPLOYEE_AGENT_NAME ?? 'Gio / Office EA',
+    BOSS_EMPLOYEE_AGENT_GRANTED_TOOLS: GIO_GRANTED_TOOLS,
+    BOSS_TENANT_ID: process.env.BOSS_TENANT_ID ?? 'default',
+  };
+  delete env.OPENAI_API_KEY;
+  return env;
+}
+
 function startCodexTurn(
   message: string,
   attachments: ChatAttachment[],
   onEvent: (event: ChatTurnEvent) => void,
 ): ChatTurnHandle {
-  const baseArgs = ['--json', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check'];
+  const baseArgs = [
+    '--json',
+    '--dangerously-bypass-approvals-and-sandbox',
+    '--dangerously-bypass-hook-trust',
+    '--skip-git-repo-check',
+    '--cd',
+    GIO_WORKSPACE,
+  ];
   const bridgeArgs = [GIO_WORKSPACE];
   for (const attachment of attachments) {
     if (attachment.mimeType?.startsWith('image/')) {
@@ -63,13 +86,13 @@ function startCodexTurn(
       bridgeArgs.push(`image=${attachment.path}`);
     }
   }
-  const args = ['exec', ...baseArgs, message];
+  const args = ['exec', ...baseArgs, '--', message];
 
   const child = USE_HOST_BRIDGE
     ? spawnBridgeCommand('codex-exec', bridgeArgs)
     : spawn(CODEX_BIN, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: process.env,
+        env: codexSubscriptionEnv(),
         cwd: GIO_WORKSPACE,
       });
   if (USE_HOST_BRIDGE) {
@@ -88,6 +111,11 @@ function startCodexTurn(
   const describeInterject = (ev: CodexEvent): string | null => {
     const itemType = ev.item?.type ?? '';
     if (!itemType || itemType === 'agent_message') return null;
+    if (itemType === 'error') {
+      const message = ev.item?.message ?? ev.item?.text ?? '';
+      if (message.includes('--dangerously-bypass-hook-trust')) return null;
+      return 'Gio received a runtime notice and is continuing.';
+    }
     if (itemType === 'reasoning') return 'Gio is reasoning through the next step.';
     if (itemType === 'tool_call') {
       const label = ev.item?.name ?? ev.item?.command ?? 'tool';

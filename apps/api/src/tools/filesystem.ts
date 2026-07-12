@@ -1,7 +1,7 @@
 /**
  * Filesystem tools — give BOS full read/write access to the home directory.
  *
- * Mounted at /data/home → /home/boss/
+ * Mounted at /data/home → /home/tcntryprd/
  * Includes: sp-hub/, .openclaw/, .claude/, boss-dev/, n8n/, and everything else.
  */
 
@@ -11,7 +11,7 @@ export const fsReadFileTool: BrainTool = {
   name: 'boss_fs_read',
   description:
     'Read a file from the local filesystem. Full access to all project files, configs, OpenClaw data, ' +
-    'Claude config, notes, scripts. Path starts with /data/home/ (maps to /home/boss/).',
+    'Claude config, notes, scripts. Path starts with /data/home/ (maps to /home/tcntryprd/).',
   parameters: {
     type: 'object',
     properties: {

@@ -16,7 +16,7 @@ import { getPool } from '../db.js';
 import { setRuntimeConfig } from '../config-store.js';
 import {
   storeMetaCreds, getMetaCreds, metaStatus, clearMetaCredsCache,
-  fbListConversations, fbPageActivity, fbPublishPost, socialActivity, graphCall, GRAPH_VERSION,
+  fbListConversations, fbPageActivity, fbPublishPost, igPublishPost, socialActivity, graphCall, GRAPH_VERSION,
   type MetaCredsInput,
 } from '../lib/meta-graph.js';
 
@@ -132,6 +132,23 @@ export async function metaRoutes(server: FastifyInstance) {
       return reply.send({ ok: true, id: r.id });
     } catch (err) {
       request.log.error({ err }, 'fb post failed');
+      return reply.status(502).send({ error: 'graph_error', message: (err as Error).message });
+    }
+  });
+
+  // ── Publish an image post to Instagram Business (admin) ─────────────────────
+  server.post<{ Body: { imageUrl?: string; caption?: string } }>('/ig/post', async (request, reply) => {
+    if (!isAdmin(request)) return reply.status(403).send({ error: 'Forbidden' });
+    const imageUrl = String(request.body?.imageUrl ?? '').trim();
+    const caption = String(request.body?.caption ?? '').trim();
+    if (!imageUrl) return reply.status(400).send({ error: 'bad_request', message: 'imageUrl is required' });
+    const creds = await getMetaCreds('default');
+    if (!creds?.instagram.igBusinessAccountId || !creds.instagram.accessToken) return reply.status(409).send({ error: 'not_connected' });
+    try {
+      const r = await igPublishPost(creds, imageUrl, caption || undefined);
+      return reply.send({ ok: true, id: r.id });
+    } catch (err) {
+      request.log.error({ err }, 'ig post failed');
       return reply.status(502).send({ error: 'graph_error', message: (err as Error).message });
     }
   });

@@ -24,82 +24,82 @@ interface AgentEntry {
 
 const AGENT_ROSTER: Record<string, AgentEntry> = {
   'industry rockstarr': {
-    dir: '/home/boss/clients/01-industry-rockstarr',
+    dir: '/home/tcntryprd/clients/01-industry-rockstarr',
     cli: 'gemini',
     description: 'Industry Rockstarr community',
   },
   'kane minkus': {
-    dir: '/home/boss/clients/02-kane-minkus',
+    dir: '/home/tcntryprd/clients/02-kane-minkus',
     cli: 'claude',
     description: 'Kane Minkus / IR + AI District founder',
   },
   'ai district': {
-    dir: '/home/boss/clients/03-ai-district',
+    dir: '/home/tcntryprd/clients/03-ai-district',
     cli: 'gemini',
     description: 'AI District consulting routing, Jess Shelley',
   },
   'douglas': {
-    dir: '/home/boss/clients/04-douglas-estremadoyro',
+    dir: '/home/tcntryprd/clients/04-douglas-estremadoyro',
     cli: 'claude',
     description: 'Douglas Estremadoyro / Magnussen Home Furnishings',
   },
   'john ballard': {
-    dir: '/home/boss/clients/05-john-ballard',
+    dir: '/home/tcntryprd/clients/05-john-ballard',
     cli: 'claude',
     description: 'John Ballard / Craft Architecture',
   },
   'debbie': {
-    dir: '/home/boss/clients/06-debbie-wooldridge',
+    dir: '/home/tcntryprd/clients/06-debbie-wooldridge',
     cli: 'claude',
     description: 'Debbie Wooldridge / TTC Innovations',
   },
   'jessy': {
-    dir: '/home/boss/clients/07-jessy-trusted-ai-experts',
+    dir: '/home/tcntryprd/clients/07-jessy-trusted-ai-experts',
     cli: 'claude',
     description: 'Jessy / Trusted AI Experts',
   },
   'micazen': {
-    dir: '/home/boss/clients/08-micazen-sharon',
+    dir: '/home/tcntryprd/clients/08-micazen-sharon',
     cli: 'claude',
     description: 'Micazen / Sharon, n8n workflows, Zoho to ARMS',
   },
   'sharon': {
-    dir: '/home/boss/clients/08-micazen-sharon',
+    dir: '/home/tcntryprd/clients/08-micazen-sharon',
     cli: 'claude',
     description: 'Micazen / Sharon',
   },
   'lori': {
-    dir: '/home/boss/clients/09-lori-zeoli',
+    dir: '/home/tcntryprd/clients/09-lori-zeoli',
     cli: 'claude',
     description: 'Lori Zeoli / xpLORIZE AI Advisors',
   },
   'pessy': {
-    dir: '/home/boss/clients/10-chris-pessy',
+    dir: '/home/tcntryprd/clients/10-chris-pessy',
     cli: 'claude',
     description: 'Chris Pessy / lead qualification',
   },
   'chris pessy': {
-    dir: '/home/boss/clients/10-chris-pessy',
+    dir: '/home/tcntryprd/clients/10-chris-pessy',
     cli: 'claude',
     description: 'Chris Pessy / lead qualification',
   },
   'eric': {
-    dir: '/home/boss/clients/eric-bloom',
+    dir: '/home/tcntryprd/clients/eric-bloom',
     cli: 'claude',
     description: 'Eric Bloom / GatorPixel AI mentee',
   },
   'berfelo': {
-    dir: '/home/boss/clients/john-berfelo',
+    dir: '/home/tcntryprd/clients/john-berfelo',
     cli: 'claude',
     description: 'John Berfelo / pro-bono collaborator',
   },
   'productions': {
-    dir: '/home/boss/clients/sp-productions',
+    dir: '/home/tcntryprd/clients/sp-productions',
     cli: 'claude',
     description: 'SP Productions content pipeline',
   },
   'sp productions': {
-    dir: '/home/boss/clients/sp-productions',
+    dir: '/home/tcntryprd/clients/sp-productions',
     cli: 'claude',
     description: 'SP Productions content pipeline',
   },
@@ -143,7 +143,7 @@ function resolveAgent(name: string): AgentEntry | null {
 }
 
 // ── Bridge Script ─────────────────────────────────────────────────────────────
-const BRIDGE_SCRIPT = '/home/boss/boss-dev/scripts/voice-agent-bridge.sh';
+const BRIDGE_SCRIPT = '/home/tcntryprd/boss-dev/scripts/voice-agent-bridge.sh';
 
 // ── Tool Definitions ──────────────────────────────────────────────────────────
 
@@ -285,7 +285,7 @@ export async function handleVoiceRouteAgent(
       {
         timeout: 120_000,
         maxBuffer: 1024 * 1024,
-        env: { ...process.env, HOME: '/home/boss' },
+        env: { ...process.env, HOME: '/home/tcntryprd' },
       },
     );
     const output = stdout.trim() || stderr.trim();

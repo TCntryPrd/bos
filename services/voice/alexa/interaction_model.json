@@ -1,0 +1,58 @@
+{
+    "interactionModel": {
+        "languageModel": {
+            "invocationName": "boss",
+            "intents": [
+                {
+                    "name": "IR Custom AIOSQueryIntent",
+                    "slots": [
+                        {
+                            "name": "query",
+                            "type": "AMAZON.SearchQuery"
+                        }
+                    ],
+                    "samples": [
+                        "ask {query}",
+                        "tell me about {query}",
+                        "what is {query}",
+                        "how do I {query}",
+                        "can you help me with {query}",
+                        "{query}"
+                    ]
+                },
+                {
+                    "name": "EmailCheckIntent",
+                    "samples": [
+                        "check my email",
+                        "what's in my email",
+                        "read my email",
+                        "do I have any new emails"
+                    ]
+                },
+                {
+                    "name": "BriefingIntent",
+                    "samples": [
+                        "give me my briefing",
+                        "what's my daily briefing",
+                        "brief me",
+                        "what's happening today",
+                        "daily briefing"
+                    ]
+                },
+                {
+                    "name": "AMAZON.HelpIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.CancelIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.StopIntent",
+                    "samples": []
+                }
+            ],
+            "types": []
+        }
+    }
+}

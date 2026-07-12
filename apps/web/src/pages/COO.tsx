@@ -29,11 +29,11 @@ import { useCooThreads } from '../components/coo/useCooThreads.js';
 
 // Claude-accented variant of the Codex workstation palette.
 const T = {
-  bg: 'var(--v-base)',
-  panel: 'var(--v-surface-1)',
-  panel2: 'var(--v-surface-2)',
-  panel3: 'var(--v-surface-3)',
-  border: 'var(--v-hairline-strong)',
+  bg: '#05060F',
+  panel: '#0B0E1D',
+  panel2: '#11152E',
+  panel3: '#181D3A',
+  border: '#232A4D',
   borderSoft: 'rgba(181,108,255,0.16)',
   text: '#F1F4FF',
   textDim: '#AAB3D6',
@@ -164,7 +164,7 @@ function Panel({ title, icon: Icon, children, action, collapsible = true }: {
     return next;
   });
   return (
-    <section className="min-h-0 min-w-0 rounded border flex flex-col" style={{ background: T.panel, borderColor: T.border }}>
+    <section className="aios-panel min-h-0 min-w-0 flex flex-col">
       <header
         className={`h-9 px-3 flex items-center gap-2 shrink-0 ${collapsible ? 'cursor-pointer' : ''}`}
         style={{ borderBottom: collapsed ? 'none' : `1px solid ${T.borderSoft}` }}
@@ -321,7 +321,7 @@ function ChecklistPanel({ threadCount, brainReady }: { threadCount: number; brai
     ['Health status', true, 'API and Brain status are polling live'],
   ] as const;
   return (
-    <Panel title="Today's Tasks" icon={CheckCircle2}>
+    <Panel title="Operator Checklist" icon={CheckCircle2}>
       <div className="p-2 space-y-1.5">
         {rows.map(([label, ok, detail]) => (
           <div key={label} className="px-2 py-1.5 rounded flex items-start gap-2" style={{ background: T.panel2 }}>
@@ -364,7 +364,7 @@ function SignalRow({ name, detail, status }: { name: string; detail?: string; st
 const LAUNCH_SURFACES = [
   ['/tasks', 'Task Board', 'Work queue'],
   ['/brain', 'Brain Config', 'AI routing'],
-  ['/connectors', 'Connected Apps', 'OAuth status'],
+  ['/connectors', 'Connectors', 'OAuth status'],
   ['/backup', 'Backup', 'Recovery state'],
   ['/voice', 'Voice Devices', 'Mic layer'],
   ['/agents', 'Employee Agents', 'Your AI staff'],
@@ -372,7 +372,7 @@ const LAUNCH_SURFACES = [
 ] as const;
 function LaunchPanel() {
   return (
-    <Panel title="Publish Channels" icon={SquareTerminal}>
+    <Panel title="Launch Surfaces" icon={SquareTerminal}>
       <div className="grid grid-cols-2 gap-2 p-3">
         {LAUNCH_SURFACES.map(([href, label, detail]) => (
           <a key={href} href={href} className="px-2 py-2 rounded border no-underline" style={{ background: T.panel2, borderColor: T.borderSoft }}>
@@ -425,7 +425,7 @@ function BrainOpsPanel({ brain }: { brain: BrainStatusPayload | null }) {
 }
 function ConnectorsPanel({ connectors, apps }: { connectors: ConnectorStatus[]; apps: AppsStatusPayload | null }) {
   return (
-    <Panel title="Connected Apps" icon={PlugZap}>
+    <Panel title="Connectors & Apps" icon={PlugZap}>
       <div className="p-2 space-y-1.5">
         {connectors.length === 0 && <EmptyLine text="No connector statuses returned." />}
         {connectors.map((conn) => <SignalRow key={conn.provider} name={conn.provider} status={conn.status} detail={conn.configuredAt ? `configured ${clock(conn.configuredAt)}` : conn.status} />)}
@@ -518,14 +518,14 @@ export default function COO() {
   };
 
   return (
-    <div className="h-full min-h-0 flex flex-col" style={{ background: T.bg, color: T.text }}>
+    <div className="aios-page h-full min-h-0 flex flex-col" style={{ color: T.text }}>
       <TopBar brain={brain} loading={brainLoading} lastActivity={lastActivity} mode={mode} setMode={setMode} />
       {mode === 'tasks' ? (
-        <div className="min-h-0 flex-1 overflow-hidden"><KanbanBoard scope={{ kind: 'coo' }} /></div>
+        <div className="aios-page-pad min-h-0 flex-1 overflow-hidden"><div className="aios-workbench h-full"><KanbanBoard scope={{ kind: 'coo' }} /></div></div>
       ) : mode === 'ops' ? (
         <OpsMode ops={ops} onRefresh={fetchOps} />
       ) : (
-        <main className="min-h-0 min-w-0 flex-1 grid gap-3 p-3 overflow-x-hidden" style={{ gridTemplateColumns: '300px minmax(0, 1fr) 340px' }}>
+        <main className="aios-page-pad min-h-0 min-w-0 flex-1 grid gap-3 overflow-x-hidden" style={{ gridTemplateColumns: '300px minmax(0, 1fr) 340px' }}>
           <aside className="min-h-0 min-w-0 overflow-y-auto space-y-3">
             <ContextPanel brain={brain} threadCount={threads.length} />
             <Panel title="Threads" icon={Radio}>
@@ -550,7 +550,7 @@ export default function COO() {
             <Panel title="Current Objective" icon={PanelRightOpen}><div className="p-3 text-[12px] leading-relaxed" style={{ color: T.textDim }}>{currentObjective}</div></Panel>
             <ChecklistPanel threadCount={threads.length} brainReady={!!brain?.ready} />
             <LaunchPanel />
-            <Panel title="Take Action" icon={Box}>
+            <Panel title="Executable From Here" icon={Box}>
               <div className="p-3 space-y-2">
                 <Badge text="Resume any Claude Code thread" />
                 <Badge text="Run with full bypass tool access" />

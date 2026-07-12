@@ -94,7 +94,7 @@ export const calendarCreateTool: BrainTool = {
 const googleAccountParam = {
   type: 'string',
   description:
-    'Which connected Google account (inbox email) to act on, e.g. "kevin@starrpartners.ai" or "d.caine@dcaine.com". Omit to use the default (most recently updated) account. ALWAYS set this when working across multiple inboxes.',
+    'Which connected Google account (inbox email) to act on, e.g. the connected inbox address. Omit to use the default (most recently updated) account. ALWAYS set this when working across multiple inboxes.',
 } as const;
 
 export const gmailUnreadTool: BrainTool = {

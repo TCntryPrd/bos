@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { SystemHealth, HealthCheckResult, HealthStatus } from '@boss/core';
 import { oauthClientConfigs } from './connectors.js';
-import { getPool } from '../db.js';
 
 export async function healthRoutes(server: FastifyInstance) {
   // Basic liveness probe — no auth required
@@ -11,29 +10,6 @@ export async function healthRoutes(server: FastifyInstance) {
       version: '2.0.0',
       timestamp: new Date().toISOString(),
     };
-  });
-
-  // WS-1/WS-3/WS-6: readiness probe — DB reachable AND schema migrated.
-  // Used by compose/installer health gates; refuses traffic until the
-  // migration ledger shows the baseline applied (schema-version guard).
-  server.get('/ready', async (_request, reply) => {
-    try {
-      await getPool().query('SELECT 1');
-    } catch (err) {
-      return reply.status(503).send({ status: 'not-ready', db: 'unreachable', reason: (err as Error).message });
-    }
-    try {
-      const { rows } = await getPool().query(
-        "SELECT 1 FROM _bos_migrate_log WHERE id = '000_baseline' LIMIT 1",
-      );
-      if (rows.length === 0) {
-        return reply.status(503).send({ status: 'not-ready', db: 'ok', schema: 'unmigrated' });
-      }
-    } catch {
-      // _bos_migrate_log table missing => migrations never ran
-      return reply.status(503).send({ status: 'not-ready', db: 'ok', schema: 'no-ledger' });
-    }
-    return { status: 'ready', db: 'ok', schema: 'ok', timestamp: new Date().toISOString() };
   });
 
   // Detailed health check — no auth required

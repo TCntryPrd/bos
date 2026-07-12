@@ -39,6 +39,20 @@ function contactTitle(c: WhatsappContact): string {
   return c.display_name || c.push_name || c.phone || c.contact_id;
 }
 
+function contactDisplayName(c: WhatsappContact | undefined): string | null {
+  return c?.display_name || c?.push_name || c?.verified_name || null;
+}
+
+function digitsOnly(value: string | null | undefined): string {
+  return (value ?? '').replace(/\D/g, '');
+}
+
+function isPlaceholderName(value: string | null | undefined): boolean {
+  if (!value) return true;
+  const trimmed = value.trim();
+  return /^\+?\d[\d\s().-]*$/.test(trimmed) || /@(s\.whatsapp\.net|c\.us|g\.us|lid)$/i.test(trimmed);
+}
+
 export default function WhatsApp() {
   const [threads, setThreads] = useState<WhatsappThread[]>([]);
   const [contacts, setContacts] = useState<WhatsappContact[]>([]);
@@ -113,6 +127,40 @@ export default function WhatsApp() {
     [threads, selected],
   );
 
+  const contactsByThread = useMemo(() => {
+    const map = new Map<string, WhatsappContact>();
+    for (const contact of contacts) {
+      map.set(contact.contact_id, contact);
+      const phoneDigits = digitsOnly(contact.phone);
+      if (phoneDigits) map.set(phoneDigits, contact);
+    }
+    return map;
+  }, [contacts]);
+
+  const threadContact = (thread: WhatsappThread): WhatsappContact | undefined => {
+    const direct = contactsByThread.get(thread.chat_id);
+    if (direct) return direct;
+    const phoneDigits = digitsOnly(thread.phone);
+    return phoneDigits ? contactsByThread.get(phoneDigits) : undefined;
+  };
+
+  const displayThreadTitle = (thread: WhatsappThread): string => {
+    const title = threadTitle(thread);
+    const contactName = contactDisplayName(threadContact(thread));
+    return isPlaceholderName(title) && contactName ? contactName : title;
+  };
+
+  const senderLabel = (message: WhatsappMessage): string | null => {
+    const explicit = message.sender_name || message.author;
+    if (!explicit) return null;
+    const authorDigits = digitsOnly(message.author);
+    if (authorDigits) {
+      const contactName = contactDisplayName(contactsByThread.get(authorDigits));
+      if (contactName) return contactName;
+    }
+    return explicit;
+  };
+
   const send = async () => {
     if (!selected || !reply.trim() || sending) return;
     setSending(true);
@@ -146,13 +194,14 @@ export default function WhatsApp() {
   };
 
   return (
-    <div className="flex h-full bg-base text-text-primary">
+    <div className="aios-page aios-page-pad flex h-full min-h-0 gap-3 overflow-hidden text-text-primary">
       {/* Threads list */}
-      <aside className="w-80 flex-shrink-0 border-r border-border overflow-y-auto bg-surface-1">
-        <header className="sticky top-0 bg-surface-1/95 backdrop-blur px-4 py-3 border-b border-border">
+      <aside className="aios-workbench w-[min(22rem,38vw)] min-w-[260px] flex-shrink-0 overflow-y-auto">
+        <header className="sticky top-0 z-10 border-b border-border/70 bg-surface-1/80 px-4 py-3 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <h2 className="text-sm font-semibold text-success uppercase tracking-wide">WhatsApp</h2>
+              <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-success">Client Comms</div>
+              <h2 className="mt-1 text-sm font-semibold text-text-primary">WhatsApp</h2>
               <p className="text-xs text-text-muted mt-0.5">
                 {leftView === 'threads' ? `${threads.length} threads` : `${contacts.length} contacts`}
               </p>
@@ -161,22 +210,22 @@ export default function WhatsApp() {
               <button
                 onClick={() => void syncContacts()}
                 disabled={syncingContacts}
-                className="text-xs px-2 py-1 text-text-secondary hover:text-text-primary border border-border rounded disabled:opacity-50"
+                className="btn-secondary !px-2 !py-1 text-xs disabled:opacity-50"
               >
                 {syncingContacts ? 'syncing' : 'sync'}
               </button>
             )}
           </div>
-          <div className="mt-3 grid grid-cols-2 rounded border border-border overflow-hidden text-xs bg-surface-2">
+          <div className="aios-segment mt-3 grid grid-cols-2 text-xs">
             <button
               onClick={() => setLeftView('threads')}
-              className={`px-2 py-1 ${leftView === 'threads' ? 'bg-success text-white' : 'text-text-secondary hover:text-text-primary'}`}
+              className={`px-2 py-1.5 ${leftView === 'threads' ? 'bg-success text-white' : 'text-text-secondary hover:text-text-primary'}`}
             >
               Threads
             </button>
             <button
               onClick={() => setLeftView('contacts')}
-              className={`px-2 py-1 ${leftView === 'contacts' ? 'bg-success text-white' : 'text-text-secondary hover:text-text-primary'}`}
+              className={`px-2 py-1.5 ${leftView === 'contacts' ? 'bg-success text-white' : 'text-text-secondary hover:text-text-primary'}`}
             >
               Contacts
             </button>
@@ -198,14 +247,14 @@ export default function WhatsApp() {
             <li key={t.chat_id}>
               <button
                 onClick={() => setSelected(t.chat_id)}
-                className={`w-full text-left px-4 py-3 border-b border-border hover:bg-success-muted transition-colors ${
+                className={`w-full text-left px-4 py-3 border-b border-border/70 hover:bg-success-muted transition-colors ${
                   selected === t.chat_id ? 'bg-success-muted' : ''
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium truncate">{threadTitle(t)}</span>
+                      <span className="font-medium truncate">{displayThreadTitle(t)}</span>
                       {t.is_group && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-info-muted text-info">group</span>
                       )}
@@ -237,7 +286,7 @@ export default function WhatsApp() {
                     const thread = threads.find((t) => t.chat_id === c.contact_id);
                     if (thread) setSelected(thread.chat_id);
                   }}
-                  className="w-full text-left px-4 py-3 border-b border-border hover:bg-success-muted transition-colors"
+                  className="w-full text-left px-4 py-3 border-b border-border/70 hover:bg-success-muted transition-colors"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
@@ -263,17 +312,17 @@ export default function WhatsApp() {
       </aside>
 
       {/* Thread view */}
-      <main className="flex-1 flex flex-col min-w-0">
+      <main className="aios-workbench flex-1 flex flex-col min-w-0">
         {!selectedThread ? (
-          <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
-            Select a thread to view messages.
+          <div className="flex-1 flex items-center justify-center px-6 text-center text-text-muted text-sm">
+            Select a thread to open the conversation.
           </div>
         ) : (
           <>
-            <header className="px-6 py-3 border-b border-border bg-surface-1/95">
+            <header className="px-6 py-3 border-b border-border/70 bg-surface-1/80 backdrop-blur-xl">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="font-semibold">{threadTitle(selectedThread)}</h1>
+                  <h1 className="font-semibold">{displayThreadTitle(selectedThread)}</h1>
                   <p className="text-xs text-text-muted mt-0.5">
                     {selectedThread.phone || selectedThread.chat_id}
                     {selectedThread.is_group && ' · group chat'}
@@ -281,7 +330,7 @@ export default function WhatsApp() {
                 </div>
                 <button
                   onClick={() => void whatsappApi.markRead(selectedThread.chat_id)}
-                  className="text-xs px-2 py-1 text-text-secondary hover:text-text-primary border border-border rounded"
+                  className="btn-secondary !px-2 !py-1 text-xs"
                 >
                   mark read
                 </button>
@@ -298,12 +347,12 @@ export default function WhatsApp() {
                       className={`max-w-[70%] rounded-lg px-3 py-2 text-sm ${
                         m.from_me
                           ? 'bg-success text-white'
-                          : 'bg-surface-1 text-text-primary border border-border'
+                          : 'bg-surface-1/80 text-text-primary border border-border/70'
                       }`}
                     >
-                      {selectedThread.is_group && !m.from_me && (m.sender_name || m.author) && (
+                      {selectedThread.is_group && !m.from_me && senderLabel(m) && (
                         <p className="mb-1 text-[11px] font-medium text-info">
-                          {m.sender_name || m.author}
+                          {senderLabel(m)}
                         </p>
                       )}
                       {m.message_type !== 'text' && !m.body ? (
@@ -325,7 +374,7 @@ export default function WhatsApp() {
               <div className="px-6 py-2 bg-danger-muted text-danger text-xs">{error}</div>
             )}
 
-            <footer className="p-4 border-t border-border bg-surface-1/95">
+            <footer className="p-4 border-t border-border/70 bg-surface-1/80 backdrop-blur-xl">
               <div className="flex gap-2">
                 <textarea
                   value={reply}
@@ -336,14 +385,14 @@ export default function WhatsApp() {
                       void send();
                     }
                   }}
-                  placeholder="Type a reply… (Cmd/Ctrl+Enter to send)"
+                  placeholder="Type a reply..."
                   rows={2}
-                  className="flex-1 bg-surface-2 border border-border rounded px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-success resize-none"
+                  className="input flex-1 resize-none text-sm focus:border-success"
                 />
                 <button
                   onClick={() => void send()}
                   disabled={!reply.trim() || sending}
-                  className="px-4 py-2 bg-success hover:bg-green-600 disabled:bg-surface-3 disabled:text-text-muted text-white rounded font-medium text-sm"
+                  className="btn-primary px-4 py-2 text-sm disabled:bg-surface-3 disabled:text-text-muted"
                 >
                   {sending ? 'Sending…' : 'Send'}
                 </button>

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 
-const GIO_WORKSPACE = process.env.BOSS_GIO_WORKSPACE ?? '/home/boss/outsiders/gio';
+const GIO_WORKSPACE = process.env.BOSS_GIO_WORKSPACE ?? '/home/tcntryprd/outsiders/gio';
 const MEMORY_ROOT = path.join(GIO_WORKSPACE, 'memory');
 const ALLOWED_ROOT_FILES = new Set(['MEMORY.md', 'AGENTS.md']);
 

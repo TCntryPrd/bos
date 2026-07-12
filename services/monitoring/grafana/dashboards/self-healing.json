@@ -1,0 +1,203 @@
+{
+  "uid": "boss-self-healing",
+  "title": "IR Custom AIOS — Self-Healing Engine",
+  "description": "Self-healing engine metrics: heal attempt rates, playbook hit rates, escalation counts, time-to-recover. Tracks the system learning to fix itself over time.",
+  "tags": ["boss", "healing", "reliability"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(self_heal_attempts_total{job=\"boss-worker\"}, service)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Heal Attempts (24h)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"] },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "green" }, { "value": 10, "color": "yellow" }, { "value": 30, "color": "red" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "increase(self_heal_attempts_total{job=\"boss-worker\"}[24h])",
+        "legendFormat": "attempts"
+      }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Playbook Hits (24h)",
+      "description": "How many failures were resolved by a known playbook without human intervention.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"] },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "increase(playbook_hits_total{job=\"boss-worker\"}[24h])",
+        "legendFormat": "hits"
+      }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Auto-Heal Rate %",
+      "description": "Percentage of failures resolved without human escalation. Target: 90%+ by month 6.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": 0, "color": "red" },
+              { "value": 50, "color": "yellow" },
+              { "value": 80, "color": "green" }
+            ]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "100 * sum(increase(self_heal_attempts_total{job=\"boss-worker\", outcome=\"resolved\"}[24h])) / sum(increase(self_heal_attempts_total{job=\"boss-worker\"}[24h]))",
+        "legendFormat": "auto-heal %"
+      }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Escalations (24h)",
+      "description": "Failures that required human intervention after 3 failed auto-heal attempts.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "green" }, { "value": 1, "color": "yellow" }, { "value": 3, "color": "red" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "increase(self_heal_attempts_total{job=\"boss-worker\", outcome=\"escalated\"}[24h])",
+        "legendFormat": "escalations"
+      }]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Heal Attempts Over Time by Outcome",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "resolved" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "escalated" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "in_progress" }, "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (outcome) (rate(self_heal_attempts_total{job=\"boss-worker\"}[30m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Heal Attempts by Service",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum by (service) (rate(self_heal_attempts_total{job=\"boss-worker\"}[30m]))",
+        "legendFormat": "{{service}}"
+      }]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Playbook Hit Rate by Service",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum by (service) (rate(playbook_hits_total{job=\"boss-worker\"}[30m]))",
+        "legendFormat": "{{service}}"
+      }]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Auto-Heal Success Rate (rolling 7d)",
+      "description": "Watch this trend upward as the playbook library grows. Target: 90%+ by month 6.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "red" }, { "value": 50, "color": "yellow" }, { "value": 80, "color": "green" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "100 * sum(increase(self_heal_attempts_total{job=\"boss-worker\", outcome=\"resolved\"}[7d])) / sum(increase(self_heal_attempts_total{job=\"boss-worker\"}[7d]))",
+        "legendFormat": "auto-heal rate (7d)"
+      }]
+    }
+  ]
+}

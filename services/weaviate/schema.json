@@ -1,0 +1,70 @@
+{
+  "_comment": "IR Custom AIOS v2 — Weaviate Collections Schema. In multi-tenant mode, collections are prefixed with tenant slug.",
+  "collections": [
+    {
+      "class": "DocumentEmbedding",
+      "description": "Embeddings for ingested documents (emails, files, messages) for semantic search and memory",
+      "vectorizer": "none",
+      "properties": [
+        { "name": "tenantId", "dataType": ["text"], "description": "Tenant identifier" },
+        { "name": "userId", "dataType": ["text"], "description": "User who owns this document" },
+        { "name": "source", "dataType": ["text"], "description": "Origin: gmail, drive, slack, calendar, etc." },
+        { "name": "sourceId", "dataType": ["text"], "description": "External ID from source system" },
+        { "name": "title", "dataType": ["text"], "description": "Document title or subject line" },
+        { "name": "content", "dataType": ["text"], "description": "Full text content" },
+        { "name": "contentType", "dataType": ["text"], "description": "email, document, message, event, file" },
+        { "name": "participants", "dataType": ["text[]"], "description": "People involved (emails/names)" },
+        { "name": "tags", "dataType": ["text[]"], "description": "Auto-generated or user tags" },
+        { "name": "importance", "dataType": ["number"], "description": "Computed importance score 0-1" },
+        { "name": "createdAt", "dataType": ["date"], "description": "When the original document was created" },
+        { "name": "ingestedAt", "dataType": ["date"], "description": "When IR Custom AIOS processed this document" }
+      ]
+    },
+    {
+      "class": "ConversationMemory",
+      "description": "Embeddings of past conversations for contextual recall",
+      "vectorizer": "none",
+      "properties": [
+        { "name": "tenantId", "dataType": ["text"], "description": "Tenant identifier" },
+        { "name": "userId", "dataType": ["text"], "description": "User in the conversation" },
+        { "name": "conversationId", "dataType": ["text"], "description": "Reference to Postgres conversation ID" },
+        { "name": "summary", "dataType": ["text"], "description": "Conversation summary" },
+        { "name": "keyTopics", "dataType": ["text[]"], "description": "Main topics discussed" },
+        { "name": "decisions", "dataType": ["text[]"], "description": "Decisions made during conversation" },
+        { "name": "actionItems", "dataType": ["text[]"], "description": "Action items identified" },
+        { "name": "source", "dataType": ["text"], "description": "web, voice, mobile, desktop" },
+        { "name": "createdAt", "dataType": ["date"], "description": "When conversation occurred" }
+      ]
+    },
+    {
+      "class": "UserProfile",
+      "description": "Semantic embeddings of user profile aspects for nuanced understanding",
+      "vectorizer": "none",
+      "properties": [
+        { "name": "tenantId", "dataType": ["text"], "description": "Tenant identifier" },
+        { "name": "userId", "dataType": ["text"], "description": "User this profile belongs to" },
+        { "name": "aspect", "dataType": ["text"], "description": "Profile aspect: communication_style, work_patterns, preferences, relationships" },
+        { "name": "description", "dataType": ["text"], "description": "Natural language description of this aspect" },
+        { "name": "data", "dataType": ["text"], "description": "JSON-encoded structured data" },
+        { "name": "confidence", "dataType": ["number"], "description": "Confidence score 0-1" },
+        { "name": "observationCount", "dataType": ["int"], "description": "Number of observations supporting this" },
+        { "name": "updatedAt", "dataType": ["date"], "description": "Last updated" }
+      ]
+    },
+    {
+      "class": "BusinessIntelligence",
+      "description": "Org-level patterns and business knowledge embeddings",
+      "vectorizer": "none",
+      "properties": [
+        { "name": "tenantId", "dataType": ["text"], "description": "Tenant identifier" },
+        { "name": "category", "dataType": ["text"], "description": "customer_patterns, revenue_cycles, team_dynamics, vendor_relationships" },
+        { "name": "entity", "dataType": ["text"], "description": "The business entity this relates to (person, company, process)" },
+        { "name": "insight", "dataType": ["text"], "description": "Natural language insight" },
+        { "name": "data", "dataType": ["text"], "description": "JSON-encoded supporting data" },
+        { "name": "confidence", "dataType": ["number"], "description": "Confidence score 0-1" },
+        { "name": "createdAt", "dataType": ["date"], "description": "When this insight was generated" },
+        { "name": "updatedAt", "dataType": ["date"], "description": "Last updated" }
+      ]
+    }
+  ]
+}

@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { getRuntimeConfig } from '../../config-store.js';
 
-const GIO_WORKSPACE = process.env.BOSS_GIO_WORKSPACE ?? '/home/boss/outsiders/gio';
+const GIO_WORKSPACE = process.env.BOSS_GIO_WORKSPACE ?? '/home/tcntryprd/outsiders/gio';
 
 export async function overviewRoute(server: FastifyInstance): Promise<void> {
   server.get('/api/openclaw/overview', async (request, reply) => {
@@ -15,15 +15,24 @@ export async function overviewRoute(server: FastifyInstance): Promise<void> {
       memoryReady = false;
     }
 
+    const tenantId = request.tenant?.tenantId ?? 'default';
+    const readCodexConfig = async (key: string): Promise<string | null> => {
+      const tenantValue = await getRuntimeConfig(key, tenantId);
+      if (tenantValue !== null || tenantId === 'default') return tenantValue;
+      return getRuntimeConfig(key, 'default');
+    };
+
     const [codexStatus, codexCheckedAt, codexExitCode, codexStderrTail] = await Promise.all([
-      getRuntimeConfig('CODEX_CLI_STATUS', request.tenant?.tenantId ?? 'default'),
-      getRuntimeConfig('CODEX_CLI_LAST_CHECK_AT', request.tenant?.tenantId ?? 'default'),
-      getRuntimeConfig('CODEX_CLI_EXIT_CODE', request.tenant?.tenantId ?? 'default'),
-      getRuntimeConfig('CODEX_CLI_STDERR_TAIL', request.tenant?.tenantId ?? 'default'),
+      readCodexConfig('CODEX_CLI_STATUS'),
+      readCodexConfig('CODEX_CLI_LAST_CHECK_AT'),
+      readCodexConfig('CODEX_CLI_EXIT_CODE'),
+      readCodexConfig('CODEX_CLI_STDERR_TAIL'),
     ]);
 
+    const gateway = codexStatus === 'ready' ? 'live' : 'down';
+
     return reply.send({
-      gateway: 'live',
+      gateway,
       agent: { id: 'gio', model: process.env.CODEX_MODEL ?? 'codex-cli' },
       channels: [],
       memoryReady,

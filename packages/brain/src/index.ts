@@ -8,6 +8,7 @@ export { BrainRouter } from './router.js';
 
 // Adapters
 export { ClaudeCodeAdapter } from './adapters/claude-code.js';
+export { CodexCliAdapter } from './adapters/codex-cli.js';
 export { OpenAIAdapter } from './adapters/openai.js';
 export { GeminiAdapter } from './adapters/gemini.js';
 export { OpenClawAdapter } from './adapters/openclaw.js';

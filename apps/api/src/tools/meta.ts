@@ -14,6 +14,7 @@ import {
   fbListConversations, fbGetMessages, fbSendMessage, fbPublishPost,
   igPublishPost, threadsPublish, adsInsights, waCloudSend,
 } from '../lib/meta-graph.js';
+import { isUnipileConfigured, startUnipileWhatsAppChat } from '../lib/unipile.js';
 
 // ── Definitions ─────────────────────────────────────────────────────────────
 export const metaStatusTool: BrainTool = {
@@ -109,7 +110,7 @@ export const metaAdsInsightsTool: BrainTool = {
 
 export const metaWaSendTool: BrainTool = {
   name: 'meta_wa_send',
-  description: 'Send a WhatsApp Cloud API text message. Only works once a WhatsApp phone number is registered and live. to is an E.164 phone number without "+".',
+  description: 'Send a WhatsApp text message through the connected Unipile WhatsApp account. to is an E.164 phone number, with or without "+".',
   parameters: {
     type: 'object',
     properties: {
@@ -131,6 +132,8 @@ export const ALL_META_TOOLS: BrainTool[] = [
   metaAdsInsightsTool,
   metaWaSendTool,
 ];
+
+export const ALL_WHATSAPP_TOOLS: BrainTool[] = [metaWaSendTool];
 
 // ── Handlers ──────────────────────────────────────────────────────────────
 type Handler = (args: Record<string, unknown>) => Promise<string>;
@@ -232,12 +235,17 @@ async function handleAdsInsights(args: Record<string, unknown>): Promise<string>
 }
 
 async function handleWaSend(args: Record<string, unknown>): Promise<string> {
-  const c = await creds();
   const to = str(args.to);
   const text = str(args.text);
   if (!to || !text) return 'Error: to and text are required.';
+  if (isUnipileConfigured()) {
+    const sent = await startUnipileWhatsAppChat(to, text);
+    return `Sent WhatsApp message via Unipile to ${to}${sent.messageId ? ` (message_id ${sent.messageId})` : ''}.`;
+  }
+
+  const c = await creds();
   if (!c.whatsapp.phoneNumberId || !c.whatsapp.accessToken) {
-    return 'WhatsApp is not live yet — the phone number has not been registered to the Cloud API. This action is parked until go-live.';
+    return 'WhatsApp is not connected through Unipile yet. Connect WhatsApp in Settings -> Connections first.';
   }
   await waCloudSend(c, to.replace(/^\+/, ''), text);
   return `Sent WhatsApp Cloud message to ${to}.`;

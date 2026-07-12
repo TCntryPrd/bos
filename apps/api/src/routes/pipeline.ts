@@ -4,7 +4,7 @@
  * Orchestration backbone for the Little Rascals autonomous agent framework.
  * Persistence via Postgres; stage-transition logic delegates to pipeline-engine.ts.
  *
- * See /home/boss/BOSS_V2_MASTER_PLAN.md §Phase 1.
+ * See /home/tcntryprd/BOSS_V2_MASTER_PLAN.md §Phase 1.
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';

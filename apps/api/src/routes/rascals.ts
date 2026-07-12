@@ -57,14 +57,14 @@ export async function rascalsRoutes(server: FastifyInstance) {
    * Returns the most recently modified output files across every rascal,
    * formatted as activity entries for the dashboard's Live Activity feed.
    *
-   * Each rascal's outputs live at /home/boss/rascals/<handle>/output.
+   * Each rascal's outputs live at /home/tcntryprd/rascals/<handle>/output.
    * Inferred verb: ".md"/".txt" → "wrote", everything else → "produced".
    */
   server.get<{ Querystring: { limit?: string } }>(
     '/agents/rascals/recent-activity',
     async (request, reply) => {
       const limit = Math.min(Math.max(parseInt(request.query.limit ?? '10', 10) || 10, 1), 50);
-      const root = '/home/boss/rascals';
+      const root = '/home/tcntryprd/rascals';
       const entries: Array<{
         agent: string; filename: string; path: string; mtime: string; sizeBytes: number; action: string;
       }> = [];

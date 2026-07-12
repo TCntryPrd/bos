@@ -47,8 +47,7 @@ export function NewThreadModal({ open, onClose, onCreate }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="w-[420px] rounded-xl border border-border p-5 flex flex-col gap-4"
-        style={{ background: 'linear-gradient(180deg, rgba(26,31,48,0.95), rgba(14,18,30,0.98))' }}
+        className="aios-panel w-[420px] p-5 flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between">
@@ -68,7 +67,7 @@ export function NewThreadModal({ open, onClose, onCreate }: Props) {
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
             placeholder="e.g. Demo prep"
-            className="px-3 py-2 rounded-md bg-surface-2/60 border border-border text-text-primary text-[12.5px] focus:outline-none focus:border-accent/60"
+            className="input text-[12.5px]"
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -76,7 +75,7 @@ export function NewThreadModal({ open, onClose, onCreate }: Props) {
           <select
             value={workspaceDir}
             onChange={(e) => setWorkspaceDir(e.target.value)}
-            className="px-3 py-2 rounded-md bg-surface-2/60 border border-border text-text-primary text-[12.5px] focus:outline-none focus:border-accent/60"
+            className="input text-[12.5px]"
           >
             {workspaces.map((w) => (
               <option key={w.path} value={w.path}>
@@ -90,13 +89,13 @@ export function NewThreadModal({ open, onClose, onCreate }: Props) {
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded-md text-[12px] text-text-muted hover:text-text-primary border border-border"
+            className="btn-ghost text-xs"
           >Cancel</button>
           <button
             type="button"
             onClick={() => void submit()}
             disabled={!name.trim() || !workspaceDir || submitting}
-            className="px-3.5 py-1.5 rounded-md text-[12px] font-semibold text-[#0a0c12] disabled:opacity-50"
+            className="btn-primary text-xs disabled:opacity-50"
             style={{ background: 'linear-gradient(135deg, #b56cff 0%, #5cc8ff 100%)' }}
           >{submitting ? 'Creating…' : 'Create'}</button>
         </div>

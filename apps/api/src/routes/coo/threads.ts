@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getPool } from '../../db.js';
 
-const DEFAULT_HOME = '/home/boss';
+const DEFAULT_HOME = '/home/tcntryprd';
 const HOME = (): string => process.env.BOSS_HOME_OVERRIDE ?? DEFAULT_HOME;
 const COO_MD_PATH = (): string => join(HOME(), 'boss-dev/docs/COO.md');
 

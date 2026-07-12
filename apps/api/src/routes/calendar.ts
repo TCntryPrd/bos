@@ -210,6 +210,55 @@ async function _getEventsForCalendar(
     }));
 }
 
+export async function getCalendarEventsForRange(
+  start: string,
+  end: string,
+  accountsFilter?: string,
+): Promise<{ events: CalendarEvent[]; accounts: string[] }> {
+  let allAccounts = await _getAllGoogleAccounts();
+
+  if (accountsFilter) {
+    const filterSet = new Set(accountsFilter.split(',').map((e) => e.trim().toLowerCase()));
+    allAccounts = allAccounts.filter((a) => filterSet.has(a.email.toLowerCase()));
+  }
+
+  const timeMin = start.includes('T') ? start : `${start}T00:00:00Z`;
+  const timeMax = end.includes('T') ? end : `${end}T23:59:59Z`;
+  const allEvents: CalendarEvent[] = [];
+  const accountEmails: string[] = [];
+
+  await Promise.allSettled(
+    allAccounts.map(async (account) => {
+      accountEmails.push(account.email);
+      const calendars = await _getCalendarsForAccount(account);
+      const calendarEvents = await Promise.allSettled(
+        calendars.map((cal) =>
+          _getEventsForCalendar(account, cal.id, cal.summary ?? cal.id, timeMin, timeMax),
+        ),
+      );
+      for (const result of calendarEvents) {
+        if (result.status === 'fulfilled') allEvents.push(...result.value);
+      }
+    }),
+  );
+
+  const seenKeys = new Set<string>();
+  const dedupedEvents = allEvents.filter((e) => {
+    const key = `${(e.summary || '').trim().toLowerCase()}|${e.start}|${e.end}`;
+    if (seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    return true;
+  });
+
+  dedupedEvents.sort((a, b) => {
+    const aTime = new Date(a.start).getTime();
+    const bTime = new Date(b.start).getTime();
+    return aTime - bTime;
+  });
+
+  return { events: dedupedEvents, accounts: accountEmails };
+}
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 export async function calendarRoutes(server: FastifyInstance) {
@@ -241,84 +290,18 @@ export async function calendarRoutes(server: FastifyInstance) {
       },
     },
     async (
-      request: FastifyRequest<{ Querystring: { start: string; end: string; accounts?: string } }>,
+      _request: FastifyRequest<{ Querystring: { start: string; end: string; accounts?: string } }>,
       reply: FastifyReply,
     ) => {
-      const { start, end, accounts: accountsFilter } = request.query;
+      const { start, end, accounts: accountsFilter } = _request.query;
 
-      let allAccounts: Awaited<ReturnType<typeof _getAllGoogleAccounts>>;
       try {
-        allAccounts = await _getAllGoogleAccounts();
+        const result = await getCalendarEventsForRange(start, end, accountsFilter);
+        return reply.status(200).send(result);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return reply.status(503).send({ error: 'Failed to load Google accounts', message: msg });
       }
-
-      if (allAccounts.length === 0) {
-        return reply.status(200).send({ events: [], accounts: [] });
-      }
-
-      // Filter to specific accounts if requested
-      if (accountsFilter) {
-        const filterSet = new Set(accountsFilter.split(',').map((e) => e.trim().toLowerCase()));
-        allAccounts = allAccounts.filter((a) => filterSet.has(a.email.toLowerCase()));
-      }
-
-      // Ensure ISO format with timezone
-      const timeMin = start.includes('T') ? start : `${start}T00:00:00Z`;
-      const timeMax = end.includes('T') ? end : `${end}T23:59:59Z`;
-
-      const allEvents: CalendarEvent[] = [];
-      const accountEmails: string[] = [];
-
-      // Fetch events for each account in parallel
-      const results = await Promise.allSettled(
-        allAccounts.map(async (account) => {
-          accountEmails.push(account.email);
-          const calendars = await _getCalendarsForAccount(account);
-          const calendarEvents = await Promise.allSettled(
-            calendars.map((cal) =>
-              _getEventsForCalendar(account, cal.id, cal.summary ?? cal.id, timeMin, timeMax),
-            ),
-          );
-          for (const result of calendarEvents) {
-            if (result.status === 'fulfilled') {
-              allEvents.push(...result.value);
-            }
-          }
-        }),
-      );
-
-      // Log any account-level failures
-      for (let i = 0; i < results.length; i++) {
-        if (results[i].status === 'rejected') {
-          const reason = (results[i] as PromiseRejectedResult).reason;
-          request.log.warn({ email: allAccounts[i]?.email, error: String(reason) }, 'calendar: failed to fetch events for account');
-        }
-      }
-
-      // Dedupe the SAME event appearing across many calendars/accounts (a shared
-      // meeting on 15 calendars should show once, not 15×). Key on summary+start+end;
-      // keep the first copy (preserves an account/calendar attribution).
-      const seenKeys = new Set<string>();
-      const dedupedEvents = allEvents.filter((e) => {
-        const key = `${(e.summary || '').trim().toLowerCase()}|${e.start}|${e.end}`;
-        if (seenKeys.has(key)) return false;
-        seenKeys.add(key);
-        return true;
-      });
-
-      // Sort by start time
-      dedupedEvents.sort((a, b) => {
-        const aTime = new Date(a.start).getTime();
-        const bTime = new Date(b.start).getTime();
-        return aTime - bTime;
-      });
-
-      return reply.status(200).send({
-        events: dedupedEvents,
-        accounts: accountEmails,
-      });
     },
   );
 

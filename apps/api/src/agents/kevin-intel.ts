@@ -40,7 +40,7 @@ async function analyzeEmailPatterns(): Promise<string[]> {
     let currentTo = '';
 
     for (const line of lines) {
-      if (line.includes('From:') && line.includes('d.caine@dcaine.com')) continue;
+      if (line.includes('From:') && line.includes('the-principal@example.com')) continue;
       if (line.trim().startsWith('From:')) {
         currentTo = line.replace(/.*From:\s*/, '').trim();
       }

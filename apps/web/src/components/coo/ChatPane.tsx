@@ -86,7 +86,7 @@ export function ChatPane({ thread }: Props) {
 
   if (!thread) {
     return (
-      <section className="rounded-xl border border-border flex items-center justify-center text-text-muted text-[12.5px]">
+      <section className="aios-panel flex items-center justify-center text-text-muted text-[12.5px]">
         Pick or create a thread to start.
       </section>
     );
@@ -94,7 +94,7 @@ export function ChatPane({ thread }: Props) {
 
   return (
     <section
-      className="rounded-xl border border-border overflow-hidden flex flex-col min-h-0 min-w-0"
+      className="aios-panel overflow-hidden flex flex-col min-h-0 min-w-0"
       style={{ background: 'linear-gradient(180deg, rgba(26,31,48,0.5), rgba(14,18,30,0.75))', backdropFilter: 'blur(18px)' }}
     >
       <header className="px-4 py-2.5 border-b border-border flex items-center gap-3">
@@ -182,7 +182,7 @@ export function ChatPane({ thread }: Props) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
-            placeholder="Talk to BOS · bypass mode is on (Shift+Enter for newline)"
+            placeholder="Talk to BOS"
             rows={1}
             className="flex-1 min-w-0 px-3 py-2 rounded-md bg-surface-2/60 border border-border text-text-primary text-[12.5px] placeholder:text-text-muted focus:outline-none focus:border-accent/60 resize-none leading-relaxed"
             style={{ maxHeight: '160px', overflowY: 'auto', wordBreak: 'break-word', overflowWrap: 'anywhere' }}

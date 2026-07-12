@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { MessageSquare, X, Send, Sparkles, Trash2 } from 'lucide-react';
-import { streamCooChat } from '../coo/streamCooChat.js';
-import { getGeneralThreadId } from '../coo/generalThread.js';
+import { streamOfficeEaChat } from './officeOrbChat.js';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -81,8 +80,7 @@ function readPanelSize(): PanelSize {
 export function BossOrb() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>(() => {
-    // Persist the visible chat log so it survives reloads/navigation — purely a
-    // viewing convenience; the COO backend session is one-shot regardless.
+    // Persist the visible chat log so it survives reloads/navigation.
     try {
       const raw = localStorage.getItem(CHAT_LOG_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
@@ -180,17 +178,11 @@ export function BossOrb() {
     setLoading(true);
 
     try {
-      // Same COO "General Discussion" session as Voice + the COO surface — runs on
-      // the COO Claude CLI with full tools, so it actually executes (not narrates).
-      const threadId = await getGeneralThreadId();
-      const authToken = localStorage.getItem('boss_token') ?? undefined;
       let streamed = '';
-      await streamCooChat({
-        threadId,
+      await streamOfficeEaChat({
         message: text,
-        authToken,
         onAssistantText: (agg) => { streamed = agg; setLastAssistant(agg); },
-        onError: (m) => setLastAssistant(streamed || `Sorry — ${m}`),
+        onError: (m) => setLastAssistant(streamed || `Sorry - ${m}`),
       });
       if (!streamed) setLastAssistant('Done.');
     } catch (err) {
@@ -323,9 +315,9 @@ export function BossOrb() {
           {/* Header */}
           <div className="p-4 border-b border-border flex items-start justify-between gap-2">
             <div>
-              <h3 className="text-lg font-semibold text-text-primary">COO Assistant</h3>
+              <h3 className="text-lg font-semibold text-text-primary">Office EA</h3>
               <p className="text-sm text-text-secondary">
-                General Discussion · acts with full tools
+                Shared Office conversation
               </p>
             </div>
             <button

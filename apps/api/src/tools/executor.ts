@@ -15,10 +15,11 @@
  */
 
 import crypto from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { getPool } from '../db.js';
 import { getRegistry, getUsageRollup } from '../lib/google-registry.js';
 import { executeWeaviateTool } from './weaviate.js';
+import { executeMiroTool } from './miro.js';
+import { gateToolCall, recordExecuted, type ToolCtx } from './risk.js';
 import { executeEraTool } from './era.js';
 import { executeFinanceTool } from './finance.js';
 import { executeCtoTool } from './cto.js';
@@ -27,6 +28,10 @@ import { executeCrmSync, executeCrmMetrics } from './crm-sync.js';
 import { handleVoiceRouteAgent, handleVoiceListAgents, handleVoiceNavigate, handleUICommand } from './voice-agents.js';
 import { handleTaskList, handleTaskCreate, handleTaskAdvance } from './pipeline.js';
 import { handleBackupStatus } from './backup-status.js';
+import {
+  handleHealthAnomalies, handleHealthBrief, handleHealthJournal,
+  handleHealthMedicalRecords, handleHealthSummary,
+} from './health.js';
 import { handleHostStatus } from './host-status.js';
 import { handleSelfIdentity, handleSelfReflect, handleSelfGoals } from './self-identity.js';
 import { handleHostApt, handleHostSystemctl, handleHostCron, handleAdminAuditLog } from './host-management.js';
@@ -36,6 +41,11 @@ import { handleTasksMove, handleTasksAdvance, handleTasksBlock } from './kanban-
 import { META_TOOL_HANDLERS } from './meta.js';
 import { LINKEDIN_TOOL_HANDLERS } from './linkedin.js';
 import { EMAIL_DRAFT_TOOL_HANDLERS } from './email-drafts.js';
+import { VALIDATOR_TOOL_HANDLERS } from './validator.js';
+import { TRIAGE_TOOL_HANDLERS } from './triage-reason.js';
+import { FINANCIAL_TOOL_HANDLERS } from './financial-reason.js';
+import { AGENT_EVAL_TOOL_HANDLERS } from './agent-evals.js';
+import { CLIENT_ROUTING_TOOL_HANDLERS } from './client-routing.js';
 
 // ── Result size limits ────────────────────────────────────────────────────────
 // These prevent individual tool results or accumulated results from bloating
@@ -118,7 +128,7 @@ function encryptToken(plaintext: string): string {
  * original single-account behaviour).
  *
  * Multi-account usage: pass google_account in tool args to target a specific
- * Google account (e.g. "kevin@starrpartners.ai" vs "d.caine@dcaine.com").
+ * Google account (when multiple accounts are connected).
  */
 async function getGoogleToken(email?: string): Promise<StoredToken> {
   const pool = getPool();
@@ -438,13 +448,10 @@ async function fetchGmailMessage(token: StoredToken, id: string): Promise<GmailM
 
 // Human labels per inbox so the model applies the right per-account rules + never
 // conflates the 5 separate mailboxes.
-const ACCOUNT_LABELS: Record<string, string> = {
-  'kevin@starrpartners.ai': 'Starr & Partners (business)',
-  'd.caine@dcaine.com': 'D. Caine Solutions (business)',
-  'kevinstarr@industryrockstar.com': 'Industry Rockstar (CLIENT-FACING — caution)',
-  'absoluterecoverybureau@gmail.com': 'ARB (personal)',
-  'travelcraft.dc@gmail.com': 'TravelCraft (personal)',
-};
+const ACCOUNT_LABELS: Record<string, string> = (() => {
+  // Per-install inbox labels, e.g. BOSS_ACCOUNT_LABELS='{"me@example.com":"Primary (business)"}'
+  try { return JSON.parse(process.env.BOSS_ACCOUNT_LABELS || '{}') as Record<string, string>; } catch { return {}; }
+})();
 
 /** List every connected Google account email (for multi-inbox aggregation). */
 async function listGoogleAccountEmails(): Promise<string[]> {
@@ -697,6 +704,47 @@ async function handleGmailMarkRead(args: Record<string, unknown>): Promise<strin
   return `Marked message ${messageId} as read`;
 }
 
+const GMAIL_SYSTEM_LABELS = new Set([
+  'INBOX', 'UNREAD', 'STARRED', 'IMPORTANT', 'SPAM', 'TRASH', 'SENT', 'DRAFT', 'CHAT',
+  'CATEGORY_PERSONAL', 'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS',
+]);
+
+/**
+ * Gmail's modify API takes label IDs, not names. Custom labels like "Processed" or
+ * "needs-reply" have IDs like "Label_42", so passing the NAME silently fails. This
+ * resolves each name to its ID (case-insensitive), creating the label if it doesn't
+ * exist yet (only when `create` is true — i.e. for add, not remove).
+ */
+async function resolveLabelIds(
+  names: string[], token: StoredToken, create: boolean,
+): Promise<{ ids: string[]; token: StoredToken; missing: string[] }> {
+  const ids: string[] = [];
+  const missing: string[] = [];
+  let tok = token;
+  let list: Array<{ id: string; name: string }> | null = null;
+  for (const raw of names) {
+    const name = String(raw).trim();
+    if (!name) continue;
+    if (GMAIL_SYSTEM_LABELS.has(name) || /^Label_/.test(name)) { ids.push(name); continue; }
+    if (!list) {
+      const r = await googleFetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', tok);
+      tok = r.token;
+      list = ((r.data as { labels?: Array<{ id: string; name: string }> }).labels ?? []);
+    }
+    let found = list.find((l) => l.name === name) ?? list.find((l) => l.name.toLowerCase() === name.toLowerCase());
+    if (!found && create) {
+      const c = await googleFetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', tok, {
+        method: 'POST', body: { name, labelListVisibility: 'labelShow', messageListVisibility: 'show' },
+      });
+      tok = c.token;
+      found = c.data as { id: string; name: string };
+      list.push(found);
+    }
+    if (found) ids.push(found.id); else missing.push(name);
+  }
+  return { ids, token: tok, missing };
+}
+
 async function handleGmailLabel(args: Record<string, unknown>): Promise<string> {
   const messageId = String(args.message_id ?? '');
   const addLabels = (args.add_labels as string[] | undefined) ?? [];
@@ -704,10 +752,17 @@ async function handleGmailLabel(args: Record<string, unknown>): Promise<string> 
   if (!messageId) return 'Error: message_id is required';
   if (addLabels.length === 0 && removeLabels.length === 0) return 'Error: provide add_labels or remove_labels';
 
-  const token = await getGoogleToken(args.google_account as string | undefined);
+  let token = await getGoogleToken(args.google_account as string | undefined);
+  // Resolve names -> IDs (create on add, skip-if-missing on remove).
+  const addRes = addLabels.length ? await resolveLabelIds(addLabels, token, true) : { ids: [], token, missing: [] };
+  token = addRes.token;
+  const remRes = removeLabels.length ? await resolveLabelIds(removeLabels, token, false) : { ids: [], token, missing: [] };
+  token = remRes.token;
+
   const body: Record<string, string[]> = {};
-  if (addLabels.length > 0) body.addLabelIds = addLabels;
-  if (removeLabels.length > 0) body.removeLabelIds = removeLabels;
+  if (addRes.ids.length > 0) body.addLabelIds = addRes.ids;
+  if (remRes.ids.length > 0) body.removeLabelIds = remRes.ids;
+  if (Object.keys(body).length === 0) return `No labels applied to ${messageId} (none resolved).`;
 
   await googleFetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`,
@@ -768,7 +823,7 @@ const QUICK_ACK_MAX_CHARS = 600;
 // Inboxes that must NEVER auto-send (client-facing). quick-ack is refused for
 // these accounts — the agent must draft and leave the send to a human. This is
 // a hard, code-level backstop to the agent-prompt rule.
-const NO_AUTOSEND_DOMAINS = ['@industryrockstar.com'];
+const NO_AUTOSEND_DOMAINS = (process.env.BOSS_NO_AUTOSEND_DOMAINS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 async function handleGmailDraft(args: Record<string, unknown>): Promise<string> {
   const toList = ((args.to as string[] | undefined) ?? []).map((e) => e.trim()).filter(Boolean);
@@ -805,6 +860,10 @@ async function handleGmailDraftReply(args: Record<string, unknown>): Promise<str
   const token = await getGoogleToken(args.google_account as string | undefined);
   const original = await fetchGmailMessageFull(token, messageId);
   const origFrom = gmailHeader(original, 'From');
+  const automatedSenderRe = /noreply|no-reply|donotreply|do-not-reply|automated|mailer-daemon|postmaster|bounce@|notifications@|alerts@/i;
+  if (automatedSenderRe.test(origFrom)) {
+    return `Refused: ${origFrom} is an automated sender — no draft created. Automated emails do not need replies.`;
+  }
   const origSubject = gmailHeader(original, 'Subject');
   const origMessageId = gmailHeader(original, 'Message-ID') || gmailHeader(original, 'Message-Id');
   const replySubject = origSubject.startsWith('Re:') ? origSubject : `Re: ${origSubject}`;
@@ -3757,6 +3816,429 @@ async function handleStripeCreateInvoice(args: Record<string, unknown>): Promise
   ].join('\n');
 }
 
+// ── QuickBooks Online helpers ─────────────────────────────────────────────────
+//
+// QuickBooks is the accounting source of truth (CRM-mirrored customers,
+// business + personal bank accounts). Auth is OAuth2 with rotating refresh
+// tokens — token lifecycle lives in quickbooks-auth.ts; handlers here only
+// ask for a live connection. Tool schemas are in quickbooks.ts.
+//
+// All requests pin minorversion=75 (Intuit's mandatory floor since Aug 2025).
+
+import { getQboConnection, forceQboRefresh } from './quickbooks-auth.js';
+
+const QBO_MINOR_VERSION = '75';
+
+async function qboFetch(
+  path: string,
+  params: Record<string, string | undefined> = {},
+): Promise<unknown> {
+  let conn = await getQboConnection();
+
+  const doFetch = (accessToken: string, base: string, realmId: string) => {
+    const search = new URLSearchParams({ minorversion: QBO_MINOR_VERSION });
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined) search.set(k, v);
+    }
+    const url = `${base}/v3/company/${realmId}${path}?${search.toString()}`;
+    return fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    });
+  };
+
+  let res = await doFetch(conn.accessToken, conn.base, conn.realmId);
+  if (res.status === 401) {
+    // Access token revoked or expired ahead of its stored expiry — refresh once and retry.
+    conn = await forceQboRefresh();
+    res = await doFetch(conn.accessToken, conn.base, conn.realmId);
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    let errMsg = `QuickBooks API error (${res.status}): ${text.slice(0, 300)}`;
+    try {
+      const parsed = JSON.parse(text) as {
+        Fault?: { Error?: Array<{ Message?: string; Detail?: string }> };
+      };
+      const first = parsed.Fault?.Error?.[0];
+      if (first?.Message) {
+        errMsg = `QuickBooks error: ${first.Message}${first.Detail ? ` — ${first.Detail}` : ''}`;
+      }
+    } catch {
+      /* use raw text */
+    }
+    throw new Error(errMsg);
+  }
+  return res.json();
+}
+
+/** QBO amounts are decimal dollars (unlike Stripe's cents). */
+function fmtQboMoney(amount: number | string | undefined, currency = 'USD'): string {
+  const n = typeof amount === 'string' ? parseFloat(amount) : amount ?? 0;
+  if (Number.isNaN(n)) return String(amount);
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+  }).format(n);
+}
+
+/** Validate a YYYY-MM-DD arg before it is spliced into a QBO query string. */
+function qboDate(value: unknown): string | undefined {
+  const s = typeof value === 'string' ? value.trim() : '';
+  if (!s) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    throw new Error(`Invalid date "${s}" — use YYYY-MM-DD.`);
+  }
+  return s;
+}
+
+/**
+ * Escape a text value for splicing into a QBO query string: backslash-escape
+ * quotes/backslashes (QBO grammar: CompanyName = 'Adam\'s Candy Shop') and
+ * strip only % — QBO's sole LIKE wildcard. Underscore is a literal in QBO
+ * LIKE, so names like "ACME_LLC" must survive intact.
+ */
+function qboSafeText(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/%/g, '')
+    .trim();
+}
+
+/**
+ * Today's date (YYYY-MM-DD) in the company's timezone — QBO dates like
+ * DueDate are company-local calendar dates, so comparing against the UTC
+ * date would flag invoices overdue hours early in US timezones.
+ */
+function qboLocalDate(msOffset = 0): string {
+  const tz = process.env.QB_COMPANY_TIMEZONE || 'America/New_York';
+  // en-CA locale formats as YYYY-MM-DD
+  return new Date(Date.now() + msOffset).toLocaleDateString('en-CA', { timeZone: tz });
+}
+
+interface QboQueryResponse {
+  QueryResponse?: Record<string, unknown>;
+}
+
+/** Extract the entity array from a QueryResponse (its key varies by entity). */
+function qboEntities<T>(data: QboQueryResponse): { name: string; rows: T[] } {
+  const qr = data.QueryResponse ?? {};
+  for (const [key, value] of Object.entries(qr)) {
+    if (Array.isArray(value)) return { name: key, rows: value as T[] };
+  }
+  return { name: '', rows: [] };
+}
+
+// Report JSON is a Header/Columns/Rows tree with nested Section rows —
+// walk it into indented "label | col | col" lines.
+interface QboReportColData {
+  value?: string;
+}
+interface QboReportRow {
+  type?: string;
+  ColData?: QboReportColData[];
+  Header?: { ColData?: QboReportColData[] };
+  Summary?: { ColData?: QboReportColData[] };
+  Rows?: { Row?: QboReportRow[] };
+}
+interface QboReport {
+  Header?: {
+    ReportName?: string;
+    StartPeriod?: string;
+    EndPeriod?: string;
+    ReportBasis?: string;
+  };
+  Columns?: { Column?: Array<{ ColTitle?: string }> };
+  Rows?: { Row?: QboReportRow[] };
+}
+
+function renderQboReportRows(rows: QboReportRow[] | undefined, depth: number, out: string[]): void {
+  for (const row of rows ?? []) {
+    const indent = '  '.repeat(depth);
+    if (row.Header?.ColData) {
+      out.push(indent + row.Header.ColData.map((c) => c.value ?? '').join(' | ').trimEnd());
+    }
+    if (row.ColData) {
+      out.push(indent + row.ColData.map((c) => c.value ?? '').join(' | ').trimEnd());
+    }
+    if (row.Rows?.Row) {
+      renderQboReportRows(row.Rows.Row, depth + 1, out);
+    }
+    if (row.Summary?.ColData) {
+      out.push(indent + row.Summary.ColData.map((c) => c.value ?? '').join(' | ').trimEnd());
+    }
+  }
+}
+
+function renderQboReport(report: QboReport): string {
+  const lines: string[] = [];
+  const h = report.Header;
+  if (h?.ReportName) {
+    const period = h.StartPeriod && h.EndPeriod ? ` (${h.StartPeriod} → ${h.EndPeriod})` : '';
+    const basis = h.ReportBasis ? ` [${h.ReportBasis} basis]` : '';
+    lines.push(`${h.ReportName}${period}${basis}`);
+  }
+  const colTitles = (report.Columns?.Column ?? [])
+    .map((c) => c.ColTitle ?? '')
+    .filter((t) => t.length > 0);
+  if (colTitles.length > 1) {
+    lines.push(colTitles.join(' | '));
+  }
+  lines.push('');
+  renderQboReportRows(report.Rows?.Row, 0, lines);
+  const text = lines.join('\n').trim();
+  return text.length > 0 ? text : 'Report returned no rows.';
+}
+
+// ── QuickBooks Online handlers ────────────────────────────────────────────────
+
+interface QboCompanyInfo {
+  CompanyName?: string;
+  LegalName?: string;
+  CompanyStartDate?: string;
+  FiscalYearStartMonth?: string;
+  Country?: string;
+  CompanyAddr?: { City?: string; CountrySubDivisionCode?: string };
+  Email?: { Address?: string };
+}
+
+async function handleQboCompanyInfo(): Promise<string> {
+  const data = (await qboFetch('/query', {
+    query: 'SELECT * FROM CompanyInfo',
+  })) as QboQueryResponse;
+  const { rows } = qboEntities<QboCompanyInfo>(data);
+  const info = rows[0];
+  if (!info) return 'No company info returned — is a QuickBooks company connected?';
+
+  const env = process.env.QB_ENVIRONMENT === 'production' ? 'production' : 'sandbox';
+  const lines = [
+    `QuickBooks company: ${info.CompanyName ?? '(unnamed)'} [${env}]`,
+  ];
+  if (info.LegalName && info.LegalName !== info.CompanyName) lines.push(`Legal name: ${info.LegalName}`);
+  if (info.CompanyStartDate) lines.push(`Company start date: ${info.CompanyStartDate}`);
+  if (info.FiscalYearStartMonth) lines.push(`Fiscal year starts: ${info.FiscalYearStartMonth}`);
+  if (info.CompanyAddr?.City) {
+    lines.push(`Location: ${info.CompanyAddr.City}${info.CompanyAddr.CountrySubDivisionCode ? ', ' + info.CompanyAddr.CountrySubDivisionCode : ''}`);
+  }
+  if (info.Email?.Address) lines.push(`Email: ${info.Email.Address}`);
+  return lines.join('\n');
+}
+
+async function handleQboProfitAndLoss(args: Record<string, unknown>): Promise<string> {
+  const start = qboDate(args.start_date);
+  const end = qboDate(args.end_date);
+  const params: Record<string, string | undefined> = {
+    accounting_method: args.accounting_method as string | undefined,
+  };
+  if (start) params.start_date = start;
+  if (end) params.end_date = end;
+  if (!start && !end) params.date_macro = 'This Fiscal Year-to-date';
+  const summarizeBy = args.summarize_by as string | undefined;
+  if (summarizeBy) params.summarize_column_by = summarizeBy;
+
+  const report = (await qboFetch('/reports/ProfitAndLoss', params)) as QboReport;
+  return renderQboReport(report);
+}
+
+async function handleQboListTransactions(args: Record<string, unknown>): Promise<string> {
+  const start = qboDate(args.start_date);
+  const end = qboDate(args.end_date);
+  const params: Record<string, string | undefined> = {};
+  if (start) params.start_date = start;
+  if (end) params.end_date = end;
+  if (!start && !end) params.date_macro = 'This Month-to-date';
+
+  const report = (await qboFetch('/reports/TransactionList', params)) as QboReport;
+  return renderQboReport(report);
+}
+
+interface QboInvoice {
+  DocNumber?: string;
+  TxnDate?: string;
+  DueDate?: string;
+  TotalAmt?: number;
+  Balance?: number;
+  CustomerRef?: { name?: string };
+  CurrencyRef?: { value?: string };
+}
+
+async function handleQboListInvoices(args: Record<string, unknown>): Promise<string> {
+  const limit = Math.min(Math.max(Number(args.limit ?? 25), 1), 100);
+  const unpaidOnly = args.unpaid_only === true;
+  const since = qboDate(args.since);
+
+  const where: string[] = [];
+  if (unpaidOnly) where.push(`Balance > '0'`);
+  if (since) where.push(`TxnDate >= '${since}'`);
+  const query =
+    `SELECT * FROM Invoice` +
+    (where.length > 0 ? ` WHERE ${where.join(' AND ')}` : '') +
+    ` ORDERBY TxnDate DESC MAXRESULTS ${limit}`;
+
+  const data = (await qboFetch('/query', { query })) as QboQueryResponse;
+  const { rows } = qboEntities<QboInvoice>(data);
+  if (rows.length === 0) {
+    return unpaidOnly ? 'No unpaid QuickBooks invoices found.' : 'No QuickBooks invoices found.';
+  }
+
+  const today = qboLocalDate();
+  const lines: string[] = [`QuickBooks invoices — ${rows.length} result${rows.length !== 1 ? 's' : ''}:\n`];
+  for (const inv of rows) {
+    const currency = inv.CurrencyRef?.value ?? 'USD';
+    const balance = inv.Balance ?? 0;
+    const status =
+      balance <= 0 ? 'PAID' : inv.DueDate && inv.DueDate < today ? 'OVERDUE' : 'OPEN';
+    lines.push(`• Invoice ${inv.DocNumber ?? '(no number)'} — ${inv.CustomerRef?.name ?? '(no customer)'}`);
+    lines.push(`  Date: ${inv.TxnDate ?? '?'}  Due: ${inv.DueDate ?? '?'}  Status: ${status}`);
+    lines.push(`  Total: ${fmtQboMoney(inv.TotalAmt, currency)}  Balance due: ${fmtQboMoney(balance, currency)}`);
+    lines.push('');
+  }
+  return lines.join('\n').trim();
+}
+
+interface QboCustomer {
+  DisplayName?: string;
+  CompanyName?: string;
+  Balance?: number;
+  PrimaryEmailAddr?: { Address?: string };
+  CurrencyRef?: { value?: string };
+}
+
+async function handleQboListCustomers(args: Record<string, unknown>): Promise<string> {
+  const limit = Math.min(Math.max(Number(args.limit ?? 25), 1), 100);
+  const nameContains = qboSafeText(args.name_contains);
+
+  const where: string[] = ['Active = true'];
+  if (nameContains) where.push(`DisplayName LIKE '%${nameContains}%'`);
+  const query =
+    `SELECT * FROM Customer WHERE ${where.join(' AND ')} ORDERBY DisplayName MAXRESULTS ${limit}`;
+
+  const data = (await qboFetch('/query', { query })) as QboQueryResponse;
+  const { rows } = qboEntities<QboCustomer>(data);
+  if (rows.length === 0) {
+    return nameContains
+      ? `No QuickBooks customers found matching "${nameContains}".`
+      : 'No QuickBooks customers found.';
+  }
+
+  const lines: string[] = [`QuickBooks customers — ${rows.length} result${rows.length !== 1 ? 's' : ''}:\n`];
+  for (const c of rows) {
+    lines.push(`• ${c.DisplayName ?? '(no name)'}`);
+    if (c.CompanyName && c.CompanyName !== c.DisplayName) lines.push(`  Company: ${c.CompanyName}`);
+    if (c.PrimaryEmailAddr?.Address) lines.push(`  Email: ${c.PrimaryEmailAddr.Address}`);
+    if (c.Balance && c.Balance !== 0) {
+      lines.push(`  Open balance: ${fmtQboMoney(c.Balance, c.CurrencyRef?.value ?? 'USD')}`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n').trim();
+}
+
+interface QboPurchase {
+  TxnDate?: string;
+  TotalAmt?: number;
+  PaymentType?: string;
+  PrivateNote?: string;
+  EntityRef?: { name?: string };
+  AccountRef?: { name?: string };
+  CurrencyRef?: { value?: string };
+  Line?: Array<{
+    AccountBasedExpenseLineDetail?: { AccountRef?: { name?: string } };
+  }>;
+}
+
+async function handleQboListExpenses(args: Record<string, unknown>): Promise<string> {
+  const limit = Math.min(Math.max(Number(args.limit ?? 25), 1), 100);
+  const since = qboDate(args.since) ?? qboLocalDate(-30 * 24 * 60 * 60 * 1000);
+
+  const query = `SELECT * FROM Purchase WHERE TxnDate >= '${since}' ORDERBY TxnDate DESC MAXRESULTS ${limit}`;
+  const data = (await qboFetch('/query', { query })) as QboQueryResponse;
+  const { rows } = qboEntities<QboPurchase>(data);
+  if (rows.length === 0) return `No QuickBooks expenses found since ${since}.`;
+
+  const lines: string[] = [
+    `QuickBooks expenses since ${since} — ${rows.length} result${rows.length !== 1 ? 's' : ''}:\n`,
+  ];
+  for (const p of rows) {
+    const currency = p.CurrencyRef?.value ?? 'USD';
+    const categories = (p.Line ?? [])
+      .map((l) => l.AccountBasedExpenseLineDetail?.AccountRef?.name)
+      .filter((n): n is string => !!n)
+      .slice(0, 3);
+    lines.push(`• ${p.TxnDate ?? '?'} — ${p.EntityRef?.name ?? '(no payee)'} — ${fmtQboMoney(p.TotalAmt, currency)}`);
+    lines.push(`  Paid from: ${p.AccountRef?.name ?? '?'}${p.PaymentType ? ` (${p.PaymentType})` : ''}`);
+    if (categories.length > 0) lines.push(`  Category: ${categories.join(', ')}`);
+    if (p.PrivateNote) lines.push(`  Memo: ${p.PrivateNote.slice(0, 120)}`);
+    lines.push('');
+  }
+  return lines.join('\n').trim();
+}
+
+interface QboAccount {
+  Name?: string;
+  AccountType?: string;
+  AccountSubType?: string;
+  CurrentBalance?: number;
+  CurrencyRef?: { value?: string };
+}
+
+async function handleQboListAccounts(args: Record<string, unknown>): Promise<string> {
+  const accountType = qboSafeText(args.account_type);
+
+  const where: string[] = ['Active = true'];
+  if (accountType) where.push(`AccountType = '${accountType}'`);
+  const query = `SELECT * FROM Account WHERE ${where.join(' AND ')} MAXRESULTS 200`;
+
+  const data = (await qboFetch('/query', { query })) as QboQueryResponse;
+  const { rows } = qboEntities<QboAccount>(data);
+  if (rows.length === 0) {
+    return accountType
+      ? `No active QuickBooks accounts of type "${accountType}".`
+      : 'No active QuickBooks accounts found.';
+  }
+
+  // Group by AccountType, bank-ish types first — those carry the live balances.
+  const byType = new Map<string, QboAccount[]>();
+  for (const a of rows) {
+    const t = a.AccountType ?? 'Other';
+    if (!byType.has(t)) byType.set(t, []);
+    byType.get(t)!.push(a);
+  }
+  const typeOrder = (t: string) => (t === 'Bank' ? 0 : t === 'Credit Card' ? 1 : 2);
+  const sortedTypes = [...byType.keys()].sort((a, b) => typeOrder(a) - typeOrder(b) || a.localeCompare(b));
+
+  const lines: string[] = [`QuickBooks chart of accounts — ${rows.length} active account${rows.length !== 1 ? 's' : ''}:`];
+  for (const t of sortedTypes) {
+    lines.push(`\n${t}:`);
+    for (const a of byType.get(t)!) {
+      const balance =
+        a.CurrentBalance !== undefined && a.CurrentBalance !== 0
+          ? ` — ${fmtQboMoney(a.CurrentBalance, a.CurrencyRef?.value ?? 'USD')}`
+          : '';
+      lines.push(`  • ${a.Name ?? '(unnamed)'}${a.AccountSubType ? ` (${a.AccountSubType})` : ''}${balance}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+async function handleQboQuery(args: Record<string, unknown>): Promise<string> {
+  const query = String(args.query ?? '').trim();
+  if (!query) throw new Error('query is required');
+  if (!/^select\s/i.test(query)) throw new Error('Only SELECT statements are allowed.');
+  if (query.includes(';')) throw new Error('Semicolons are not allowed — pass a single SELECT statement.');
+
+  const data = (await qboFetch('/query', { query })) as QboQueryResponse;
+  const { name, rows } = qboEntities<Record<string, unknown>>(data);
+  if (!name || rows.length === 0) {
+    // COUNT(*) queries return a bare totalCount with no entity array
+    const totalCount = data.QueryResponse?.totalCount;
+    if (typeof totalCount === 'number') return `Count: ${totalCount}`;
+    return 'Query returned no results.';
+  }
+  return `${rows.length} ${name} result${rows.length !== 1 ? 's' : ''}:\n\n${JSON.stringify(rows, null, 1)}`;
+}
+
 // ── Sub-agent spawn handlers ──────────────────────────────────────────────────
 //
 // These handlers are invoked when the main brain calls boss_spawn_agent or
@@ -3781,6 +4263,7 @@ const SPAWN_TOOLS = ['boss_spawn_agent', 'boss_spawn_parallel'];
 
 const ROLE_DEFAULT_TOOLS: Record<AgentRole, string[]> = {
   researcher: [
+    ...SPAWN_TOOLS,
     'boss_calendar_today',
     'boss_calendar_upcoming',
     'boss_gmail_unread',
@@ -3801,6 +4284,7 @@ const ROLE_DEFAULT_TOOLS: Record<AgentRole, string[]> = {
     'boss_read_local_file',
   ],
   executor: [
+    ...SPAWN_TOOLS,
     'boss_gmail_archive',
     'boss_gmail_mark_read',
     'boss_gmail_label',
@@ -3819,6 +4303,7 @@ const ROLE_DEFAULT_TOOLS: Record<AgentRole, string[]> = {
     'boss_ha_run_automation',
   ],
   analyst: [
+    ...SPAWN_TOOLS,
     'boss_gmail_unread',
     'boss_gmail_search',
     'boss_gmail_read',
@@ -3837,8 +4322,17 @@ const ROLE_DEFAULT_TOOLS: Record<AgentRole, string[]> = {
     'boss_stripe_list_invoices',
     'boss_stripe_list_payments',
     'boss_stripe_get_balance',
+    'boss_qbo_company_info',
+    'boss_qbo_profit_and_loss',
+    'boss_qbo_list_transactions',
+    'boss_qbo_list_invoices',
+    'boss_qbo_list_customers',
+    'boss_qbo_list_expenses',
+    'boss_qbo_list_accounts',
+    'boss_qbo_query',
   ],
   writer: [
+    ...SPAWN_TOOLS,
     'boss_gmail_send',
     'boss_gmail_reply',
     'boss_gmail_archive',
@@ -3852,19 +4346,11 @@ const ROLE_DEFAULT_TOOLS: Record<AgentRole, string[]> = {
   ],
 };
 
-// WS-4: hard cap on parallel fan-out from a single boss_spawn_parallel call.
-const MAX_PARALLEL_SPAWN = 8;
-
 function resolveAllowedTools(role: AgentRole, toolsArg: unknown): string[] {
-  const requested =
-    Array.isArray(toolsArg) && toolsArg.length > 0
-      ? toolsArg.filter((t): t is string => typeof t === 'string')
-      : ROLE_DEFAULT_TOOLS[role];
-  // WS-4: a spawned sub-agent must NOT be able to spawn further agents — that is
-  // the unbounded-recursion / exponential-fan-out risk. Strip spawn tools from
-  // EVERY child grant, whether from role defaults or an explicit request, so the
-  // spawn tree is at most one level deep.
-  return requested.filter((t) => !SPAWN_TOOLS.includes(t));
+  if (Array.isArray(toolsArg) && toolsArg.length > 0) {
+    return toolsArg.filter((t): t is string => typeof t === 'string');
+  }
+  return ROLE_DEFAULT_TOOLS[role];
 }
 
 async function handleSpawnAgent(args: Record<string, unknown>): Promise<string> {
@@ -3910,16 +4396,12 @@ async function handleSpawnParallel(args: Record<string, unknown>): Promise<strin
     return 'boss_spawn_parallel: "agents" must be a non-empty array.';
   }
 
-  // WS-4: bound fan-out — never spawn more than MAX_PARALLEL_SPAWN in one call.
-  const cappedAgents = agentsArg.slice(0, MAX_PARALLEL_SPAWN);
-  const droppedCount = agentsArg.length - cappedAgents.length;
-
   const validRoles: AgentRole[] = ['researcher', 'executor', 'analyst', 'writer'];
   const specs: AgentSpec[] = [];
   const errors: string[] = [];
 
-  for (let i = 0; i < cappedAgents.length; i++) {
-    const entry = cappedAgents[i] as Record<string, unknown>;
+  for (let i = 0; i < agentsArg.length; i++) {
+    const entry = agentsArg[i] as Record<string, unknown>;
     const role = entry.role as AgentRole;
     const task = entry.task as string;
 
@@ -3960,11 +4442,7 @@ async function handleSpawnParallel(args: Record<string, unknown>): Promise<strin
     ].join('\n');
   });
 
-  const header =
-    droppedCount > 0
-      ? `⚠️ Capped at ${MAX_PARALLEL_SPAWN} parallel agents; ${droppedCount} not spawned — re-call boss_spawn_parallel for the rest.\n\n`
-      : '';
-  return header + sections.join('\n\n');
+  return sections.join('\n\n');
 }
 
 // ── Email agent handlers ──────────────────────────────────────────────────────
@@ -4109,7 +4587,7 @@ type ToolHandler = (args: Record<string, unknown>) => Promise<string>;
 
 // Full access — when running on host, direct paths. In Docker, /data/home.
 const IS_DOCKER = process.env.BOSS_RUNTIME === 'docker';
-const HOME_PREFIX = IS_DOCKER ? '/data/home' : '/home/boss';
+const HOME_PREFIX = IS_DOCKER ? '/data/home' : '/home/tcntryprd';
 const ALLOWED_READ_PREFIXES = [HOME_PREFIX, '/tmp/boss-jobs', '/tmp'];
 const ALLOWED_WRITE_PREFIXES = [HOME_PREFIX, '/tmp/boss-jobs', '/tmp'];
 
@@ -4632,26 +5110,10 @@ async function handleWebFetch(args: Record<string, unknown>): Promise<string> {
 // These give BOS the ability to modify, build, test, and version its own code.
 // Restricted to admin trust tier. All changes go to boss-dev directory.
 
-// Source paths — the repo is mounted at /home/boss/boss-dev in docker (see
-// docker-compose.bos.yml). Resolve to a directory that actually EXISTS so
-// boss_bash (and self-mod) never fail with `spawnSync /bin/sh ENOENT` when the
-// mount path differs. Picks the first existing candidate, else /tmp.
-function resolveBossSrc(): string {
-  const candidates = [
-    process.env.BOSS_SRC_DIR,
-    '/home/boss/boss-dev',
-    '/data/home/boss-dev',
-    '/app',
-    process.env.HOME,
-  ];
-  for (const c of candidates) {
-    if (c) { try { if (existsSync(c)) return c; } catch { /* ignore */ } }
-  }
-  return '/tmp';
-}
-const BOSS_SRC = resolveBossSrc();
-const HOST_BOSS_SRC = BOSS_SRC;
-const DOCKER_COMPOSE_DIR = BOSS_SRC;
+// Source paths — adapt to runtime mode
+const BOSS_SRC = IS_DOCKER ? '/data/home/boss-dev' : '/home/tcntryprd/boss-dev';
+const HOST_BOSS_SRC = IS_DOCKER ? '/data/home/boss-dev' : '/home/tcntryprd/boss-dev';
+const DOCKER_COMPOSE_DIR = IS_DOCKER ? '/data/home/boss-dev' : '/home/tcntryprd/boss-dev';
 
 // Blocked patterns for shell safety
 const BLOCKED_COMMANDS = [
@@ -5449,7 +5911,7 @@ async function handleGithubPushTag(args: Record<string, unknown>): Promise<strin
       type: 'commit',
       tagger: {
         name: 'BOS',
-        email: 'boss@starrpartners.ai',
+        email: process.env.BOSS_GIT_EMAIL || 'boss@bos.local',
         date: new Date().toISOString(),
       },
     }),
@@ -5920,6 +6382,16 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   ...LINKEDIN_TOOL_HANDLERS,
   // ── Email draft rating + learning ───────────────────────────────────────────
   ...EMAIL_DRAFT_TOOL_HANDLERS,
+  // ── Email draft validation (Validator agent) ────────────────────────────────
+  ...VALIDATOR_TOOL_HANDLERS,
+  // ── Triage reasoning (Nemotron decision delegation) ─────────────────────────
+  ...TRIAGE_TOOL_HANDLERS,
+  // ── Financial reasoning (CFO: Nemotron analyst over gathered ERA+Stripe) ─────
+  ...FINANCIAL_TOOL_HANDLERS,
+  // ── Agent evaluation (per-run quality verdicts + weekly synthesis) ───────────
+  ...AGENT_EVAL_TOOL_HANDLERS,
+  // ── Client-email routing (to the client manager rascal) ──────────────────────
+  ...CLIENT_ROUTING_TOOL_HANDLERS,
   // ── Telegram ──────────────────────────────────────────────────────────────
   boss_telegram_get_updates: handleTelegramGetUpdates,
   boss_telegram_send_message: handleTelegramSendMessage,
@@ -5930,6 +6402,12 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   boss_notion_get_page: handleNotionGetPage,
   boss_notion_create_page: handleNotionCreatePage,
   boss_notion_list_databases: handleNotionListDatabases,
+  // ── Miro ──────────────────────────────────────────────────────────────────
+  boss_miro_health: (args) => executeMiroTool('boss_miro_health', args),
+  boss_miro_list_boards: (args) => executeMiroTool('boss_miro_list_boards', args),
+  boss_miro_get_board: (args) => executeMiroTool('boss_miro_get_board', args),
+  boss_miro_create_board: (args) => executeMiroTool('boss_miro_create_board', args),
+  boss_miro_list_items: (args) => executeMiroTool('boss_miro_list_items', args),
   // ── Airtable ──────────────────────────────────────────────────────────────
   boss_airtable_list_bases: (_args) => handleAirtableListBases(),
   boss_airtable_list_records: handleAirtableListRecords,
@@ -5958,6 +6436,15 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   boss_stripe_list_payments: handleStripeListPayments,
   boss_stripe_get_balance: handleStripeGetBalance,
   boss_stripe_create_invoice: handleStripeCreateInvoice,
+  // ── QuickBooks Online ─────────────────────────────────────────────────────
+  boss_qbo_company_info: (_args) => handleQboCompanyInfo(),
+  boss_qbo_profit_and_loss: handleQboProfitAndLoss,
+  boss_qbo_list_transactions: handleQboListTransactions,
+  boss_qbo_list_invoices: handleQboListInvoices,
+  boss_qbo_list_customers: handleQboListCustomers,
+  boss_qbo_list_expenses: handleQboListExpenses,
+  boss_qbo_list_accounts: handleQboListAccounts,
+  boss_qbo_query: handleQboQuery,
   // ── Sub-agent spawning (always available — no API key gate) ───────────────
   boss_spawn_agent: handleSpawnAgent,
   boss_spawn_parallel: handleSpawnParallel,
@@ -6028,6 +6515,12 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   boss_sys_services: (_args) => handleSysServices(),
   // ── Backup status (vD.0.1) ────────────────────────────────────────────────
   boss_backup_status: (_args) => handleBackupStatus(),
+  // ── Health (read-only brief + daily summary over health_daily) ────────────
+  boss_health_brief: handleHealthBrief,
+  boss_health_summary: handleHealthSummary,
+  boss_health_anomalies: handleHealthAnomalies,
+  boss_health_journal: handleHealthJournal,
+  boss_health_medical_records: handleHealthMedicalRecords,
   // ── Host status (vS.0.1) ─────────────────────────────────────────────────
   boss_host_status: (_args) => handleHostStatus(),
   // ── Self-identity (vS.0.4) ──────────────────────────────────────────────
@@ -6108,14 +6601,19 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
 export async function executeTool(
   toolName: string,
   args: Record<string, unknown>,
-  _tenantId: string,
+  ctxOrTenant: string | ToolCtx,
 ): Promise<string> {
+  const ctx: ToolCtx = typeof ctxOrTenant === 'string' ? { tenantId: ctxOrTenant } : ctxOrTenant;
   const handler = TOOL_HANDLERS[toolName];
   if (!handler) {
     return `Unknown tool: "${toolName}". Available tools: ${Object.keys(TOOL_HANDLERS).join(', ')}`;
   }
+  const gate = await gateToolCall(toolName, args, ctx);
+  if (!gate.allow) return gate.pendingResult ?? '⏸ Queued for your approval.';
+  const __t0 = Date.now();
   try {
     const result = await handler(args);
+    recordExecuted(toolName, gate.tier, ctx, Date.now() - __t0);
     if (result.length > MAX_TOOL_RESULT_CHARS) {
       return result.slice(0, MAX_TOOL_RESULT_CHARS) + '\n[truncated — result exceeded limit]';
     }

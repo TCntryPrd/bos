@@ -23,27 +23,6 @@ const DEFAULT_MODEL = 'gemini-2.5-pro';
 const DEFAULT_MAX_TOKENS = 4096;
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-// Gemini's function-calling schema is a strict OpenAPI subset and returns a 400
-// ("Unknown name ...") on JSON Schema meta fields it doesn't recognise. Strip
-// them recursively so tools that carry e.g. `additionalProperties` (airtable,
-// n8n) don't break the Gemini brain — which is the DEFAULT brain for installs.
-const GEMINI_UNSUPPORTED_SCHEMA_KEYS = new Set([
-  'additionalProperties', '$schema', '$ref', '$defs', 'definitions',
-  'patternProperties', 'examples',
-]);
-function sanitizeGeminiSchema(schema: unknown): unknown {
-  if (Array.isArray(schema)) return schema.map(sanitizeGeminiSchema);
-  if (schema && typeof schema === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
-      if (GEMINI_UNSUPPORTED_SCHEMA_KEYS.has(k)) continue;
-      out[k] = sanitizeGeminiSchema(v);
-    }
-    return out;
-  }
-  return schema;
-}
-
 export class GeminiAdapter implements BrainAdapter {
   readonly info: BrainAdapterInfo;
   private apiKey: string;
@@ -90,7 +69,7 @@ export class GeminiAdapter implements BrainAdapter {
           functionDeclarations: request.tools.map((t) => ({
             name: t.name,
             description: t.description,
-            parameters: sanitizeGeminiSchema(t.parameters),
+            parameters: t.parameters,
           })),
         },
       ];

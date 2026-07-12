@@ -10,7 +10,7 @@
  * until explicitly stopped.
  */
 
-import { Cron } from 'croner';
+import { spawn } from 'node:child_process';
 import { getPool } from '../db.js';
 import { hasNewDriveFiles } from '../tools/executor.js';
 import { detectAndRecordSpikes, getOpenIncidents } from '../lib/cost-ledger.js';
@@ -39,63 +39,133 @@ const nextRunTimes = new Map<string, number>();
 // on a short cron would re-fire on every 60s tick while a run is still in flight.
 const inFlight = new Set<string>();
 
-// ── Cron matching (WS-4: croner) ─────────────────────────────────────────────
-// The old hand-rolled parser only understood "*/N min", "*/N hour" and
-// "0 H * * *"; EVERY other shape (lists/ranges/step-lists like "0 9,17 * * *",
-// "0 9-17 * * *") hit a "fail-safe → never run" branch, so those agents were
-// silently dead. croner parses all standard 5-field crons correctly. Schedules
-// are interpreted in UTC to preserve the previous behaviour (the old code used
-// getUTCHours). If a schedule should follow a business timezone, set it per-agent
-// later — but it now FIRES either way instead of silently skipping.
+type EmployeeAgentProvider = 'codex-cli';
+
+interface EmployeeAgentRuntime {
+  provider: EmployeeAgentProvider;
+  model: string;
+  logModel: string;
+}
+
+interface EmployeeAgentBrainResult {
+  response?: string;
+  error?: string;
+  model?: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+}
+
+function defaultCodexModel(): string {
+  return process.env.BOSS_EMPLOYEE_AGENT_CODEX_MODEL || process.env.CODEX_MODEL || '';
+}
+
+function codexRuntime(model?: string): EmployeeAgentRuntime {
+  const selectedModel = (model || defaultCodexModel()).trim();
+  return {
+    provider: 'codex-cli',
+    model: selectedModel,
+    logModel: selectedModel ? `codex:${selectedModel}` : 'codex-cli',
+  };
+}
+
+function resolveEmployeeAgentRuntime(rawModel: string | null | undefined): EmployeeAgentRuntime {
+  const raw = (rawModel || '').trim();
+  const lower = raw.toLowerCase();
+
+  if (lower.startsWith('codex:')) {
+    return codexRuntime(raw.slice(raw.indexOf(':') + 1).trim());
+  }
+
+  if (lower === 'codex' || lower === 'codex-cli' || lower === '') {
+    return codexRuntime();
+  }
+
+  if (/^(gpt-|o[134]-|codex-)/i.test(raw)) {
+    return codexRuntime(raw);
+  }
+
+  // Employee Agents are Codex-only. Legacy Claude, OpenRouter, NIM, and other
+  // provider model IDs are normalized onto Codex CLI subscription auth here,
+  // leaving non-Employee-Agent Claude paths untouched.
+  return codexRuntime();
+}
+
+// ── Cron Parser (simple — supports standard 5-field cron) ────────────────────
+
+// Parse a cron hour field into the set of allowed UTC hours. Returns null for
+// "*" (no restriction). Supports lists + ranges, incl. wrap-around past midnight
+// ("16-1" → 16..23,0,1). Lets an interval cron carry a business-hours window.
+function parseHourSet(hourPart: string): Set<number> | null {
+  if (!hourPart || hourPart === '*') return null;
+  const set = new Set<number>();
+  for (const tok of hourPart.split(',')) {
+    if (tok.includes('-')) {
+      const [a, b] = tok.split('-').map((x) => parseInt(x, 10));
+      if (Number.isNaN(a) || Number.isNaN(b)) return null;
+      if (a <= b) { for (let h = a; h <= b; h++) set.add(h % 24); }
+      else { for (let h = a; h < 24; h++) set.add(h); for (let h = 0; h <= b; h++) set.add(h); }
+    } else {
+      const h = parseInt(tok, 10);
+      if (Number.isNaN(h)) return null;
+      set.add(h % 24);
+    }
+  }
+  return set.size ? set : null;
+}
+
 function shouldRunNow(cronExpr: string, lastRun: Date | null): boolean {
-  let cron: Cron;
-  try {
-    cron = new Cron(cronExpr.trim(), { timezone: 'UTC' });
-  } catch (err) {
-    console.warn(`[scheduler] invalid cron "${cronExpr}": ${(err as Error).message} — skipping`);
+  // Simple interval-based parsing for common patterns:
+  // "*/15 * * * *" = every 15 minutes
+  // "0 */4 * * *" = every 4 hours
+  // "0 8 * * *" = daily at 8am
+  // "0 */1 * * *" = every hour
+
+  const parts = cronExpr.trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+
+  const now = new Date();
+  const [minPart, hourPart] = parts;
+
+  // Calculate interval in ms from cron expression
+  let intervalMs = 0;
+
+  if (minPart.startsWith('*/')) {
+    // Every N minutes — optionally restricted to a UTC hour window, e.g.
+    // "*/15 16-23,0-1 * * *" = every 15 min only during those UTC hours
+    // (used for business-hours agents like the Transcript Intelligence Agent).
+    intervalMs = parseInt(minPart.slice(2), 10) * 60_000;
+    const hourSet = parseHourSet(hourPart);
+    if (hourSet && !hourSet.has(now.getUTCHours())) return false;
+  } else if (hourPart.startsWith('*/')) {
+    // Every N hours
+    intervalMs = parseInt(hourPart.slice(2), 10) * 3600_000;
+  } else if (minPart === '0' && /^\d+$/.test(hourPart)) {
+    // Specific hour — daily
+    const targetHour = parseInt(hourPart, 10);
+    if (now.getUTCHours() === targetHour && now.getUTCMinutes() < 2) {
+      // Within the first 2 minutes of the target hour
+      if (!lastRun || now.getTime() - lastRun.getTime() > 3600_000) return true;
+    }
+    return false;
+  } else {
+    // Unrecognised cron shape (list/range/step-list, e.g. "0 9,17 * * *").
+    // Fail SAFE: do NOT run on a guessed cadence — warn occasionally and skip
+    // until the schedule is expressed in a supported form.
+    if (Math.random() < 0.02) {
+      console.warn(`[scheduler] unsupported cron "${cronExpr}" — skipping (supported: */N min, */N hour, "0 H * * *")`);
+    }
     return false;
   }
-  if (!lastRun) return true; // never run before → start on this tick
-  // Due if a scheduled firing has occurred at or before now since the last run.
-  const prev = cron.previousRun();
-  return prev != null && lastRun.getTime() < prev.getTime();
+
+  if (intervalMs === 0) return false;
+  if (!lastRun) return true; // Never run before
+  return now.getTime() - lastRun.getTime() >= intervalMs;
 }
 
-// Human-readable summary of a schedule for the loud startup log.
-function describeSchedule(cronExpr: string): string {
-  try {
-    const next = new Cron(cronExpr.trim(), { timezone: 'UTC' }).nextRun();
-    return next ? `next ${next.toISOString()}` : 'no upcoming run';
-  } catch (err) {
-    return `INVALID (${(err as Error).message})`;
-  }
-}
-
-// ── Cost model + run metrics ──────────────────────────────────────────────────
-// $ per 1M tokens (input, output). Rough rates for budgeting/observability — the
-// COO uses these to spot expensive agents, not for billing. Fallback covers
-// unknown models. Update as pricing changes.
-const MODEL_RATES: Record<string, { in: number; out: number }> = {
-  'claude-haiku-4-5': { in: 1.0, out: 5.0 },
-  'claude-fable-5': { in: 1.0, out: 5.0 },
-  'anthropic/claude-3.7-sonnet': { in: 3.0, out: 15.0 },
-  'anthropic/claude-3.5-sonnet': { in: 3.0, out: 15.0 },
-  'google/gemini-2.5-flash': { in: 0.30, out: 2.5 },
-  'openai/gpt-4.1-mini': { in: 0.40, out: 1.6 },
-  'claude-sonnet-4-6': { in: 3.0, out: 15.0 },
-};
-
-function estimateCostUsd(model: string, tokensIn: number, tokensOut: number): number {
-  // Native models (no provider namespace, e.g. "claude-sonnet-4-6") run on the
-  // Claude Max SUBSCRIPTION via the ClaudeCode adapter — no API-credit cost.
-  // Only namespaced/OpenRouter models ("anthropic/...", "google/...") cost $.
-  if (!model.includes('/')) return 0;
-  // Normalize provider/version suffixes (e.g. "...:beta") before lookup.
-  const key = (model || '').split(':')[0];
-  // Deliberately HIGH fallback so an unmodeled model surfaces as expensive (a COO
-  // signal to investigate), never silently cheap.
-  const rate = MODEL_RATES[key] ?? { in: 3.0, out: 15.0 };
-  return Number(((tokensIn / 1_000_000) * rate.in + (tokensOut / 1_000_000) * rate.out).toFixed(6));
+// ── Run metrics ──────────────────────────────────────────────────────────────
+// Employee Agents are Codex CLI subscription runs, so API-token cost is not
+// estimated here. Runtime health is tracked through status, duration, and tokens.
+function estimateCostUsd(_model: string, _tokensIn: number, _tokensOut: number): number {
+  return 0;
 }
 
 /** Per-run analytics + cost table feeding the Employee Agents surface + COO. */
@@ -125,57 +195,171 @@ async function ensureRunsTable(): Promise<void> {
 
 // ── Agent Execution ──────────────────────────────────────────────────────────
 
+function buildAgentPrompt(agent: PersistentAgent, triggerContext?: string): string {
+  return `[PERSISTENT AGENT: ${agent.name}]
+
+You are running as a persistent Employee Agent on Codex CLI. Do not present yourself as Claude or any other provider.
+Follow these instructions:
+
+${agent.instructions}${triggerContext ? `\n\n--- TRIGGER ---\n${triggerContext}` : ''}`;
+}
+
+function toolBridgePrompt(agent: PersistentAgent, allowedTools: string[]): string {
+  if (allowedTools.length === 0) {
+    return 'No BOS tools are granted for this run. Complete the assignment using reasoning only.';
+  }
+  return [
+    'BOS TOOL BRIDGE',
+    'You are running inside the BOS API container. The app-specific boss_* tools are available through this local command bridge.',
+    'List your granted tools and schemas:',
+    '  node /app/apps/api/dist/employee-tool-cli.js list',
+    'Run one granted tool:',
+    '  node /app/apps/api/dist/employee-tool-cli.js run <tool_name> \'<json_args>\'',
+    'Examples:',
+    '  node /app/apps/api/dist/employee-tool-cli.js run boss_task_list \'{}\'',
+    '  node /app/apps/api/dist/employee-tool-cli.js run boss_gmail_unread \'{"limit":10}\'',
+    'Use only this bridge for BOS tools. Do not say boss_* tools are unavailable before checking the bridge.',
+    `Granted tool names for ${agent.name}: ${allowedTools.join(', ')}`,
+  ].join('\n');
+}
+
+function runCodexAgent(
+  prompt: string,
+  runtime: EmployeeAgentRuntime,
+  agent: PersistentAgent,
+  allowedTools: string[],
+): Promise<EmployeeAgentBrainResult> {
+  return new Promise((resolve, reject) => {
+    const codexBin = process.env.BOSS_EMPLOYEE_AGENT_CODEX_BIN || process.env.BOSS_GIO_BIN || 'codex';
+    const codexHome = process.env.CODEX_HOME || '/home/boss/.codex';
+    const workspace = process.env.BOSS_EMPLOYEE_AGENT_WORKSPACE
+      || process.env.BOSS_GIO_WORKSPACE
+      || '/home/boss/boss-dev';
+    const args = [
+      'exec',
+      '--json',
+      '--ephemeral',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--dangerously-bypass-hook-trust',
+      '--skip-git-repo-check',
+      '--cd',
+      workspace,
+    ];
+    if (runtime.model) args.push('--model', runtime.model);
+    args.push('-');
+
+    const codexEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      CODEX_HOME: codexHome,
+      BOSS_EMPLOYEE_AGENT_NAME: agent.name,
+      BOSS_EMPLOYEE_AGENT_ID: agent.id,
+      BOSS_EMPLOYEE_AGENT_GRANTED_TOOLS: JSON.stringify(allowedTools),
+    };
+    // Force Codex CLI to use CODEX_HOME subscription auth, not API-key billing.
+    delete codexEnv.OPENAI_API_KEY;
+
+    const child = spawn(codexBin, args, {
+      cwd: workspace,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: codexEnv,
+    });
+
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
+    let assistantText = '';
+    let tokensIn = 0;
+    let tokensOut = 0;
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill('SIGKILL'); } catch { /* already closed */ }
+      reject(new Error(`Codex CLI timed out after 300000ms: ${stderrBuffer.slice(-1000)}`));
+    }, 300_000);
+    timer.unref();
+
+    const processLine = (line: string): void => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      try {
+        const ev = JSON.parse(trimmed) as {
+          type?: string;
+          item?: { type?: string; text?: string };
+          usage?: { input_tokens?: number; output_tokens?: number; reasoning_output_tokens?: number };
+        };
+        if (ev.type === 'item.completed' && ev.item?.type === 'agent_message' && ev.item.text) {
+          assistantText += ev.item.text;
+        }
+        if (ev.usage) {
+          tokensIn = ev.usage.input_tokens ?? tokensIn;
+          tokensOut = ev.usage.output_tokens ?? tokensOut;
+        }
+      } catch {
+        // Codex --json should be JSONL, but ignore any incidental text.
+      }
+    };
+
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      stdoutBuffer += chunk;
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() ?? '';
+      for (const line of lines) processLine(line);
+    });
+    child.stderr?.on('data', (chunk: string) => { stderrBuffer += chunk; });
+    child.stdin?.end(`${prompt}\n\n---\n${toolBridgePrompt(agent, allowedTools)}\n`);
+
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (stdoutBuffer.trim()) processLine(stdoutBuffer);
+      if (code !== 0) {
+        reject(new Error(`Codex CLI exited ${code}: ${stderrBuffer.slice(-2000)}`));
+        return;
+      }
+      resolve({
+        response: assistantText || 'Codex CLI completed without a final message.',
+        model: runtime.logModel,
+        usage: { inputTokens: tokensIn, outputTokens: tokensOut },
+      });
+    });
+  });
+}
+
 async function executeAgent(agent: PersistentAgent, triggerContext?: string): Promise<void> {
   const pool = getPool();
   const startedAt = Date.now();
   console.log(`[scheduler] Running agent: ${agent.name} (${agent.id})`);
 
-  // Derive provider from the model id: OpenRouter model ids are namespaced
-  // (contain a '/', e.g. "anthropic/claude-3.7-sonnet"); bare ids run on the
-  // global brain provider. The brain honours provider/model/allowedTools only
-  // for internal (X-BOSS-Internal) calls — which this is.
-  const model = agent.model || '';
-  const provider = model.includes('/') ? 'openrouter' : undefined;
+  const runtime = resolveEmployeeAgentRuntime(agent.model);
   const allowedTools = Array.isArray(agent.tools) ? agent.tools : [];
+  const prompt = buildAgentPrompt(agent, triggerContext);
 
   let status = 'ok';
   let result = '';
   let tokensIn = 0;
   let tokensOut = 0;
-  let usedModel = model;
+  let usedModel = runtime.logModel;
+  let usedProvider = runtime.provider;
 
   try {
-    const port = process.env.PORT || '8010';
-    const res = await fetch(`http://127.0.0.1:${port}/api/brain/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-BOSS-Internal': 'true',
-      },
-      body: JSON.stringify({
-        message: `[PERSISTENT AGENT: ${agent.name}]\n\nYou are running as a persistent agent. Follow these instructions:\n\n${agent.instructions}${triggerContext ? `\n\n--- TRIGGER ---\n${triggerContext}` : ''}`,
-        // Fresh conversation each run — prevents unbounded context accumulation
-        conversationId: `agent-${agent.id}-run-${Date.now()}`,
-        ...(provider ? { provider } : {}),
-        ...(model ? { model } : {}),
-        // Always send the grant — the brain fails CLOSED on an empty grant.
-        // Use ['*'] in the agent's tools column to mean full access.
-        allowedTools,
-      }),
-      signal: AbortSignal.timeout(300_000), // 5 min max per run
-    });
+    const data = await runCodexAgent(prompt, runtime, agent, allowedTools);
 
-    const data = await res.json() as {
-      response?: string;
-      error?: string;
-      model?: string;
-      usage?: { inputTokens?: number; outputTokens?: number };
-    };
     result = data.response || data.error || 'No response';
     if (data.error) status = 'error';
     tokensIn = data.usage?.inputTokens ?? 0;
     tokensOut = data.usage?.outputTokens ?? 0;
-    usedModel = data.model || model;
+    usedModel = data.model || runtime.logModel;
 
     await pool.query(
       `UPDATE boss_persistent_agents
@@ -207,7 +391,7 @@ async function executeAgent(agent: PersistentAgent, triggerContext?: string): Pr
       `INSERT INTO boss_agent_runs
          (agent_id, agent_name, started_at, finished_at, status, model, provider, tokens_in, tokens_out, cost_usd, duration_ms, summary)
        VALUES ($1, $2, to_timestamp($3 / 1000.0), now(), $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [agent.id, agent.name, startedAt, status, usedModel, provider ?? 'global', tokensIn, tokensOut, costUsd, durationMs, result.slice(0, 2000)],
+      [agent.id, agent.name, startedAt, status, usedModel, usedProvider, tokensIn, tokensOut, costUsd, durationMs, result.slice(0, 2000)],
     );
   } catch (err) {
     if (Math.random() < 0.1) console.error('[scheduler] metrics insert failed:', err);
@@ -222,7 +406,7 @@ async function executeAgent(agent: PersistentAgent, triggerContext?: string): Pr
 interface TriggerGate { account: string; folderId: string }
 const TRIGGER_GATES: Record<string, TriggerGate> = {
   // Transcript Intelligence Agent → My Drive / D. Caine Solutions / Meetings / Transcript
-  transcript: { account: 'd.caine@dcaine.com', folderId: '1z84HIkWwkTJFokwjkLiZUnCoM-s0N51o' },
+  transcript: { account: process.env.BOSS_TRANSCRIPT_ACCOUNT || '', folderId: process.env.BOSS_TRANSCRIPT_FOLDER_ID || '' },
 };
 function gateKeyFor(agent: PersistentAgent): string | null {
   if (/transcript/i.test(agent.name)) return 'transcript';
@@ -331,7 +515,7 @@ export async function createPersistentAgent(params: {
       params.name,
       params.instructions,
       params.cronExpression || '0 */4 * * *',
-      params.model || 'claude-sonnet-4-6',
+      params.model || 'codex',
       params.tools || [],
       params.createdBy || 'admin',
     ],
@@ -381,29 +565,9 @@ export async function deletePersistentAgent(id: string): Promise<void> {
 export function startScheduler(): void {
   console.log('[scheduler] Starting persistent agent scheduler (checks every 60s)');
   void ensureRunsTable();
-  void logLoadedSchedules();
   schedulerHandle = setInterval(() => void checkSchedule(), SCHEDULER_CHECK_INTERVAL_MS);
   // First check after 30 seconds
   setTimeout(() => void checkSchedule(), 30_000);
-}
-
-// WS-4: log EVERY active agent's schedule loudly at startup so an invalid /
-// never-firing cron is visible immediately (was: silent 2% warning).
-async function logLoadedSchedules(): Promise<void> {
-  try {
-    const { rows } = await getPool().query<{ name: string; cron_expression: string }>(
-      `SELECT name, cron_expression FROM boss_persistent_agents WHERE status = 'active' ORDER BY name`,
-    );
-    if (rows.length === 0) { console.log('[scheduler] no active agents'); return; }
-    console.log(`[scheduler] ${rows.length} active agent schedule(s):`);
-    for (const a of rows) {
-      const desc = describeSchedule(a.cron_expression);
-      const flag = desc.startsWith('INVALID') ? '  ⚠️ ' : '  ✓ ';
-      console.log(`${flag}${a.name}  [${a.cron_expression}]  ${desc}`);
-    }
-  } catch (err) {
-    console.warn('[scheduler] could not log schedules:', (err as Error).message);
-  }
 }
 
 export function stopScheduler(): void {

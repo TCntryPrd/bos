@@ -4,7 +4,7 @@
  * No DB I/O, no Fastify deps, no side effects. Accepts current task + pipeline
  * definition, returns the next state. Callers persist the result.
  *
- * See /home/boss/BOSS_V2_MASTER_PLAN.md §Phase 1.
+ * See /home/tcntryprd/BOSS_V2_MASTER_PLAN.md §Phase 1.
  */
 
 export type TaskStatus = 'pending' | 'active' | 'blocked' | 'done' | 'failed';

@@ -18,11 +18,11 @@ import { useAgentName, promptRenameAgent } from '../lib/agentNames.js';
 import { KanbanBoard } from '../components/kanban/KanbanBoard.js';
 
 const T = {
-  bg: 'var(--v-base)',
-  panel: 'var(--v-surface-1)',
-  panel2: 'var(--v-surface-2)',
-  panel3: 'var(--v-surface-3)',
-  border: 'var(--v-hairline-strong)',
+  bg: '#05060F',
+  panel: '#0B0E1D',
+  panel2: '#11152E',
+  panel3: '#181D3A',
+  border: '#232A4D',
   borderSoft: 'rgba(139,92,246,0.16)',
   text: '#F1F4FF',
   textDim: '#AAB3D6',
@@ -286,7 +286,7 @@ function Panel({ title, icon: Icon, children, action }: {
   action?: React.ReactNode;
 }) {
   return (
-    <section className="min-h-0 rounded border flex flex-col" style={{ background: T.panel, borderColor: T.border }}>
+    <section className="aios-panel min-h-0 flex flex-col">
       <header className="h-9 px-3 flex items-center gap-2 border-b" style={{ borderColor: T.borderSoft }}>
         <Icon className="h-3.5 w-3.5" style={{ color: T.violet }} />
         <h2 className="text-xs font-semibold flex-1" style={{ color: T.text }}>{title}</h2>
@@ -460,7 +460,7 @@ function ChecklistPanel({ activityCount, memoryReady }: { activityCount: number;
     ['Health status', true, 'API and Codex overview are polling live'],
   ] as const;
   return (
-    <Panel title="Today's Tasks" icon={CheckCircle2}>
+    <Panel title="Operator Checklist" icon={CheckCircle2}>
       <div className="p-2 space-y-1.5">
         {rows.map(([label, ok, detail]) => (
           <div key={label} className="px-2 py-1.5 rounded flex items-start gap-2" style={{ background: T.panel2 }}>
@@ -519,7 +519,7 @@ function SignalRow({ name, detail, status }: { name: string; detail?: string; st
 const LAUNCH_SURFACES = [
   ['/tasks', 'Task Board', 'Work queue'],
   ['/brain', 'Brain Config', 'AI routing'],
-  ['/connectors', 'Connected Apps', 'OAuth status'],
+  ['/connectors', 'Connectors', 'OAuth status'],
   ['/backup', 'Backup', 'Recovery state'],
   ['/voice', 'Voice Devices', 'Mic layer'],
   ['/agents', 'Employee Agents', 'Your AI staff'],
@@ -527,7 +527,7 @@ const LAUNCH_SURFACES = [
 ] as const;
 function LaunchPanel() {
   return (
-    <Panel title="Publish Channels" icon={SquareTerminal}>
+    <Panel title="Launch Surfaces" icon={SquareTerminal}>
       <div className="grid grid-cols-2 gap-2 p-3">
         {LAUNCH_SURFACES.map(([href, label, detail]) => (
           <a key={href} href={href} className="px-2 py-2 rounded border no-underline" style={{ background: T.panel2, borderColor: T.borderSoft }}>
@@ -580,7 +580,7 @@ function BrainOpsPanel({ brain }: { brain: BrainStatusPayload | null }) {
 }
 function ConnectorsPanel({ connectors, apps }: { connectors: ConnectorStatus[]; apps: AppsStatusPayload | null }) {
   return (
-    <Panel title="Connected Apps" icon={PlugZap}>
+    <Panel title="Connectors & Apps" icon={PlugZap}>
       <div className="p-2 space-y-1.5">
         {connectors.length === 0 && <EmptyLine text="No connector statuses returned." />}
         {connectors.map((conn) => <SignalRow key={conn.provider} name={conn.provider} status={conn.status} detail={conn.configuredAt ? `configured ${clock(conn.configuredAt)}` : conn.status} />)}
@@ -946,14 +946,14 @@ export default function OC() {
   const currentObjective = useMemo(() => activity.find((a) => a.kind === 'system' && a.label === 'Turn started')?.detail ?? 'No active turn. Use chat to start work.', [activity]);
 
   return (
-    <div className="h-full min-h-0 flex flex-col" style={{ background: T.bg, color: T.text }}>
+    <div className="aios-page h-full min-h-0 flex flex-col" style={{ color: T.text }}>
       <TopBar overview={overview} loading={overviewLoading} mode={mode} setMode={setMode} />
       {overviewError && <div className="px-4 py-2 text-[11px] border-b flex items-center gap-2" style={{ color: T.red, background: T.redDim, borderColor: T.border }}><AlertTriangle className="h-3.5 w-3.5" />Overview fetch failed: {overviewError}</div>}
-      {mode === 'tasks' ? <div className="min-h-0 flex-1 overflow-hidden"><KanbanBoard scope={{ kind: 'coe' }} /></div> : mode === 'ops' ? <OpsMode ops={ops} onRefresh={fetchOps} /> : (
-        <main className="min-h-0 flex-1 grid gap-3 p-3" style={{ gridTemplateColumns: '300px minmax(420px, 1fr) 340px' }}>
+      {mode === 'tasks' ? <div className="aios-page-pad min-h-0 flex-1 overflow-hidden"><div className="aios-workbench h-full"><KanbanBoard scope={{ kind: 'coe' }} /></div></div> : mode === 'ops' ? <OpsMode ops={ops} onRefresh={fetchOps} /> : (
+        <main className="aios-page-pad min-h-0 flex-1 grid gap-3" style={{ gridTemplateColumns: '300px minmax(420px, 1fr) 340px' }}>
           <aside className="min-h-0 overflow-y-auto space-y-3"><ContextPanel overview={overview} channels={channels} skills={skills} /><MemoryPanel files={memoryFiles} selected={selectedMemory} content={memoryContent} loading={memoryLoading} onSelect={selectMemory} onRefresh={fetchMemory} /></aside>
           <section className="min-h-0 grid gap-3" style={{ gridTemplateRows: 'minmax(360px, 1fr) 220px' }}><ChatPane disabled={!!chatDisabled} onActivity={addActivity} /><ActivityPanel items={activity} /></section>
-          <aside className="min-h-0 overflow-y-auto space-y-3"><Panel title="Current Objective" icon={PanelRightOpen}><div className="p-3 text-[12px] leading-relaxed" style={{ color: T.textDim }}>{currentObjective}</div></Panel><ChecklistPanel activityCount={activity.length} memoryReady={!!overview?.memoryReady} /><LaunchPanel /><ToolingPanel channels={channels} skills={skills} /><Panel title="Take Action" icon={Box}><div className="p-3 space-y-2"><Badge text="Send Codex turns through chat" /><Badge text="Inspect Codex memory files" /><Badge text="Open scoped task board" /><Badge text="Poll Codex/API status" /><Badge text="Use live voice control" /><Badge text="Open Ops status console" /><Badge text="Launch other BOS surfaces" /></div></Panel></aside>
+          <aside className="min-h-0 overflow-y-auto space-y-3"><Panel title="Current Objective" icon={PanelRightOpen}><div className="p-3 text-[12px] leading-relaxed" style={{ color: T.textDim }}>{currentObjective}</div></Panel><ChecklistPanel activityCount={activity.length} memoryReady={!!overview?.memoryReady} /><LaunchPanel /><ToolingPanel channels={channels} skills={skills} /><Panel title="Executable From Here" icon={Box}><div className="p-3 space-y-2"><Badge text="Send Codex turns through chat" /><Badge text="Inspect Codex memory files" /><Badge text="Open scoped task board" /><Badge text="Poll Codex/API status" /><Badge text="Use live voice control" /><Badge text="Open Ops status console" /><Badge text="Launch other BOS surfaces" /></div></Panel></aside>
         </main>
       )}
     </div>

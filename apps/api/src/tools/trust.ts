@@ -130,6 +130,13 @@ const TOOL_MIN_TRUST: Record<string, TrustTier> = {
   boss_notion_list_databases:'observer',
   boss_notion_create_page:   'assistant',
 
+  // ── Miro ────────────────────────────────────────────────────────────────
+  boss_miro_health:      'observer',
+  boss_miro_list_boards: 'observer',
+  boss_miro_get_board:   'observer',
+  boss_miro_list_items:  'observer',
+  boss_miro_create_board:'assistant',
+
   // ── Airtable ────────────────────────────────────────────────────────────
   boss_airtable_list_bases:    'observer',
   boss_airtable_list_records:  'observer',
@@ -157,6 +164,17 @@ const TOOL_MIN_TRUST: Record<string, TrustTier> = {
   boss_stripe_get_balance:    'observer',
   boss_stripe_create_invoice: 'operator',
 
+  // ── QuickBooks Online (all read-only in v1) ─────────────────────────────
+  boss_qbo_company_info:      'observer',
+  boss_qbo_profit_and_loss:   'observer',
+  boss_qbo_list_transactions: 'observer',
+  boss_qbo_list_invoices:     'observer',
+  boss_qbo_list_customers:    'observer',
+  boss_qbo_list_expenses:     'observer',
+  boss_qbo_list_accounts:     'observer',
+  // Raw query reaches every readable entity — hold it to authenticated users.
+  boss_qbo_query:             'assistant',
+
   // ── ERA Context (finance — read-only; not observer-visible) ───────────────
   boss_era_accounts:            'assistant',
   boss_era_financial_overview:  'assistant',
@@ -164,6 +182,13 @@ const TOOL_MIN_TRUST: Record<string, TrustTier> = {
   boss_era_search_transactions: 'assistant',
   boss_era_cash_flow:           'assistant',
   boss_era_recurring_charges:   'assistant',
+
+  // ── Health (personal health data — read-only; not observer-visible) ───────
+  boss_health_brief:   'assistant',
+  boss_health_summary: 'assistant',
+  boss_health_anomalies: 'assistant',
+  boss_health_journal: 'assistant',
+  boss_health_medical_records: 'assistant',
 
   // ── Sub-agent spawning ───────────────────────────────────────────────────
   // Agents can chain tool calls that write data, trigger workflows, and send
@@ -297,4 +322,14 @@ export function tierFromRole(role: string | undefined | null): TrustTier {
     default:
       return 'observer';
   }
+}
+
+/**
+ * The explicit minimum-trust entry for a tool, or undefined if unlisted.
+ * Used by the risk axis (tools/risk.ts) so the existing per-tool trust classification
+ * (which already covers the whole registry) becomes the base risk tier — far more
+ * accurate than name patterns alone.
+ */
+export function toolMinTrust(name: string): TrustTier | undefined {
+  return TOOL_MIN_TRUST[name];
 }

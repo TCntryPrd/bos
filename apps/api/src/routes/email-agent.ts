@@ -475,7 +475,7 @@ export async function emailAgentRoutes(server: FastifyInstance) {
    * subsequent draft or resolve calls.
    *
    * Example request:
-   *   { "messageId": "...", "accountEmail": "d.caine@dcaine.com",
+   *   { "messageId": "...", "accountEmail": "user@example.com",
    *     "sender": "newsletter@tldr.tech", "subject": "TLDR AI March 31",
    *     "receivedAt": "2026-03-31T08:00:00Z", "category": "newsletter",
    *     "actionTaken": "archived", "goldenNugget": "...", "needsAttention": false }
@@ -596,6 +596,12 @@ export async function emailAgentRoutes(server: FastifyInstance) {
    * Example request:
    *   { "emailLogId": "...", "resolvedBy": "kevin" }
    */
+    // Clear all — resolve the ENTIRE attention backlog, not just the visible top-N.
+  server.post('/resolve-all', async (_request: FastifyRequest, reply: FastifyReply) => {
+    const r = await getPool().query(`UPDATE boss_email_log SET resolved_at = now(), resolved_by = 'kevin' WHERE needs_attention = true AND resolved_at IS NULL`);
+    return reply.send({ ok: true, resolved: r.rowCount ?? 0 });
+  });
+
   server.post<{ Body: ResolveBody }>(
     '/resolve',
     {
@@ -655,7 +661,7 @@ export async function emailAgentRoutes(server: FastifyInstance) {
    *
    * Example request:
    *   {
-   *     "from": "d.caine@dcaine.com",
+   *     "from": "user@example.com",
    *     "to": ["prospect@example.com"],
    *     "subject": "Quick idea for Example Co",
    *     "body": "Hi Jane,\n\n...",
@@ -759,7 +765,7 @@ export async function emailAgentRoutes(server: FastifyInstance) {
    *
    * Example request:
    *   {
-   *     "account": "d.caine@dcaine.com",
+   *     "account": "user@example.com",
    *     "query": "subject:\"Quick idea for Example Co\" in:inbox",
    *     "maxResults": 10
    *   }

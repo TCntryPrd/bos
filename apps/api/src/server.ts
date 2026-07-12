@@ -9,6 +9,8 @@ import { authRoutes } from './routes/auth.js';
 import { brainRoutes } from './routes/brain.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { linkedinRoutes } from './routes/linkedin.js';
+import { linkedinSystemRoutes } from './routes/linkedin-system.js';
+import { unipileRoutes } from './routes/unipile.js';
 import { gwAuthRoutes, ensureHermesDashboard } from './routes/gw-auth.js';
 import { servicesRoutes } from './routes/services.js';
 import { voiceRoutes } from './routes/voice.js';
@@ -16,6 +18,7 @@ import { healingRoutes } from './routes/healing.js';
 import { learningRoutes } from './routes/learning.js';
 import { backupRoutes } from './routes/backup.js';
 import { settingsRoutes } from './routes/settings.js';
+import { mcpRoutes } from './routes/mcp.js';
 import { appsRoutes } from './routes/apps.js';
 import { skillsRoutes } from './routes/skills.js';
 import { emailAgentRoutes } from './routes/email-agent.js';
@@ -30,6 +33,7 @@ import { rascalWorkspaceRoutes, outsiderWorkspaceRoutes } from './routes/rascal-
 import { outsidersRoutes } from './routes/outsiders.js';
 import { metaWebhookRoutes } from './routes/webhooks/meta.js';
 import { whatsappWebhookRoutes } from './routes/webhooks/whatsapp.js';
+import { quickbooksWebhookRoutes } from './routes/webhooks/quickbooks.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
 import { metaRoutes } from './routes/meta.js';
 import { META_CREDENTIALS_DDL } from './lib/meta-graph.js';
@@ -40,6 +44,8 @@ import { cooRoutes } from './routes/coo/index.js';
 import { claudeAuthRoutes } from './routes/claude-auth.js';
 import { hermesSetupRoutes } from './routes/hermes-setup.js';
 import { zucchiRoutes } from './routes/zucchi.js';
+import boardRoutes from './routes/board.js';
+import roundtableRoutes from './routes/roundtable.js';
 import kanbanRoutes from './routes/kanban.js';
 import woRoutes from './routes/wo.js';
 import { miroRoutes } from './routes/miro.js';
@@ -53,6 +59,9 @@ import reviewsRoutes from './routes/reviews.js';
 import opsRoutes from './routes/ops.js';
 import googleAdminRoutes from './routes/google-admin.js';
 import costRoutes from './routes/cost.js';
+import lifeRoutes from './routes/life.js';
+import approvalsRoutes from './routes/approvals.js';
+import healthDataRoutes from './health/routes.js';
 import { startSlackSocketMode } from './lib/slack-socket.js';
 import { authMiddleware } from './middleware/auth.js';
 import { tenantMiddleware } from './middleware/tenant.js';
@@ -265,6 +274,8 @@ export async function buildServer() {
   // Connector OAuth and account management
   await server.register(connectorRoutes, { prefix: '/api/connectors' });
   await server.register(linkedinRoutes, { prefix: '/api/linkedin' });
+  await server.register(linkedinSystemRoutes, { prefix: '/api/linkedin-system' });
+  await server.register(unipileRoutes, { prefix: '/api/unipile' });
   await server.register(revenueRoutes, { prefix: '/api/revenue' });
   await server.register(employeeAgentsRoutes, { prefix: '/api/employee-agents' });
   await server.register(financeRoutes, { prefix: '/api/finance' });
@@ -292,6 +303,9 @@ export async function buildServer() {
 
   // Tenant settings
   await server.register(settingsRoutes, { prefix: '/api/settings' });
+
+  // Global MCP discovery for Codex CLI, Claude Code CLI, and Hermes.
+  await server.register(mcpRoutes, { prefix: '/api/mcp' });
 
   // App download metadata and installation registration
   await server.register(appsRoutes, { prefix: '/api/apps' });
@@ -350,6 +364,10 @@ export async function buildServer() {
   // (GET) and X-Hub-Signature-256 (POST) are the auth.
   await server.register(metaWebhookRoutes, { prefix: '/api/webhooks' });
   await server.register(whatsappWebhookRoutes, { prefix: '/api/webhooks' });
+
+  // QuickBooks entity-change webhook receiver. Public route — Intuit hits
+  // us as an anonymous third party; the intuit-signature HMAC is the auth.
+  await server.register(quickbooksWebhookRoutes, { prefix: '/api/webhooks' });
   await server.register(whatsappRoutes, { prefix: '/api/whatsapp' });
 
   // Meta connector + read API (status, credential register, FB threads, events).
@@ -372,6 +390,13 @@ export async function buildServer() {
   await server.register(claudeAuthRoutes, { prefix: '/api/setup' });
   await server.register(hermesSetupRoutes, { prefix: '/api/setup' });
   await server.register(zucchiRoutes, { prefix: '/api' });
+  await server.register(boardRoutes, { prefix: '/api/board' });
+  await server.register(roundtableRoutes, { prefix: '/api/roundtable' });
+  await server.register(lifeRoutes, { prefix: '/api/life' });
+  await server.register(approvalsRoutes, { prefix: '/api/approvals' });
+
+  // Health data — Health Connect bridge ingest + tile/page reads (spec 2026-07-01).
+  await server.register(healthDataRoutes, { prefix: '/api/health' });
 
   return server;
 }

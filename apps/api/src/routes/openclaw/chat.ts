@@ -14,6 +14,7 @@
  * table is the reconnect bridge.
  */
 import type { FastifyInstance } from 'fastify';
+import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getPool } from '../../db.js';
@@ -37,11 +38,26 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_CONTEXT_CHARS = 72_000;
 const MAX_MESSAGE_CONTEXT_CHARS = 12_000;
+const MAX_CHAT_BODY_BYTES = Number(process.env.BOSS_GIO_CHAT_BODY_LIMIT_BYTES ?? 48 * 1024 * 1024);
 const GIO_ATTACHMENT_ROOT = process.env.BOSS_GIO_ATTACHMENT_ROOT ?? '/home/boss/gio/.tmp';
+const IMAGE_EXTENSION_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
+};
 const RECENT_CONTEXT_MESSAGES = 4;
 const GIO_HANDLE = 'gio';
 const GIO_KIND = 'gio';
 const GIO_WORKSPACE = process.env.BOSS_GIO_WORKSPACE ?? '/home/boss/gio';
+const GIO_MEMORY_HOOK = process.env.BOSS_GIO_MEMORY_HOOK ?? path.join(GIO_WORKSPACE, '.codex/hooks/codex_memory.py');
+const GIO_MEMORY_HOOK_TIMEOUT_MS = Number(process.env.BOSS_GIO_MEMORY_HOOK_TIMEOUT_MS ?? 10_000);
 
 interface ChatSessionRow {
   id: string;
@@ -61,6 +77,14 @@ interface ChatMessageRow {
 interface ActiveTurn {
   interrupt: () => void;
   assistantMessageId: string;
+}
+
+interface AttachmentReceipt {
+  count: number;
+  imageCount: number;
+  fileCount: number;
+  skippedCount: number;
+  names: string[];
 }
 
 const activeTurns = new Map<string, ActiveTurn>();
@@ -160,12 +184,110 @@ async function readGioMemoryIndex(): Promise<string> {
   }
 }
 
+function extractHookContext(stdout: string): string {
+  const sections: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        hookSpecificOutput?: {
+          additionalContext?: unknown;
+        };
+      };
+      const context = parsed.hookSpecificOutput?.additionalContext;
+      if (typeof context === 'string' && context.trim()) {
+        sections.push(context.trim());
+      }
+    } catch {
+      // Hook output is expected to be JSONL. Ignore incidental status text.
+    }
+  }
+  return sections.join('\n\n');
+}
+
+async function readPromptRelevantMemory(prompt: string, sessionId: string): Promise<string> {
+  try {
+    await fs.access(GIO_MEMORY_HOOK);
+  } catch {
+    return '';
+  }
+
+  return new Promise((resolve) => {
+    const child = spawn('python3', [GIO_MEMORY_HOOK, 'prompt-submit'], {
+      cwd: GIO_WORKSPACE,
+      env: {
+        ...process.env,
+        CODEX_MEMORY_ROOT: GIO_WORKSPACE,
+        CODEX_MEMORY_WEAVIATE_URL: process.env.CODEX_MEMORY_WEAVIATE_URL ?? 'http://weaviate:8080',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill('SIGKILL'); } catch { /* already closed */ }
+      resolve('');
+    }, GIO_MEMORY_HOOK_TIMEOUT_MS);
+    timer.unref();
+
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr?.resume();
+    child.stdin?.end(JSON.stringify({
+      session_id: sessionId,
+      cwd: GIO_WORKSPACE,
+      hook_event_name: 'UserPromptSubmit',
+      prompt,
+    }));
+
+    child.on('error', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve('');
+    });
+    child.on('close', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(extractHookContext(stdout).slice(0, 24_000));
+    });
+  });
+}
+
 function truncateContext(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   return `${text.slice(0, maxChars)}\n\n[truncated to keep Gio web-chat context bounded]`;
 }
 
-function buildCodexPrompt(memoryIndex: string, priorMessages: ChatMessageRow[], currentMessage: string): string {
+function bosToolBridgePrompt(): string {
+  return [
+    '## BOS Tool Bridge',
+    'You can use Vasari/BOS brain tools from this Codex process through the local bridge.',
+    'List the live granted tools and their exact schemas before using an unfamiliar tool:',
+    '  node /app/apps/api/dist/employee-tool-cli.js list',
+    'Run one tool:',
+    '  node /app/apps/api/dist/employee-tool-cli.js run <tool_name> \'<json_args>\'',
+    'Useful examples:',
+    '  node /app/apps/api/dist/employee-tool-cli.js run boss_gmail_unread \'{"limit":5}\'',
+    '  node /app/apps/api/dist/employee-tool-cli.js run boss_drive_create_doc \'{"title":"Draft title","content":"Draft body"}\'',
+    '  node /app/apps/api/dist/employee-tool-cli.js run boss_knowledge_search \'{"query":"client or project context","limit":5}\'',
+    '  node /app/apps/api/dist/employee-tool-cli.js run boss_memory_recall \'{"query":"operator preference","limit":5}\'',
+    'Available categories include Gmail, Calendar, Drive, Weaviate/knowledge, memory, files, tasks, CRM, Slack, Make, Stripe, Meta/WhatsApp, LinkedIn, health, host status, and agent management when configured.',
+    'Do not claim a BOS tool is unavailable before listing the bridge. Use read-only tools first. For externally visible, destructive, spending, sending, posting, deleting, infrastructure, or CRM-changing actions, proceed only when the operator explicitly asked for that action or after a clear confirmation.',
+  ].join('\n');
+}
+
+function buildCodexPrompt(
+  memoryIndex: string,
+  promptRelevantMemory: string,
+  priorMessages: ChatMessageRow[],
+  currentMessage: string,
+): string {
   const transcript = priorMessages
     .map((msg) => {
       const speaker = msg.role === 'assistant' ? 'Gio' : msg.role === 'user' ? 'Operator' : 'System';
@@ -176,9 +298,11 @@ function buildCodexPrompt(memoryIndex: string, priorMessages: ChatMessageRow[], 
   const prompt = [
     'You are Gio, the COE Codex operator surface inside BOS.',
     'This Codex process is disposable. Do not rely on Codex CLI session state for continuity.',
-    'Use only the bounded context below for this turn: Gio memory index, recent DB chat turns, and the current operator message.',
+    'Use the bounded context below for this turn: prompt-relevant memory recall, Gio memory index, recent DB chat turns, and the current operator message.',
     'Target loop: understand expectation, execute the next concrete step, report results against expectation, then either continue with the next safe action or ask for specific clarification.',
     `Work from ${GIO_WORKSPACE} and follow its AGENTS.md, CLAUDE.md, and MEMORY.md instructions.`,
+    bosToolBridgePrompt(),
+    promptRelevantMemory ? `## Prompt-Relevant Memory Recall\n\n${promptRelevantMemory}` : '## Prompt-Relevant Memory Recall\n\nNo prompt-specific memory was returned for this turn.',
     `## Gio Memory Index\n\n${memoryIndex}`,
     transcript ? `## Recent DB Conversation Context\n\n${transcript}` : '## Recent DB Conversation Context\n\nNo prior messages are stored for this conversation.',
     `## Current Operator Message\n\n${currentMessage}`,
@@ -211,9 +335,40 @@ function safeAttachmentName(name: string | undefined, index: number): string {
   return cleaned || `attachment-${index}`;
 }
 
-async function materializeAttachments(body: ChatBody): Promise<{ promptSuffix: string; files: ChatAttachment[]; tempDir: string | null }> {
+function mimeTypeFromDataUrl(dataUrl: string | undefined): string | null {
+  const match = dataUrl?.match(/^data:([^;,]+)[;,]/);
+  return match?.[1] ?? null;
+}
+
+function inferAttachmentMimeType(name: string, mimeType: string | undefined, dataUrl?: string): string {
+  if (mimeType && mimeType !== 'application/octet-stream') return mimeType;
+  const fromDataUrl = mimeTypeFromDataUrl(dataUrl);
+  if (fromDataUrl) return fromDataUrl;
+  const ext = path.extname(name).toLowerCase();
+  return IMAGE_EXTENSION_MIME[ext] ?? mimeType ?? 'application/octet-stream';
+}
+
+function isImageAttachment(name: string, mimeType: string, dataUrl?: string): boolean {
+  return mimeType.startsWith('image/') ||
+    Boolean(mimeTypeFromDataUrl(dataUrl)?.startsWith('image/')) ||
+    Object.prototype.hasOwnProperty.call(IMAGE_EXTENSION_MIME, path.extname(name).toLowerCase());
+}
+
+function imageExtensionFor(mimeType: string): string {
+  if (mimeType === 'image/png') return '.png';
+  if (mimeType === 'image/webp') return '.webp';
+  if (mimeType === 'image/gif') return '.gif';
+  if (mimeType === 'image/bmp') return '.bmp';
+  if (mimeType === 'image/tiff') return '.tiff';
+  if (mimeType === 'image/heic') return '.heic';
+  if (mimeType === 'image/heif') return '.heif';
+  return '.jpg';
+}
+
+async function materializeAttachments(body: ChatBody): Promise<{ promptSuffix: string; files: ChatAttachment[]; tempDir: string | null; receipt: AttachmentReceipt }> {
   const incoming = (body.attachments ?? []).slice(0, MAX_ATTACHMENTS);
-  if (incoming.length === 0) return { promptSuffix: '', files: [], tempDir: null };
+  const receipt: AttachmentReceipt = { count: incoming.length, imageCount: 0, fileCount: 0, skippedCount: 0, names: [] };
+  if (incoming.length === 0) return { promptSuffix: '', files: [], tempDir: null, receipt };
 
   await fs.mkdir(GIO_ATTACHMENT_ROOT, { recursive: true });
   const tempDir = await fs.mkdtemp(path.join(GIO_ATTACHMENT_ROOT, 'gio-chat-'));
@@ -222,29 +377,31 @@ async function materializeAttachments(body: ChatBody): Promise<{ promptSuffix: s
 
   for (const [index, attachment] of incoming.entries()) {
     const name = safeAttachmentName(attachment.name, index + 1);
-    const mimeType = attachment.mimeType || 'application/octet-stream';
+    const mimeType = inferAttachmentMimeType(name, attachment.mimeType, attachment.dataUrl);
+    const image = isImageAttachment(name, mimeType, attachment.dataUrl);
+    receipt.names.push(name);
 
     if (attachment.dataUrl) {
       const comma = attachment.dataUrl.indexOf(',');
       const b64 = comma === -1 ? attachment.dataUrl : attachment.dataUrl.slice(comma + 1);
       const bytes = Buffer.from(b64, 'base64');
-      const maxBytes = mimeType.startsWith('image/') ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
+      const maxBytes = image ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
       if (bytes.byteLength > maxBytes) {
         notes.push(`- ${name}: skipped, file exceeded ${maxBytes / 1024 / 1024}MB.`);
+        receipt.skippedCount += 1;
         continue;
       }
       const ext = path.extname(name) || (
-        mimeType === 'image/png' ? '.png'
-          : mimeType === 'image/webp' ? '.webp'
-            : mimeType.startsWith('image/') ? '.jpg'
-              : '.bin'
+        image ? imageExtensionFor(mimeType) : '.bin'
       );
       const filePath = path.join(tempDir, `${index + 1}-${name}${path.extname(name) ? '' : ext}`);
       await fs.writeFile(filePath, bytes, { mode: 0o600 });
-      if (mimeType.startsWith('image/')) {
+      if (image) {
         files.push({ path: filePath, mimeType, name });
+        receipt.imageCount += 1;
         notes.push(`- ${name}: attached image (${mimeType}) at ${filePath}.`);
       } else {
+        receipt.fileCount += 1;
         notes.push(`- ${name}: uploaded file (${mimeType}, ${bytes.byteLength} bytes) at ${filePath}. Read this path directly if needed; do not quote sensitive contents back unless the operator explicitly asks.`);
       }
     } else if (typeof attachment.text === 'string' && attachment.text.trim()) {
@@ -252,20 +409,23 @@ async function materializeAttachments(body: ChatBody): Promise<{ promptSuffix: s
       const bytes = Buffer.byteLength(text, 'utf8');
       if (bytes > MAX_FILE_BYTES) {
         notes.push(`- ${name}: skipped, text attachment exceeded ${MAX_FILE_BYTES / 1024}KB.`);
+        receipt.skippedCount += 1;
         continue;
       }
       const filePath = path.join(tempDir, `${index + 1}-${name}${path.extname(name) ? '' : '.txt'}`);
       await fs.writeFile(filePath, text, { mode: 0o600 });
+      receipt.fileCount += 1;
       notes.push(`- ${name}: uploaded text file (${mimeType}, ${bytes} bytes) at ${filePath}. Read this path directly if needed; do not quote sensitive contents back unless the operator explicitly asks.`);
     } else {
+      receipt.skippedCount += 1;
       notes.push(`- ${name}: metadata only (${mimeType}); no readable file payload arrived.`);
     }
   }
 
   const promptSuffix = notes.length > 0
-    ? `\n\nAttached files from the operator:\n${notes.join('\n\n')}`
+    ? `\n\nAttached files from the operator:\n${receipt.imageCount > 0 ? `${receipt.imageCount} image attachment(s) were provided to Codex with --image. Inspect the image attachment(s) directly before saying no image is attached.\n\n` : ''}${notes.join('\n\n')}`
     : '';
-  return { promptSuffix, files, tempDir };
+  return { promptSuffix, files, tempDir, receipt };
 }
 
 export async function chatRoute(server: FastifyInstance): Promise<void> {
@@ -319,7 +479,7 @@ export async function chatRoute(server: FastifyInstance): Promise<void> {
     return reply.send({ ok: true, interrupted: true, conversationId: session.id, sessionId: session.id });
   });
 
-  server.post<{ Body: ChatBody }>('/api/openclaw/chat', async (request, reply) => {
+  server.post<{ Body: ChatBody }>('/api/openclaw/chat', { bodyLimit: MAX_CHAT_BODY_BYTES }, async (request, reply) => {
     const message = (request.body?.message ?? '').trim();
     const tenantId = tenantOf(request);
 
@@ -338,6 +498,16 @@ export async function chatRoute(server: FastifyInstance): Promise<void> {
     let materialized: Awaited<ReturnType<typeof materializeAttachments>>;
     try {
       materialized = await materializeAttachments(request.body ?? {});
+      request.log.info(
+        {
+          attachmentCount: materialized.receipt.count,
+          imageCount: materialized.receipt.imageCount,
+          fileCount: materialized.receipt.fileCount,
+          skippedCount: materialized.receipt.skippedCount,
+          names: materialized.receipt.names,
+        },
+        'gio chat attachments materialized',
+      );
     } catch (err) {
       return reply.status(400).send({ error: 'attachment-read-failed', message: (err as Error).message });
     }
@@ -362,8 +532,10 @@ export async function chatRoute(server: FastifyInstance): Promise<void> {
     }, 15_000);
 
     let aggregate = '';
-    const [memoryIndex, priorMessages] = await Promise.all([
+    const currentMessage = message + materialized.promptSuffix;
+    const [memoryIndex, promptRelevantMemory, priorMessages] = await Promise.all([
       readGioMemoryIndex(),
+      readPromptRelevantMemory(currentMessage, dbSession.id),
       loadRecentConversationMessages(dbSession.id),
     ]);
     await getPool().query(
@@ -379,9 +551,10 @@ export async function chatRoute(server: FastifyInstance): Promise<void> {
     );
     const assistantMessageId = assistantRow.rows[0].id;
     const persistState = { lastPersistedAt: 0, lastPersistedLen: 0 };
-    const codexPrompt = buildCodexPrompt(memoryIndex, priorMessages, message + materialized.promptSuffix);
+    const codexPrompt = buildCodexPrompt(memoryIndex, promptRelevantMemory, priorMessages, currentMessage);
 
     send('conversation', { conversationId: dbSession.id, sessionId: dbSession.id });
+    send('attachment', materialized.receipt);
 
     const { child, interrupt, done } = startChatTurn(codexPrompt, materialized.files, (event) => {
       send(event.type, event.payload);

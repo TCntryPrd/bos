@@ -16,12 +16,99 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, FolderOpen, Send, Loader2, Square, ChevronRight, ChevronDown, File as FileIcon, FileText, Folder, RefreshCw, Pencil, Save, X as XIcon } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Send, Loader2, Square, ChevronRight, ChevronDown, File as FileIcon, FileText, Folder, RefreshCw, Pencil, Save, X as XIcon, Mic, MicOff, Volume2, Monitor } from 'lucide-react';
 import { AgentAvatar } from '../components/AgentAvatar';
 import { PageLoader } from '../components/LoadingSpinner';
 import { KanbanBoard } from '../components/kanban/KanbanBoard.js';
 import { SurfaceTabs, type SurfaceTab } from '../components/SurfaceTabs.js';
 import { DictationButton } from '../components/DictationButton';
+import { humanizeSpokenBrief } from '../lib/spokenBrief';
+import ajBloomPortrait from '../assets/rascal-ajbloom-anime.png';
+import alfalfaPortrait from '../assets/rascal-alfalfa-anime.png';
+import buckwheatPortrait from '../assets/rascal-buckwheat-anime.png';
+import butchPortrait from '../assets/rascal-butch-anime.png';
+import darlaPortrait from '../assets/rascal-darla-anime.png';
+import froggyPortrait from '../assets/rascal-froggy-anime.png';
+import msRobertsPortrait from '../assets/rascal-msroberts-anime.png';
+import peteyPortrait from '../assets/rascal-petey-anime.png';
+import porkyPortrait from '../assets/rascal-porky-anime.png';
+import spankyPortrait from '../assets/rascal-spanky-anime.png';
+import stymiePortrait from '../assets/rascal-stymie-anime.png';
+import wheezerPortrait from '../assets/rascal-wheezer-anime.png';
+import buckleyPortrait from '../assets/outsider-buckley-anime.png';
+import dallyPortrait from '../assets/outsider-dally-anime.png';
+import darryPortrait from '../assets/outsider-darry-anime.png';
+import gioPortrait from '../assets/outsider-gio-anime.png';
+import mercuryPortrait from '../assets/outsider-mercury-anime.png';
+import ponyboyPortrait from '../assets/outsider-ponyboy-anime.png';
+import sodapopPortrait from '../assets/outsider-sodapop-anime.png';
+
+type SpeechRecognitionAlternative = { transcript: string };
+type SpeechRecognitionResult = { isFinal: boolean; 0: SpeechRecognitionAlternative };
+type SpeechRecognitionResultList = { length: number; [index: number]: SpeechRecognitionResult };
+type SpeechRecognitionEventLike = { resultIndex: number; results: SpeechRecognitionResultList };
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onend: (() => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  abort: () => void;
+  start: () => void;
+  stop: () => void;
+};
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  }
+}
+
+const SOFT_BLUE_GLASS: React.CSSProperties = {
+  background: 'linear-gradient(145deg, rgba(226, 248, 255, 0.88), rgba(196, 235, 251, 0.82))',
+  backdropFilter: 'blur(18px) saturate(1.14)',
+  WebkitBackdropFilter: 'blur(18px) saturate(1.14)',
+};
+
+const SOFT_BLUE_GLASS_HEADER: React.CSSProperties = {
+  background: 'linear-gradient(145deg, rgba(211, 242, 255, 0.94), rgba(181, 225, 246, 0.9))',
+  backdropFilter: 'blur(14px) saturate(1.16)',
+  WebkitBackdropFilter: 'blur(14px) saturate(1.16)',
+};
+
+const SOFT_BLUE_GLASS_BODY: React.CSSProperties = {
+  background: 'rgba(223, 247, 255, 0.9)',
+  backdropFilter: 'blur(12px) saturate(1.08)',
+  WebkitBackdropFilter: 'blur(12px) saturate(1.08)',
+};
+
+const RASCAL_PORTRAITS: Record<string, string> = {
+  ajbloom: ajBloomPortrait,
+  alfalfa: alfalfaPortrait,
+  buckwheat: buckwheatPortrait,
+  butch: butchPortrait,
+  darla: darlaPortrait,
+  froggy: froggyPortrait,
+  msroberts: msRobertsPortrait,
+  petey: peteyPortrait,
+  porky: porkyPortrait,
+  spanky: spankyPortrait,
+  stymie: stymiePortrait,
+  wheezer: wheezerPortrait,
+};
+
+const OUTSIDER_PORTRAITS: Record<string, string> = {
+  buckley: buckleyPortrait,
+  dally: dallyPortrait,
+  darry: darryPortrait,
+  gio: gioPortrait,
+  mercury: mercuryPortrait,
+  ponyboy: ponyboyPortrait,
+  slack: sodapopPortrait,
+};
 
 // ── Kind config ─────────────────────────────────────────────────────────────
 
@@ -31,8 +118,8 @@ interface KindConfig {
   apiBase:     string; // 'api/agents/rascals' or 'api/agents/outsiders'
   listKey:     'rascals' | 'outsiders';
   indexRoute:  string; // '/rascals' or '/outsiders'
-  indexLabel:  string; // 'Rascals' or 'Outsiders'
-  agentNoun:   string; // 'rascal' or 'outsider'
+  indexLabel:  string;
+  agentNoun:   string;
   testid:      string; // 'rascal-workspace' or 'outsider-workspace'
   chatTestid:  string; // 'rascal-chat-panel' or 'outsider-chat-panel'
 }
@@ -42,16 +129,16 @@ const KIND_CONFIG: Record<AgentKind, KindConfig> = {
     apiBase:    'api/agents/rascals',
     listKey:    'rascals',
     indexRoute: '/rascals',
-    indexLabel: 'Your Team',
-    agentNoun:  'rascal',
+    indexLabel: 'Client Managers',
+    agentNoun:  'client manager',
     testid:     'rascal-workspace',
     chatTestid: 'rascal-chat-panel',
   },
   outsider: {
     apiBase:    'api/agents/outsiders',
     listKey:    'outsiders',
-    indexRoute: '/outsiders',
-    indexLabel: 'Outsiders',
+    indexRoute: '/rascals',
+    indexLabel: 'Client Managers',
     agentNoun:  'outsider',
     testid:     'outsider-workspace',
     chatTestid: 'outsider-chat-panel',
@@ -256,16 +343,53 @@ function writeChatCache(cfg: KindConfig, handle: string, sessionId: string, mess
 
 // ── ChatPanel ───────────────────────────────────────────────────────────────
 
+function buildVoiceFirstMessage(text: string, displayName: string, visualWorkMode = false): string {
+  if (visualWorkMode) {
+    return [
+      `CEO voice request for ${displayName}: ${text}`,
+      '',
+      'This is a voice-first desk visit. The CEO does not want their spoken words displayed back in the UI.',
+      'Start your response with a short section exactly titled "Voice summary:" followed by 1-3 concise sentences suitable for spoken readback.',
+      'After that, keep the normal visible work details on screen when useful, including decisions, artifacts, tool outcomes, and relevant supporting detail.',
+      'Do not put step-by-step tool narration in the Voice summary. The visible screen can contain fuller working detail.',
+    ].join('\n');
+  }
+  return [
+    `CEO voice request for ${displayName}: ${text}`,
+    '',
+    'Respond like an executive assistant/client manager in a voice-first workspace.',
+    'Do not narrate internal reasoning, tool use, command output, logs, or implementation play-by-play.',
+    'Give a concise spoken summary of the work done, the requested result, and any decision or next step needed.',
+  ].join('\n');
+}
+
+function extractVoiceSummary(text: string): string {
+  return humanizeSpokenBrief(text, 420);
+}
+
+function browserSpeakText(text: string): void {
+  if (!window.speechSynthesis || !text.trim()) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text.slice(0, 1200));
+  utterance.rate = 0.96;
+  utterance.pitch = 0.95;
+  window.speechSynthesis.speak(utterance);
+}
+
 interface ChatPanelProps {
   cfg:         KindConfig;
   handle:      string;
   sessionId:   string;
   displayName: string;
+  voiceOnly?:  boolean;
 }
 
-function ChatPanel({ cfg, handle, sessionId, displayName }: ChatPanelProps) {
+function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => readChatCache(cfg, handle, sessionId));
   const [draft, setDraft] = useState('');
+  const [interim, setInterim] = useState('');
+  const [listening, setListening] = useState(false);
+  const [lastVoiceSummary, setLastVoiceSummary] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [pending, setPending] = useState('');
   const [pendingStartedAt, setPendingStartedAt] = useState<string | null>(null);
@@ -275,10 +399,19 @@ function ChatPanel({ cfg, handle, sessionId, displayName }: ChatPanelProps) {
   // sub returns — surface that to the user so the chat doesn't look frozen.
   const [activeSubagents, setActiveSubagents] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => { writeChatCache(cfg, handle, sessionId, messages); }, [cfg, handle, sessionId, messages]);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.abort();
+      audioRef.current?.pause();
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+    };
+  }, []);
 
   // Initial load + background polling. Server-side persist-on-frame
   // updates the assistant row every ~2s while the agent is generating,
@@ -329,14 +462,93 @@ function ChatPanel({ cfg, handle, sessionId, displayName }: ChatPanelProps) {
     abortRef.current?.abort();
   }, []);
 
+  const speakSummary = useCallback(async (text: string) => {
+    const summary = extractVoiceSummary(text);
+    if (!summary) return;
+    setLastVoiceSummary(summary);
+    try {
+      const token = localStorage.getItem('boss_token') ?? '';
+      const res = await fetch('api/tts/persona', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          text: summary,
+          surface: cfg.listKey,
+          handle,
+          displayName,
+          title: cfg.agentNoun,
+        }),
+      });
+      if (!res.ok) throw new Error(`TTS ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      audioRef.current?.pause();
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      audio.onerror = () => URL.revokeObjectURL(url);
+      audioRef.current = audio;
+      await audio.play();
+    } catch {
+      browserSpeakText(summary);
+    }
+  }, [cfg.agentNoun, cfg.listKey, displayName, handle]);
+
+  const startListening = useCallback(() => {
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Recognition || streaming) {
+      setStatusLabel(Recognition ? null : 'Speech recognition is unavailable in this browser.');
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.onresult = (event) => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        if (result.isFinal) finalText += result[0].transcript;
+        else interimText += result[0].transcript;
+      }
+      if (finalText.trim()) {
+        setDraft((prev) => `${prev}${prev ? ' ' : ''}${finalText.trim()}`);
+      }
+      setInterim(interimText.trim());
+    };
+    recognition.onerror = () => {
+      setListening(false);
+      setInterim('');
+    };
+    recognition.onend = () => {
+      setListening(false);
+      setInterim('');
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+    setListening(true);
+    setStatusLabel(null);
+  }, [streaming]);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    setListening(false);
+    setInterim('');
+  }, []);
+
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text || streaming) return;
+    recognitionRef.current?.stop();
+    setListening(false);
+    setInterim('');
     setDraft('');
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     setStreaming(true);
     setPending('');
-    setStatusLabel('Thinking…');
+    setStatusLabel('Coordinating...');
     const startedAt = new Date().toISOString();
     setPendingStartedAt(startedAt);
     const userTurn: ChatMessage = {
@@ -361,7 +573,7 @@ function ChatPanel({ cfg, handle, sessionId, displayName }: ChatPanelProps) {
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify({ message: buildVoiceFirstMessage(text, displayName, voiceOnly) }),
           signal: controller.signal,
         },
       );
@@ -394,7 +606,7 @@ function ChatPanel({ cfg, handle, sessionId, displayName }: ChatPanelProps) {
             for (const block of message?.content ?? []) {
               if (block.type === 'text' && block.text) { aggregated += block.text; sawText = true; }
               else if (block.type === 'tool_use' && block.name) {
-                setStatusLabel(`Working… ${block.name}`);
+                setStatusLabel('Coordinating request...');
                 if (block.name === 'Agent' && block.id) {
                   const toolId = block.id;
                   setActiveSubagents((s) => { const n = new Set(s); n.add(toolId); return n; });
@@ -444,8 +656,13 @@ function ChatPanel({ cfg, handle, sessionId, displayName }: ChatPanelProps) {
       try {
         const fresh = await fetchMessages(cfg, handle, sessionId);
         setMessages(fresh);
+        if (voiceOnly) {
+          const finalAssistant = [...fresh].reverse().find((m) => m.role === 'assistant')?.content ?? aggregated;
+          void speakSummary(finalAssistant);
+        }
       } catch {
         setMessages((m) => m);
+        if (voiceOnly) void speakSummary(aggregated);
       }
       setPending('');
       setPendingStartedAt(null);
@@ -454,14 +671,24 @@ function ChatPanel({ cfg, handle, sessionId, displayName }: ChatPanelProps) {
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [cfg, draft, handle, sessionId, streaming]);
+  }, [cfg, displayName, draft, handle, sessionId, speakSummary, streaming, voiceOnly]);
+
+  const visibleMessages = messages;
 
   return (
-    <div className="flex flex-1 flex-col min-h-0" data-testid={cfg.chatTestid}>
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
-        {messages.length === 0 && !pending && !statusLabel ? (
-          <div className="text-[12px] text-text-muted text-center pt-6">
-            No messages yet. Say hi to {displayName}.
+    <div
+      className={`flex flex-1 flex-col min-h-0 ${voiceOnly ? 'text-[#03070a]' : ''}`}
+      data-testid={cfg.chatTestid}
+      style={voiceOnly ? SOFT_BLUE_GLASS_BODY : undefined}
+    >
+      <div
+        ref={scrollRef}
+        className={`flex-1 min-h-0 overflow-y-auto space-y-3 ${voiceOnly ? 'px-5 py-4' : 'px-4 py-3'}`}
+        style={voiceOnly ? SOFT_BLUE_GLASS_BODY : undefined}
+      >
+        {visibleMessages.length === 0 && !pending && !statusLabel ? (
+          <div className={`text-[12px] text-center pt-6 ${voiceOnly ? 'text-[#1d2f38]' : 'text-text-muted'}`}>
+            {voiceOnly ? `${displayName}'s screen is ready.` : `No messages yet. Say hi to ${displayName}.`}
           </div>
         ) : null}
         {/* Cap render to last 10 messages. Long histories with multi-MB
@@ -469,18 +696,18 @@ function ChatPanel({ cfg, handle, sessionId, displayName }: ChatPanelProps) {
             after the 20-cap; dropping to 10 + per-message 50KB truncation
             on the server is what's keeping the page snappy. Older messages
             still live in boss_chat_messages — query with ?limit=N. */}
-        {messages.length > 10 ? (
-          <div className="text-[10px] text-text-muted/70 italic text-center py-2 border-y border-border/30">
-            … {messages.length - 10} earlier message{messages.length - 10 === 1 ? '' : 's'} hidden (recent 10 shown)
+        {visibleMessages.length > 10 ? (
+          <div className={`text-[10px] italic text-center py-2 border-y ${voiceOnly ? 'border-[#71b9d8]/80 text-[#1d2f38]' : 'border-border/30 text-text-muted/70'}`}>
+            … {visibleMessages.length - 10} earlier message{visibleMessages.length - 10 === 1 ? '' : 's'} hidden (recent 10 shown)
           </div>
         ) : null}
-        {messages.slice(-10).map((m) => (
-          <div key={m.id} className={`text-[13px] ${m.role === 'user' ? 'text-text-primary' : m.role === 'system' ? 'text-warning' : 'text-text-secondary'}`}>
+        {visibleMessages.slice(-10).map((m) => (
+          <div key={m.id} className={`text-[13px] ${voiceOnly ? (m.role === 'system' ? 'text-[#5c2600]' : 'text-[#03070a]') : m.role === 'user' ? 'text-text-primary' : m.role === 'system' ? 'text-warning' : 'text-text-secondary'}`}>
             <div className="flex items-baseline justify-between gap-3 mb-0.5">
-              <div className="vs-mono text-[9px] uppercase tracking-[0.22em] text-text-muted">
+              <div className={`vs-mono text-[9px] uppercase tracking-[0.22em] ${voiceOnly ? 'text-[#164257]' : 'text-text-muted'}`}>
                 {m.role === 'user' ? 'You' : m.role === 'system' ? 'System' : displayName}
               </div>
-              <div className="vs-mono text-[9px] text-text-muted/70" title={new Date(m.createdAt).toLocaleString()}>
+              <div className={`vs-mono text-[9px] ${voiceOnly ? 'text-[#274a5b]' : 'text-text-muted/70'}`} title={new Date(m.createdAt).toLocaleString()}>
                 {formatTimestamp(m.createdAt)}
               </div>
             </div>
@@ -488,21 +715,21 @@ function ChatPanel({ cfg, handle, sessionId, displayName }: ChatPanelProps) {
           </div>
         ))}
         {pending || statusLabel || activeSubagents.size > 0 ? (
-          <div className="text-[13px] text-text-secondary">
+          <div className={`text-[13px] ${voiceOnly ? 'text-[#03070a]' : 'text-text-secondary'}`}>
             <div className="flex items-baseline justify-between gap-3 mb-0.5">
-              <div className="vs-mono text-[9px] uppercase tracking-[0.22em] text-text-muted">{displayName}</div>
+              <div className={`vs-mono text-[9px] uppercase tracking-[0.22em] ${voiceOnly ? 'text-[#164257]' : 'text-text-muted'}`}>{displayName}</div>
               <div className="flex items-center gap-2">
                 {activeSubagents.size > 0 ? (
                   <div
                     className="inline-flex items-center gap-1 vs-mono text-[9px] px-1.5 py-0.5 rounded border border-accent/40 bg-accent/10 text-accent"
-                    title={`${activeSubagents.size} subagent${activeSubagents.size === 1 ? '' : 's'} running. Stop will interrupt them.`}
+                    title="Supporting work is running. Stop will interrupt it."
                   >
                     <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                    SUB×{activeSubagents.size}
+                    ACTIVE
                   </div>
                 ) : null}
                 {pendingStartedAt ? (
-                  <div className="vs-mono text-[9px] text-text-muted/70">{formatTimestamp(pendingStartedAt)}</div>
+                  <div className={`vs-mono text-[9px] ${voiceOnly ? 'text-[#274a5b]' : 'text-text-muted/70'}`}>{formatTimestamp(pendingStartedAt)}</div>
                 ) : null}
               </div>
             </div>
@@ -519,52 +746,111 @@ function ChatPanel({ cfg, handle, sessionId, displayName }: ChatPanelProps) {
       </div>
       <form
         onSubmit={(e) => { e.preventDefault(); void send(); }}
-        className="flex-shrink-0 border-t border-border px-3 py-2 flex items-end gap-2 bg-surface-1/30"
+        className={`flex-shrink-0 border-t px-3 py-2 ${voiceOnly ? 'border-[#71b9d8]/90 bg-[#bfe8fb]/98' : 'border-border bg-surface-1/30'}`}
+        style={voiceOnly ? SOFT_BLUE_GLASS_HEADER : undefined}
       >
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          value={draft}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            const t = e.currentTarget;
-            t.style.height = 'auto';
-            t.style.height = `${Math.min(t.scrollHeight, 128)}px`;
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !streaming) { e.preventDefault(); void send(); }
-          }}
-          placeholder={streaming ? 'Streaming… (Stop to interrupt, then send a follow-up)' : `Message ${displayName} (Enter to send, Shift+Enter for newline)`}
-          className="flex-1 min-w-0 resize-none bg-surface-2/60 border border-border rounded-md px-3 py-2 text-[13px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60 max-h-32 overflow-y-auto disabled:opacity-50"
-          disabled={streaming}
-        />
-        <DictationButton
-          compact={false}
-          disabled={streaming}
-          onTranscript={(text) =>
-            setDraft((prev) => (prev ? `${prev.trimEnd()} ${text}` : text))
-          }
-        />
-        {streaming ? (
-          <button
-            type="button"
-            onClick={cancel}
-            className="text-[12px] font-semibold text-text-primary px-3 py-2 rounded-md inline-flex items-center gap-1.5 border border-warning/50 bg-warning/15 hover:bg-warning/25"
-            title="Interrupt — sends Esc to the chat to cancel the current tool or subagent. Chat stays alive; partial reply is saved."
-          >
-            <Square className="w-3.5 h-3.5" />
-            Stop
-          </button>
+        {voiceOnly ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={listening ? stopListening : startListening}
+              disabled={streaming}
+              className={`inline-flex h-11 w-11 items-center justify-center rounded-md border transition disabled:opacity-40 ${
+                listening
+                  ? 'border-red-300/70 bg-red-100 text-red-700'
+                  : 'border-[#1c83ab] bg-white/78 text-[#061015] hover:bg-white'
+              }`}
+              title={listening ? 'Stop listening' : `Speak to ${displayName}`}
+            >
+              {listening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+            </button>
+            {streaming ? (
+              <button
+                type="button"
+                onClick={cancel}
+                className="inline-flex h-11 items-center gap-1.5 rounded-md border border-amber-300/60 bg-amber-100 px-3 text-[12px] font-semibold text-amber-800 hover:bg-amber-50"
+                title="Stop the current voice request"
+              >
+                <Square className="h-3.5 w-3.5" />
+                Stop
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!draft.trim()}
+                className="inline-flex h-11 items-center gap-1.5 rounded-md bg-[#56bf9b] px-3 text-[12px] font-bold text-[#07140f] shadow-lg shadow-[#6fb8ca]/25 disabled:opacity-35"
+                title="Send captured voice"
+              >
+                <Send className="h-3.5 w-3.5" />
+                Send voice
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void speakSummary(lastVoiceSummary)}
+              disabled={!lastVoiceSummary.trim()}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-[#71b9d8] bg-white/72 text-[#061015] disabled:opacity-35"
+              title="Replay spoken summary"
+            >
+              <Volume2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => { setDraft(''); setInterim(''); }}
+              disabled={(!draft.trim() && !interim.trim()) || streaming}
+              className="ml-auto h-11 rounded-md border border-[#71b9d8] bg-white/72 px-3 text-[12px] text-[#061015] disabled:opacity-35"
+            >
+              Clear
+            </button>
+            <div className="min-w-[160px] flex-1 text-[12px] text-[#061015]">
+              {listening ? 'Listening...' : draft.trim() ? 'Voice captured. Send when ready.' : streaming ? `${displayName} is working...` : `Speak to ${displayName}.`}
+              {interim ? <span className="text-[#274a5b]"> Capturing...</span> : null}
+            </div>
+          </div>
         ) : (
-          <button
-            type="submit"
-            disabled={!draft.trim()}
-            className="text-[12px] font-semibold text-[#0a0c12] px-3 py-2 rounded-md inline-flex items-center gap-1.5 disabled:opacity-50"
-            style={{ background: 'linear-gradient(135deg, #b56cff 0%, #5cc8ff 100%)' }}
-          >
-            <Send className="w-3.5 h-3.5" />
-            Send
-          </button>
+          <>
+            <div className="mb-2 min-h-[44px] rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-[13px] leading-relaxed text-text-primary">
+              {draft.trim() || (streaming ? 'Coordinating...' : `Speak to ${displayName}.`)}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <DictationButton
+                compact={false}
+                disabled={streaming}
+                onTranscript={(text) =>
+                  setDraft((prev) => (prev ? `${prev.trimEnd()} ${text}` : text))
+                }
+              />
+              {streaming ? (
+                <button
+                  type="button"
+                  onClick={cancel}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/15 px-3 py-2 text-[12px] font-semibold text-text-primary hover:bg-warning/25"
+                  title="Stop the current voice request"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!draft.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-[12px] font-semibold text-[#0a0c12] disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #b56cff 0%, #5cc8ff 100%)' }}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  Send voice
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setDraft('')}
+                disabled={!draft.trim() || streaming}
+                className="rounded-md border border-border bg-surface-2/50 px-3 py-2 text-[12px] text-text-muted hover:text-text-primary disabled:opacity-45"
+              >
+                Clear
+              </button>
+            </div>
+          </>
         )}
       </form>
     </div>
@@ -580,9 +866,10 @@ interface FileTreeNodeProps {
   depth:      number;
   onOpen:     (path: string) => void;
   activePath: string | null;
+  softBlue?:   boolean;
 }
 
-function FileTreeNode({ cfg, handle, entry, depth, onOpen, activePath }: FileTreeNodeProps) {
+function FileTreeNode({ cfg, handle, entry, depth, onOpen, activePath, softBlue = false }: FileTreeNodeProps) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<DirEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -607,20 +894,20 @@ function FileTreeNode({ cfg, handle, entry, depth, onOpen, activePath }: FileTre
         <button
           type="button"
           onClick={() => void toggle()}
-          className="w-full flex items-center gap-1 text-[12px] py-0.5 px-2 hover:bg-surface-2/40 text-text-secondary"
+          className={`w-full flex items-center gap-1 text-[12px] py-0.5 px-2 ${softBlue ? 'text-[#03070a] hover:bg-white/52' : 'text-text-secondary hover:bg-surface-2/40'}`}
           style={{ paddingLeft: 8 + indent }}
         >
           {expanded ? <ChevronDown className="w-3 h-3 flex-shrink-0" /> : <ChevronRight className="w-3 h-3 flex-shrink-0" />}
-          <Folder className="w-3 h-3 flex-shrink-0 text-accent/70" />
+          <Folder className={`w-3 h-3 flex-shrink-0 ${softBlue ? 'text-[#0e5c80]' : 'text-accent/70'}`} />
           <span className="truncate">{entry.name}</span>
         </button>
         {expanded && children
           ? children.map((c) => (
-              <FileTreeNode key={c.path} cfg={cfg} handle={handle} entry={c} depth={depth + 1} onOpen={onOpen} activePath={activePath} />
+              <FileTreeNode key={c.path} cfg={cfg} handle={handle} entry={c} depth={depth + 1} onOpen={onOpen} activePath={activePath} softBlue={softBlue} />
             ))
           : null}
         {expanded && loading ? (
-          <div className="text-[11px] text-text-muted px-2 py-1" style={{ paddingLeft: 24 + indent }}>Loading…</div>
+          <div className={`text-[11px] px-2 py-1 ${softBlue ? 'text-[#1d2f38]' : 'text-text-muted'}`} style={{ paddingLeft: 24 + indent }}>Loading…</div>
         ) : null}
       </div>
     );
@@ -631,10 +918,18 @@ function FileTreeNode({ cfg, handle, entry, depth, onOpen, activePath }: FileTre
     <button
       type="button"
       onClick={() => onOpen(entry.path)}
-      className={`w-full flex items-center gap-1 text-[12px] py-0.5 px-2 ${isActive ? 'bg-accent/15 text-text-primary' : 'hover:bg-surface-2/40 text-text-secondary'}`}
+      className={`w-full flex items-center gap-1 text-[12px] py-0.5 px-2 ${
+        softBlue
+          ? isActive
+            ? 'bg-white/70 text-[#03070a]'
+            : 'text-[#03070a] hover:bg-white/52'
+          : isActive
+            ? 'bg-accent/15 text-text-primary'
+            : 'hover:bg-surface-2/40 text-text-secondary'
+      }`}
       style={{ paddingLeft: 8 + indent + 12 }}
     >
-      {isMd ? <FileText className="w-3 h-3 flex-shrink-0 text-text-muted" /> : <FileIcon className="w-3 h-3 flex-shrink-0 text-text-muted" />}
+      {isMd ? <FileText className={`w-3 h-3 flex-shrink-0 ${softBlue ? 'text-[#0e5c80]' : 'text-text-muted'}`} /> : <FileIcon className={`w-3 h-3 flex-shrink-0 ${softBlue ? 'text-[#0e5c80]' : 'text-text-muted'}`} />}
       <span className="truncate">{entry.name}</span>
     </button>
   );
@@ -645,9 +940,10 @@ interface FileTreeProps {
   handle:     string;
   onOpen:     (path: string) => void;
   activePath: string | null;
+  softBlue?:   boolean;
 }
 
-function FileTree({ cfg, handle, onOpen, activePath }: FileTreeProps) {
+function FileTree({ cfg, handle, onOpen, activePath, softBlue = false }: FileTreeProps) {
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
 
   useEffect(() => {
@@ -657,15 +953,15 @@ function FileTree({ cfg, handle, onOpen, activePath }: FileTreeProps) {
   }, [cfg, handle]);
 
   if (!entries) {
-    return <div className="text-[11px] text-text-muted px-3 py-2">Loading project files…</div>;
+    return <div className={`text-[11px] px-3 py-2 ${softBlue ? 'text-[#1d2f38]' : 'text-text-muted'}`}>Loading project files…</div>;
   }
   if (entries.length === 0) {
-    return <div className="text-[11px] text-text-muted px-3 py-2">Project directory is empty.</div>;
+    return <div className={`text-[11px] px-3 py-2 ${softBlue ? 'text-[#1d2f38]' : 'text-text-muted'}`}>Project directory is empty.</div>;
   }
   return (
     <div className="py-1">
       {entries.map((e) => (
-        <FileTreeNode key={e.path} cfg={cfg} handle={handle} entry={e} depth={0} onOpen={onOpen} activePath={activePath} />
+        <FileTreeNode key={e.path} cfg={cfg} handle={handle} entry={e} depth={0} onOpen={onOpen} activePath={activePath} softBlue={softBlue} />
       ))}
     </div>
   );
@@ -992,19 +1288,24 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
   const [notFound, setNotFound] = useState(false);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [view, setView] = useState<SurfaceTab>('chat');
+  const deskVisit = kind === 'rascal' || kind === 'outsider';
 
   useEffect(() => {
     if (!handle) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setNotFound(false);
       const a = await fetchAgent(cfg, handle);
       if (cancelled) return;
       if (!a) {
+        setAgent(null);
+        setActiveSession(null);
         setNotFound(true);
         setLoading(false);
         return;
       }
+      setNotFound(false);
       setAgent(a);
       const list = await fetchSessions(cfg, handle);
       if (cancelled) return;
@@ -1031,28 +1332,148 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
     );
   }
 
+  if (deskVisit) {
+    const portraitMap = kind === 'outsider' ? OUTSIDER_PORTRAITS : RASCAL_PORTRAITS;
+    const portraitSrc = portraitMap[agent.handle.toLowerCase()] ?? null;
+    return (
+      <div data-testid={cfg.testid} className="relative h-full min-h-0 overflow-hidden text-white">
+        {auth.expired ? (
+          <div className="absolute inset-x-4 top-4 z-40 rounded-lg border border-amber-200/35 bg-amber-950/80 px-4 py-2 text-[12px] text-amber-100 backdrop-blur-md">
+            Your session expired. <button type="button" onClick={() => window.location.reload()} className="underline">Reload</button> to sign in again.
+          </div>
+        ) : null}
+
+        <header className="absolute left-4 right-4 top-4 z-30 flex items-center gap-3 rounded-lg border border-white/18 bg-[#101714]/62 px-4 py-3 shadow-2xl backdrop-blur-xl">
+          <Link to={cfg.indexRoute} className="inline-flex items-center gap-1 text-[12px] text-white/68 hover:text-white" aria-label={`Back to ${cfg.indexLabel.toLowerCase()}`}>
+            <ArrowLeft className="h-3.5 w-3.5" /> {cfg.indexLabel}
+          </Link>
+          <span className="text-white/28">/</span>
+          <div className="hidden sm:block">
+            {portraitSrc ? (
+              <img
+                src={portraitSrc}
+                alt=""
+                className="h-[30px] w-[30px] flex-shrink-0 rounded-full object-cover object-top"
+              />
+            ) : (
+              <AgentAvatar handle={agent.handle} displayName={agent.displayName} size={30} ring />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[14px] font-semibold leading-tight text-white">{agent.displayName}</div>
+            <div className="vs-mono truncate text-[10.5px] text-white/50">
+              {agent.client || agent.handle} · <span className="uppercase">{agent.cli}</span>
+            </div>
+          </div>
+          {agent.projectDir ? (
+            <div className="hidden items-center gap-1.5 font-mono text-[11px] text-white/52 lg:flex" title={agent.projectDir}>
+              <FolderOpen className="h-3.5 w-3.5" />
+              <span className="truncate max-w-[28ch]">{agent.projectDir}</span>
+            </div>
+          ) : null}
+          <SurfaceTabs value={view} onChange={setView} />
+        </header>
+
+        <aside
+          className="absolute bottom-5 left-4 top-[104px] z-20 flex w-[270px] min-h-0 flex-col overflow-hidden rounded-lg border border-[#71b9d8] text-[#03070a] shadow-2xl shadow-black/20"
+          style={SOFT_BLUE_GLASS}
+        >
+          <div className="flex-shrink-0 border-b border-[#71b9d8]/90 px-4 py-3" style={SOFT_BLUE_GLASS_HEADER}>
+            <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-[#164257]">Workspace Tree</div>
+            <div className="mt-1 truncate text-[11px] text-[#061015]">{activeFile ?? 'Browse their workspace'}</div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto py-1">
+            <FileTree cfg={cfg} handle={agent.handle} onOpen={setActiveFile} activePath={activeFile} softBlue />
+          </div>
+        </aside>
+
+        <div
+          className="absolute z-10 overflow-hidden rounded-xl border border-white/20 bg-black/12 shadow-2xl shadow-black/35"
+          style={{
+            left: '30%',
+            top: '17%',
+            width: 'clamp(176px, 15vw, 260px)',
+            aspectRatio: '3 / 4',
+          }}
+        >
+          {portraitSrc ? (
+            <img src={portraitSrc} alt="" className="h-full w-full object-cover object-top" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-[#10251f]/86">
+              <AgentAvatar handle={agent.handle} displayName={agent.displayName} size={112} ring />
+            </div>
+          )}
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/78 to-transparent px-3 pb-3 pt-10">
+            <div className="truncate text-sm font-semibold">{agent.displayName}</div>
+            <div className="truncate text-[11px] text-white/62">{agent.client || agent.handle}</div>
+          </div>
+        </div>
+
+        <section
+          className="absolute z-20 flex min-h-0 flex-col overflow-hidden rounded-lg border border-[#71b9d8] text-[#03070a] shadow-2xl shadow-black/26 ring-1 ring-white/35"
+          style={{
+            ...SOFT_BLUE_GLASS,
+            right: '7%',
+            top: '18%',
+            height: '44%',
+            width: '40.5%',
+          }}
+        >
+          <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-[#71b9d8]/90 px-4 py-2" style={SOFT_BLUE_GLASS_HEADER}>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[12px] font-semibold text-[#03070a]">
+                <Monitor className="h-4 w-4 text-[#0e5c80]" />
+                {agent.displayName}'s screen
+              </div>
+              <div className="vs-mono mt-0.5 truncate text-[9.5px] uppercase tracking-[0.18em] text-[#164257]">
+                {view === 'tasks' ? 'Task board' : 'Live work feed'}
+              </div>
+            </div>
+            <div className="hidden rounded-full border border-[#71b9d8] bg-white/72 px-2.5 py-1 text-[10px] font-semibold text-[#061015] md:block">
+              Voice only
+            </div>
+          </div>
+          {view === 'tasks' ? (
+            <div className="min-h-0 flex-1 overflow-hidden bg-white/92 text-[#101714]">
+              <KanbanBoard scope={{ kind, handle: agent.handle }} />
+            </div>
+          ) : activeSession ? (
+            <ChatPanel cfg={cfg} handle={agent.handle} sessionId={activeSession.id} displayName={agent.displayName} voiceOnly />
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-[12px] text-white/54">
+              Initialising voice desk...
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
   return (
-    <div data-testid={cfg.testid} className="flex flex-1 flex-col h-full">
+    <div
+      data-testid={cfg.testid}
+      className={deskVisit ? 'flex h-full flex-1 flex-col gap-3 overflow-hidden p-4 text-white' : 'flex h-full flex-1 flex-col'}
+    >
       {auth.expired ? (
         <div className="bg-warning/15 border-b border-warning/40 text-warning px-4 py-2 text-[12px]">
           Your session expired. <button type="button" onClick={() => window.location.reload()} className="underline">Reload</button> to sign in again.
         </div>
       ) : null}
 
-      <header className="flex items-center gap-3 border-b border-border bg-surface-1/60 px-5 py-3">
+      <header className={`flex items-center gap-3 border-border px-5 py-3 ${deskVisit ? 'rounded-lg border bg-white/48 text-[#12201b] shadow-2xl backdrop-blur-xl' : 'border-b bg-surface-1/60'}`}>
         <Link to={cfg.indexRoute} className="inline-flex items-center gap-1 text-[12px] text-text-muted hover:text-text-primary" aria-label={`Back to ${cfg.indexLabel.toLowerCase()}`}>
           <ArrowLeft className="w-3.5 h-3.5" /> {cfg.indexLabel}
         </Link>
         <span className="text-text-muted">/</span>
         <AgentAvatar handle={agent.handle} displayName={agent.displayName} size={32} ring />
         <div className="min-w-0 flex-1">
-          <div className="text-[14px] font-semibold text-text-primary leading-tight truncate">{agent.displayName}</div>
-          <div className="vs-mono text-[10.5px] text-text-muted truncate">
+          <div className={`truncate text-[14px] font-semibold leading-tight ${deskVisit ? 'text-[#101714]' : 'text-text-primary'}`}>{agent.displayName}</div>
+          <div className={`vs-mono truncate text-[10.5px] ${deskVisit ? 'text-[#40524b]' : 'text-text-muted'}`}>
             {agent.handle} · {agent.client || '—'} · <span className="uppercase">{agent.cli}</span>
           </div>
         </div>
         {agent.projectDir ? (
-          <div className="hidden md:flex items-center gap-1.5 text-[11px] text-text-muted font-mono" title={agent.projectDir}>
+          <div className={`hidden items-center gap-1.5 font-mono text-[11px] md:flex ${deskVisit ? 'text-[#40524b]' : 'text-text-muted'}`} title={agent.projectDir}>
             <FolderOpen className="w-3.5 h-3.5" />
             <span className="truncate max-w-[28ch]">{agent.projectDir}</span>
           </div>
@@ -1061,13 +1482,13 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
       </header>
 
       {view === 'tasks' ? (
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div className={deskVisit ? 'min-h-0 flex-1 overflow-hidden rounded-lg border border-white/26 bg-white/55 shadow-2xl backdrop-blur-xl' : 'flex-1 min-h-0 overflow-hidden'}>
           <KanbanBoard scope={{ kind, handle: agent.handle }} />
         </div>
       ) : (
-      <div className="grid flex-1 min-h-0 grid-cols-[260px_1fr_280px] gap-px bg-border">
-        <aside className="flex flex-col bg-surface-1/40 min-h-0">
-          <div className="flex-shrink-0 vs-mono px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-text-muted border-b border-border">
+      <div className={deskVisit ? 'grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_300px] gap-3' : 'grid flex-1 min-h-0 grid-cols-[260px_1fr_280px] gap-px bg-border'}>
+        <aside className={`flex min-h-0 flex-col ${deskVisit ? 'overflow-hidden rounded-lg border border-white/26 bg-white/55 text-[#12201b] shadow-2xl backdrop-blur-xl' : 'bg-surface-1/40'}`}>
+          <div className={`vs-mono flex-shrink-0 border-b border-border px-4 py-2 text-[10px] uppercase tracking-[0.22em] ${deskVisit ? 'text-[#53655d]' : 'text-text-muted'}`}>
             Project files
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
@@ -1075,9 +1496,9 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
           </div>
         </aside>
 
-        <main className="flex flex-col bg-surface-0/60 min-h-0 min-w-0">
-          <section className="flex-1 min-h-0 min-w-0 flex flex-col">
-            <div className="flex-shrink-0 vs-mono px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-text-muted border-b border-border">
+        <main className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${deskVisit ? 'rounded-lg border border-white/26 bg-[#101714]/72 shadow-2xl backdrop-blur-xl' : 'bg-surface-0/60'}`}>
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="vs-mono flex-shrink-0 border-b border-border px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-text-muted">
               File editor
             </div>
             <FileEditor cfg={cfg} handle={agent.handle} path={activeFile} />
@@ -1090,9 +1511,9 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
             }}
             aria-hidden
           />
-          <section className="flex-1 min-h-0 min-w-0 flex flex-col">
-            <div className="flex-shrink-0 vs-mono px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-text-muted border-b border-border">
-              Chat with {agent.displayName}
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="vs-mono flex-shrink-0 border-b border-border px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-text-muted">
+              {deskVisit ? 'Voice desk' : 'Chat'} with {agent.displayName}
             </div>
             {activeSession ? (
               <ChatPanel cfg={cfg} handle={agent.handle} sessionId={activeSession.id} displayName={agent.displayName} />
@@ -1104,8 +1525,8 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
           </section>
         </main>
 
-        <aside className="flex flex-col bg-surface-1/40 min-h-0">
-          <div className="flex-shrink-0 vs-mono px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-text-muted border-b border-border">
+        <aside className={`flex min-h-0 flex-col ${deskVisit ? 'overflow-hidden rounded-lg border border-white/26 bg-white/55 text-[#12201b] shadow-2xl backdrop-blur-xl' : 'bg-surface-1/40'}`}>
+          <div className={`vs-mono flex-shrink-0 border-b border-border px-4 py-2 text-[10px] uppercase tracking-[0.22em] ${deskVisit ? 'text-[#53655d]' : 'text-text-muted'}`}>
             Agenda · agenda.md
           </div>
           <AgendaPanel

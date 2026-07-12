@@ -12,6 +12,9 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getPool } from '../db.js';
+import { findUnipileAccount, isUnipileConfigured, sendUnipileChatMessage, startUnipileWhatsAppChat } from '../lib/unipile.js';
+
+const UNIPILE_CHAT_PREFIX = 'unipile:';
 
 function getTenantId(req: FastifyRequest): string {
   return req.tenant?.tenantId ?? 'default';
@@ -91,7 +94,16 @@ export default async function agentsRoutes(app: FastifyInstance): Promise<void> 
             ? String(modification.message)
             : String(data.draft_message);
 
-          // Send via WhatsApp API
+          if (isUnipileConfigured()) {
+            const liveChatId = chatId?.startsWith(UNIPILE_CHAT_PREFIX) ? chatId.slice(UNIPILE_CHAT_PREFIX.length) : chatId;
+            const account = await findUnipileAccount('WHATSAPP');
+            const sent = liveChatId
+              ? await sendUnipileChatMessage(liveChatId, message, account?.id)
+              : await startUnipileWhatsAppChat(String(data.phone ?? data.to ?? ''), message);
+            return reply.send({ ok: true, action: 'sent', messageId: sent.messageId });
+          }
+
+          // Legacy OpenWA path, retained only when Unipile is not configured.
           const OPENWA_BASE = process.env.OPENWA_BASE_URL ?? 'http://localhost:2785/api';
           const OPENWA_SESSION = process.env.OPENWA_SESSION_ID;
           const OPENWA_KEY = process.env.OPENWA_API_KEY;

@@ -6,17 +6,27 @@
  *   POST   /api/whatsapp/threads/:chatId/send          — send a text reply (manual)
  *   POST   /api/whatsapp/threads/:chatId/mark-read     — zero the unread counter
  *
- * The send endpoint hits OpenWA `/messages/send-text`. Inbound + outbound
- * persistence happens via /api/webhooks/whatsapp (subscribed to message.sent
- * and message.received), so this route never inserts directly; OpenWA's echo
- * is the source of truth.
+ * Live WhatsApp traffic is served through Unipile. The older OpenWA paths
+ * below are retained as legacy code, but the active API short-circuits to
+ * Unipile so stale local OpenWA tables are not shown in the UI.
  */
 import type { FastifyInstance } from 'fastify';
 import { getPool } from '../db.js';
+import {
+  findUnipileAccount,
+  isUnipileConfigured,
+  listUnipileChatMessages,
+  listUnipileChats,
+  sendUnipileChatMessage,
+  startUnipileWhatsAppChat,
+  type UnipileChat,
+  type UnipileMessage,
+} from '../lib/unipile.js';
 
 const OPENWA_BASE = process.env.OPENWA_BASE_URL ?? 'http://localhost:2785/api';
 const OPENWA_SESSION = process.env.OPENWA_SESSION_ID ?? '932ccb22-8072-4bee-906c-0c1bae593a1f';
 const OPENWA_KEY = process.env.OPENWA_API_KEY ?? '';
+const UNIPILE_CHAT_PREFIX = 'unipile:';
 
 interface ThreadRow {
   chat_id: string;
@@ -69,6 +79,138 @@ interface OpenWaContact {
   isMyContact?: boolean;
   isBlocked?: boolean;
   isGroup?: boolean;
+}
+
+function unipileRouteChatId(chatId: string): string {
+  return chatId.startsWith(UNIPILE_CHAT_PREFIX) ? chatId.slice(UNIPILE_CHAT_PREFIX.length) : chatId;
+}
+
+function asBool(value: unknown): boolean {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+function unipilePhone(value?: string | null): string | null {
+  if (!value) return null;
+  const stripped = value.replace(/@(s\.whatsapp\.net|c\.us|lid)$/i, '');
+  return stripped ? `+${stripped.replace(/^\+/, '')}` : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function textFrom(source: Record<string, unknown> | null | undefined, keys: string[]): string | null {
+  if (!source) return null;
+  for (const key of keys) {
+    const value = stringValue(source[key]);
+    if (value) return value;
+  }
+  return null;
+}
+
+function nestedTextFrom(source: Record<string, unknown> | null | undefined, parentKeys: string[], keys: string[]): string | null {
+  if (!source) return null;
+  for (const parentKey of parentKeys) {
+    const value = textFrom(recordValue(source[parentKey]), keys);
+    if (value) return value;
+  }
+  return null;
+}
+
+function entityDisplayName(entity: Record<string, unknown> | null | undefined): string | null {
+  return textFrom(entity, ['display_name', 'displayName', 'full_name', 'fullName', 'name', 'push_name', 'pushName', 'verified_name', 'verifiedName']);
+}
+
+function entityProviderId(entity: Record<string, unknown> | null | undefined): string | null {
+  return textFrom(entity, ['provider_id', 'providerId', 'attendee_provider_id', 'attendeeProviderId', 'id']);
+}
+
+function firstAttendee(chat: UnipileChat): Record<string, unknown> | null {
+  return recordValue(chat.attendee) ?? chat.attendees?.map(recordValue).find(Boolean) ?? null;
+}
+
+function unipileChatProviderId(chat: UnipileChat): string | null {
+  return chat.attendee_provider_id ?? chat.provider_id ?? entityProviderId(firstAttendee(chat));
+}
+
+function isUnipileGroupChat(chat: UnipileChat): boolean {
+  const type = String(chat.type ?? '').toLowerCase();
+  if (type.includes('group')) return true;
+  if ((chat.provider_id ?? '').endsWith('@g.us') || (chat.attendee_provider_id ?? '').endsWith('@g.us')) return true;
+  return Array.isArray(chat.attendees) && chat.attendees.length > 1;
+}
+
+function unipileChatDisplayName(chat: UnipileChat): string | null {
+  const attendee = firstAttendee(chat);
+  return chat.name ?? chat.subject ?? entityDisplayName(attendee);
+}
+
+function unipileMessageSenderName(message: UnipileMessage): string | null {
+  const source = message as unknown as Record<string, unknown>;
+  return message.sender_name
+    ?? message.sender_full_name
+    ?? entityDisplayName(recordValue(message.sender))
+    ?? entityDisplayName(recordValue(message.attendee))
+    ?? nestedTextFrom(source, ['sender', 'attendee', 'author', 'from'], ['display_name', 'displayName', 'full_name', 'fullName', 'name', 'push_name', 'pushName'])
+    ?? null;
+}
+
+function mapUnipileChat(chat: UnipileChat): ThreadRow {
+  const providerId = unipileChatProviderId(chat);
+  const phone = unipilePhone(providerId);
+  return {
+    chat_id: `${UNIPILE_CHAT_PREFIX}${chat.id}`,
+    display_name: unipileChatDisplayName(chat) ?? phone ?? providerId ?? chat.id,
+    phone,
+    is_group: isUnipileGroupChat(chat),
+    last_message_at: chat.timestamp ?? null,
+    last_message_preview: chat.subject ?? null,
+    last_message_from_me: null,
+    unread_count: Number(chat.unread_count ?? 0),
+    archived: asBool(chat.archived),
+  };
+}
+
+function mapUnipileMessage(message: UnipileMessage): MessageRow {
+  const fromMe = asBool(message.is_sender);
+  const id = message.id ?? message.message_id ?? `${message.chat_id ?? 'unipile'}-${message.timestamp ?? Date.now()}`;
+  const senderName = unipileMessageSenderName(message);
+  return {
+    id: `${UNIPILE_CHAT_PREFIX}${id}`,
+    chat_id: `${UNIPILE_CHAT_PREFIX}${message.chat_id ?? ''}`,
+    wa_message_id: message.message_id ?? message.id ?? null,
+    direction: fromMe ? 'outbound' : 'inbound',
+    from_me: fromMe,
+    author: message.sender_id ?? null,
+    sender_name: senderName,
+    body: message.text ?? null,
+    message_type: message.message_type ?? 'chat',
+    media_url: null,
+    ack_status: asBool(message.seen) ? 'seen' : asBool(message.delivered) ? 'delivered' : null,
+    sent_at: message.timestamp ?? new Date().toISOString(),
+  };
+}
+
+function mapUnipileContact(chat: UnipileChat): ContactRow {
+  const providerId = unipileChatProviderId(chat);
+  const phone = unipilePhone(providerId);
+  const displayName = unipileChatDisplayName(chat);
+  return {
+    contact_id: `${UNIPILE_CHAT_PREFIX}${chat.id}`,
+    display_name: displayName ?? phone,
+    phone,
+    push_name: displayName,
+    verified_name: null,
+    is_my_contact: null,
+    is_blocked: null,
+    is_group: isUnipileGroupChat(chat),
+    last_seen_at: chat.timestamp ?? null,
+    synced_at: new Date().toISOString(),
+  };
 }
 
 function chatIdToPhone(chatId: string): string {
@@ -138,6 +280,15 @@ async function upsertWhatsappContact(contact: OpenWaContact, lastSeenAt: Date | 
 export async function whatsappRoutes(server: FastifyInstance) {
   // ── List threads ────────────────────────────────────────────────────────
   server.get('/threads', async (request, reply) => {
+    if (!isUnipileConfigured()) return reply.send({ threads: [] });
+    try {
+      const chats = await listUnipileChats('WHATSAPP', 200);
+      return reply.send({ threads: chats.map(mapUnipileChat) });
+    } catch (err) {
+      request.log.error({ err }, 'unipile whatsapp threads failed');
+      return reply.status(502).send({ error: 'unipile_threads_failed' });
+    }
+
     const { rows } = await getPool().query<ThreadRow>(
       `SELECT chat_id, display_name, phone, is_group, last_message_at,
               last_message_preview, last_message_from_me, unread_count, archived
@@ -154,6 +305,15 @@ export async function whatsappRoutes(server: FastifyInstance) {
     '/threads/:chatId/messages',
     async (request, reply) => {
       const chatId = decodeURIComponent(request.params.chatId);
+      if (!isUnipileConfigured()) return reply.send({ chatId, messages: [] });
+      try {
+        const messages = await listUnipileChatMessages(unipileRouteChatId(chatId), Math.min(parseInt(request.query.limit ?? '50', 10) || 50, 200));
+        return reply.send({ chatId, messages: messages.map(mapUnipileMessage) });
+      } catch (err) {
+        request.log.error({ err, chatId }, 'unipile whatsapp messages failed');
+        return reply.status(502).send({ error: 'unipile_messages_failed' });
+      }
+
       const limit = Math.min(parseInt(request.query.limit ?? '50', 10) || 50, 200);
       const before = request.query.before;
       const params: unknown[] = [chatId];
@@ -184,6 +344,15 @@ export async function whatsappRoutes(server: FastifyInstance) {
       const chatId = decodeURIComponent(request.params.chatId);
       const message = String(request.body?.message ?? '').trim();
       if (!message) return reply.status(400).send({ error: 'bad_request', message: 'message is required' });
+      if (!isUnipileConfigured()) return reply.status(503).send({ error: 'unipile_not_configured' });
+      try {
+        const account = await findUnipileAccount('WHATSAPP');
+        const sent = await sendUnipileChatMessage(unipileRouteChatId(chatId), message, account?.id);
+        return reply.send({ ok: true, unipile: sent });
+      } catch (err) {
+        request.log.error({ err, chatId }, 'unipile whatsapp send failed');
+        return reply.status(502).send({ error: 'unipile_send_failed' });
+      }
       if (!OPENWA_KEY) return reply.status(503).send({ error: 'openwa_not_configured' });
 
       try {
@@ -237,8 +406,12 @@ export async function whatsappRoutes(server: FastifyInstance) {
     },
   );
 
-  // ── Contact list from OpenWA ────────────────────────────────────────────
+  // ── Live contact list derived from Unipile WhatsApp chats ───────────────
   server.get('/contacts', async (_request, reply) => {
+    if (!isUnipileConfigured()) return reply.send({ contacts: [] });
+    const chats = await listUnipileChats('WHATSAPP', 500);
+    return reply.send({ contacts: chats.map(mapUnipileContact) });
+
     const { rows } = await getPool().query<ContactRow>(
       `SELECT contact_id, display_name, phone, push_name, verified_name,
               is_my_contact, is_blocked, is_group, last_seen_at, synced_at
@@ -251,6 +424,15 @@ export async function whatsappRoutes(server: FastifyInstance) {
   });
 
   server.post('/contacts/sync', async (request, reply) => {
+    if (!isUnipileConfigured()) return reply.status(503).send({ error: 'unipile_not_configured' });
+    try {
+      const chats = await listUnipileChats('WHATSAPP', 500);
+      return reply.send({ ok: true, upserted: 0, total: chats.length });
+    } catch (err) {
+      request.log.error({ err }, 'unipile whatsapp contacts sync failed');
+      return reply.status(502).send({ error: 'unipile_contacts_failed' });
+    }
+
     if (!OPENWA_KEY) return reply.status(503).send({ error: 'openwa_not_configured' });
     try {
       const contactsRes = await fetch(`${OPENWA_BASE}/sessions/${OPENWA_SESSION}/contacts`, {
@@ -271,8 +453,10 @@ export async function whatsappRoutes(server: FastifyInstance) {
     }
   });
 
-  // ── Sync names from OpenWA (groups + contacts) ─────────────────────────
+  // ── Legacy name sync. With Unipile live, this is a no-op. ───────────────
   server.post('/sync-names', async (request, reply) => {
+    if (isUnipileConfigured()) return reply.send({ ok: true, updated: 0, source: 'unipile' });
+
     if (!OPENWA_KEY) return reply.status(503).send({ error: 'openwa_not_configured' });
     const pool = getPool();
     try {
@@ -350,6 +534,9 @@ export async function whatsappRoutes(server: FastifyInstance) {
   // ── Mark a thread read ──────────────────────────────────────────────────
   server.post<{ Params: { chatId: string } }>('/threads/:chatId/mark-read', async (request, reply) => {
     const chatId = decodeURIComponent(request.params.chatId);
+    if (isUnipileConfigured()) {
+      return reply.send({ ok: true });
+    }
     await getPool().query(
       `UPDATE boss_whatsapp_threads
           SET unread_count = 0, updated_at = NOW()
@@ -359,8 +546,10 @@ export async function whatsappRoutes(server: FastifyInstance) {
     return reply.send({ ok: true });
   });
 
-  // ── Sync messages from OpenWA (for phone-sent messages not captured by webhook) ──
+  // ── Legacy message sync. With Unipile live, this is a no-op. ────────────
   server.post<{ Params: { chatId: string } }>('/threads/:chatId/sync', async (request, reply) => {
+    if (isUnipileConfigured()) return reply.send({ ok: true, synced: 0, source: 'unipile' });
+
     if (!OPENWA_KEY) return reply.status(503).send({ error: 'openwa_not_configured' });
     const chatId = decodeURIComponent(request.params.chatId);
     const SESSION_PHONE = process.env.OPENWA_SESSION_PHONE ?? '15397777906';
@@ -520,6 +709,15 @@ export async function whatsappRoutes(server: FastifyInstance) {
       const { phone, message } = request.body;
       if (!phone || !message) {
         return reply.status(400).send({ error: 'phone and message required' });
+      }
+      if (!isUnipileConfigured()) return reply.status(503).send({ error: 'unipile_not_configured' });
+
+      try {
+        const sent = await startUnipileWhatsAppChat(phone, message);
+        return reply.send({ ok: true, chatId: sent.chatId ? `${UNIPILE_CHAT_PREFIX}${sent.chatId}` : null, messageId: sent.messageId });
+      } catch (err) {
+        request.log.error({ err, phone }, 'unipile start-conversation failed');
+        return reply.status(502).send({ error: 'unipile_start_conversation_failed' });
       }
 
       // Normalize phone to chatId format

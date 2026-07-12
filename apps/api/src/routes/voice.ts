@@ -18,10 +18,12 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { execFile } from 'node:child_process';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { parse as parseForm } from 'node:querystring';
 
 const execFileAsync = promisify(execFile);
 
@@ -29,6 +31,7 @@ const execFileAsync = promisify(execFile);
 const STT_URL = process.env.STT_URL || 'http://stt:8000';
 const TTS_URL = process.env.TTS_URL || 'http://tts:8003/speak';
 const VOICE_JOBS_DIR = process.env.VOICE_JOBS_DIR || '/tmp/boss-jobs';
+const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01';
 
 fs.mkdir(VOICE_JOBS_DIR, { recursive: true }).catch(() => {});
 
@@ -140,11 +143,96 @@ interface UpdateDeviceBody {
   ttsVoice?: string;
 }
 
+interface TwilioCallBody {
+  message?: string;
+}
+
+type TwilioFormBody = Record<string, string | string[] | undefined>;
+
+function xmlEscape(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function twiml(body: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`;
+}
+
+function firstValue(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
+function twilioCredentials() {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID || '';
+  const authToken = process.env.TWILIO_AUTH_TOKEN || '';
+  const apiKeySid = process.env.TWILIO_API_KEY_SID || '';
+  const fromNumber = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM_NUMBER || '';
+  const allowedCaller = process.env.TWILIO_ALLOWED_CALLER || '+15397777906';
+  return {
+    accountSid,
+    authToken,
+    apiKeySid,
+    fromNumber,
+    allowedCaller,
+    configured: Boolean(accountSid && authToken),
+    outboundReady: Boolean(accountSid && authToken && fromNumber && allowedCaller),
+  };
+}
+
+function twilioSayVoice(): string {
+  return process.env.TWILIO_SAY_VOICE || 'Polly.Joanna-Neural';
+}
+
+function twilioSay(text: string): string {
+  return `<Say voice="${xmlEscape(twilioSayVoice())}">${xmlEscape(text)}</Say>`;
+}
+
+function safeEq(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function expectedTwilioSignature(url: string, params: TwilioFormBody, authToken: string): string {
+  const payload = Object.keys(params)
+    .sort()
+    .reduce((acc, key) => `${acc}${key}${firstValue(params[key])}`, url);
+  return createHmac('sha1', authToken).update(payload).digest('base64');
+}
+
+function twilioSignatureValid(request: FastifyRequest, params: TwilioFormBody, authToken: string): boolean {
+  const received = request.headers['x-twilio-signature'];
+  if (!authToken || typeof received !== 'string') return false;
+  const host = request.headers['x-forwarded-host'] || request.headers.host || '';
+  const proto = request.headers['x-forwarded-proto'] || 'https';
+  const requestUrl = request.url;
+  const candidates = [
+    process.env.TWILIO_VOICE_WEBHOOK_URL,
+    host ? `${proto}://${host}${requestUrl}` : '',
+    host ? `https://${host}${requestUrl}` : '',
+  ].filter((url): url is string => Boolean(url));
+  return candidates.some((url) => safeEq(received, expectedTwilioSignature(url, params, authToken)));
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
 export async function voiceRoutes(server: FastifyInstance) {
+  server.addContentTypeParser(
+    'application/x-www-form-urlencoded',
+    { parseAs: 'string' },
+    (request, body, done) => {
+      const text = typeof body === 'string' ? body : body.toString('utf8');
+      (request as unknown as { rawBody: string }).rawBody = text;
+      done(null, parseForm(text));
+    },
+  );
+
   /**
    * GET /api/voice/devices
    * List all registered voice devices for the current tenant.
@@ -171,6 +259,95 @@ export async function voiceRoutes(server: FastifyInstance) {
         .map((d) => ({ ...d, updatedAt: d.updatedAt.toISOString() }));
 
       return reply.status(200).send(devices);
+    },
+  );
+
+  server.get('/twilio/status', async (_request, reply) => {
+    const creds = twilioCredentials();
+    return reply.status(200).send({
+      configured: creds.configured,
+      accountSidConfigured: Boolean(creds.accountSid),
+      apiKeySidConfigured: Boolean(creds.apiKeySid),
+      outboundReady: creds.outboundReady,
+      allowedCaller: creds.allowedCaller,
+      sayVoice: twilioSayVoice(),
+      inboundWebhookPath: '/api/voice/twilio/inbound',
+    });
+  });
+
+  server.post<{ Body: TwilioCallBody }>(
+    '/twilio/call',
+    async (request, reply) => {
+      const creds = twilioCredentials();
+      if (!creds.configured) {
+        return reply.status(503).send({ error: 'twilio-not-configured' });
+      }
+      if (!creds.fromNumber) {
+        return reply.status(409).send({ error: 'twilio-number-required' });
+      }
+
+      const say = (request.body?.message || 'This is your Office EA calling from BOS.').slice(0, 800);
+      const params = new URLSearchParams({
+        To: creds.allowedCaller,
+        From: creds.fromNumber,
+        Twiml: twiml(twilioSay(say)),
+      });
+      const basic = Buffer.from(`${creds.accountSid}:${creds.authToken}`).toString('base64');
+      const res = await fetch(`${TWILIO_API_BASE}/Accounts/${creds.accountSid}/Calls.json`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${basic}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: params,
+        signal: AbortSignal.timeout(20_000),
+      });
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        request.log.warn({ status: res.status, code: data.code, message: data.message }, 'Twilio outbound call failed');
+        return reply.status(res.status).send({
+          error: 'twilio-call-failed',
+          status: res.status,
+          code: data.code ?? null,
+          message: data.message ?? 'Twilio call failed',
+        });
+      }
+      return reply.status(200).send({
+        ok: true,
+        callSid: typeof data.sid === 'string' ? data.sid : null,
+        status: data.status ?? null,
+      });
+    },
+  );
+
+  server.all<{ Body: TwilioFormBody }>(
+    '/twilio/inbound',
+    {
+      config: { skipAuth: true },
+    },
+    async (request, reply) => {
+      const creds = twilioCredentials();
+      const body = (request.body ?? {}) as TwilioFormBody;
+      const from = firstValue(body.From);
+      const signatureRequired = process.env.TWILIO_VALIDATE_SIGNATURE !== 'false';
+      const signatureOk = signatureRequired
+        ? twilioSignatureValid(request, body, creds.authToken)
+        : true;
+
+      if (!signatureOk) {
+        request.log.warn({ from }, 'Twilio inbound rejected: invalid signature');
+        return reply.type('text/xml').status(403).send(twiml('<Reject reason="rejected" />'));
+      }
+      if (from !== creds.allowedCaller) {
+        request.log.warn({ from }, 'Twilio inbound rejected: caller not allowed');
+        return reply.type('text/xml').status(200).send(twiml('<Reject reason="rejected" />'));
+      }
+
+      return reply.type('text/xml').status(200).send(twiml([
+        twilioSay('Office EA is online.'),
+        '<Pause length="1" />',
+        twilioSay('I can receive your call from this number only. Live task coordination is being connected to the Office.'),
+      ].join('')));
     },
   );
 
@@ -510,9 +687,9 @@ export async function voiceRoutes(server: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const { stdout } = await execFileAsync(
-          '/home/boss/boss-dev/scripts/voice-session-cleanup.sh',
+          '/home/tcntryprd/boss-dev/scripts/voice-session-cleanup.sh',
           [],
-          { timeout: 10_000, env: { ...process.env, HOME: '/home/boss' } },
+          { timeout: 10_000, env: { ...process.env, HOME: '/home/tcntryprd' } },
         );
         const result = JSON.parse(stdout.trim());
         request.log.info({ result }, 'Voice sessions cleaned up');

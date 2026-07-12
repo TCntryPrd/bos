@@ -1,0 +1,286 @@
+# IR Custom AIOS v2 — Prometheus Alert Rules
+#
+# Loaded by Prometheus from /etc/prometheus/alerts/boss.yml
+# (mounted from services/monitoring/alerts/ in the repo).
+#
+# Severity levels:
+#   warning  — degraded, investigate when convenient
+#   critical — service down or SLA breach, page immediately
+
+groups:
+
+  # ---------------------------------------------------------------------------
+  # Service availability
+  # ---------------------------------------------------------------------------
+  - name: boss.availability
+    interval: 30s
+    rules:
+
+      - alert: IR Custom AIOSApiDown
+        expr: up{job="boss-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "IR Custom AIOS API is down"
+          description: "The IR Custom AIOS Fastify API has not been reachable for over 1 minute."
+
+      - alert: IR Custom AIOSWorkerDown
+        expr: up{job="boss-worker"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: worker
+        annotations:
+          summary: "IR Custom AIOS Worker is down"
+          description: "The background job processor has not been reachable for over 2 minutes. Healing, learning, and backup jobs are stalled."
+
+      - alert: IR Custom AIOSSttDown
+        expr: up{job="boss-stt"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: stt
+        annotations:
+          summary: "STT service is down"
+          description: "The faster-whisper STT service has not been reachable for over 2 minutes. Voice pipeline is non-functional."
+
+      - alert: PostgresDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: postgres
+        annotations:
+          summary: "Postgres is down"
+          description: "The Postgres exporter cannot reach the database. All services are likely degraded."
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis is down"
+          description: "The Redis exporter cannot reach the cache/event bus. Job queues and pub/sub are non-functional."
+
+      - alert: WeaviateDown
+        expr: up{job="weaviate"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: weaviate
+        annotations:
+          summary: "Weaviate is down"
+          description: "The Weaviate vector DB has not been reachable for over 2 minutes. Semantic memory and learning features are degraded."
+
+  # ---------------------------------------------------------------------------
+  # API latency and error rate
+  # ---------------------------------------------------------------------------
+  - name: boss.api
+    interval: 30s
+    rules:
+
+      - alert: ApiHighErrorRate
+        expr: |
+          100 * sum(rate(http_requests_total{job="boss-api", status=~"5.."}[5m]))
+              / sum(rate(http_requests_total{job="boss-api"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "API error rate above 5%"
+          description: "API 5xx error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      - alert: ApiCriticalErrorRate
+        expr: |
+          100 * sum(rate(http_requests_total{job="boss-api", status=~"5.."}[5m]))
+              / sum(rate(http_requests_total{job="boss-api"}[5m])) > 20
+        for: 2m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "API error rate above 20%"
+          description: "API 5xx error rate is {{ $value | humanizePercentage }}. Immediate investigation required."
+
+      - alert: ApiHighP95Latency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{job="boss-api"}[5m])) by (le)
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "API p95 latency above 1 second"
+          description: "API p95 response time is {{ $value | humanizeDuration }}."
+
+  # ---------------------------------------------------------------------------
+  # Voice pipeline latency
+  # Target: end-to-end < 3 seconds (design spec §5.3)
+  # ---------------------------------------------------------------------------
+  - name: boss.voice
+    interval: 15s
+    rules:
+
+      - alert: VoicePipelineSlowP95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(voice_pipeline_duration_seconds_bucket{job="boss-api", stage="total"}[5m])) by (le)
+          ) > 3.0
+        for: 5m
+        labels:
+          severity: warning
+          service: voice
+        annotations:
+          summary: "Voice pipeline p95 exceeds 3-second target"
+          description: "Voice pipeline end-to-end p95 is {{ $value | humanizeDuration }}. Target is < 3s."
+
+      - alert: VoicePipelineSlowP99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(voice_pipeline_duration_seconds_bucket{job="boss-api", stage="total"}[5m])) by (le)
+          ) > 5.0
+        for: 5m
+        labels:
+          severity: warning
+          service: voice
+        annotations:
+          summary: "Voice pipeline p99 exceeds 5 seconds"
+          description: "Voice pipeline end-to-end p99 is {{ $value | humanizeDuration }}."
+
+      - alert: SttServiceSlowP95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(stt_transcription_duration_seconds_bucket{job="boss-stt"}[5m])) by (le)
+          ) > 1.5
+        for: 5m
+        labels:
+          severity: warning
+          service: stt
+        annotations:
+          summary: "STT p95 transcription latency above 1.5 seconds"
+          description: "STT p95 transcription time is {{ $value | humanizeDuration }}. Consider a faster model tier."
+
+  # ---------------------------------------------------------------------------
+  # Self-healing engine
+  # ---------------------------------------------------------------------------
+  - name: boss.healing
+    interval: 60s
+    rules:
+
+      - alert: HealingEscalationBurst
+        expr: increase(self_heal_attempts_total{job="boss-worker", outcome="escalated"}[30m]) > 3
+        for: 0m
+        labels:
+          severity: critical
+          service: healing
+        annotations:
+          summary: "More than 3 healing escalations in 30 minutes"
+          description: "{{ $value }} failures were escalated to human in the last 30 minutes. Check the self-healing dashboard."
+
+      - alert: HealingAutoResolveRateLow
+        expr: |
+          100 * sum(increase(self_heal_attempts_total{job="boss-worker", outcome="resolved"}[6h]))
+               / sum(increase(self_heal_attempts_total{job="boss-worker"}[6h])) < 50
+        for: 10m
+        labels:
+          severity: warning
+          service: healing
+        annotations:
+          summary: "Auto-heal resolve rate below 50% over last 6 hours"
+          description: "Auto-heal rate is {{ $value | humanizePercentage }}. Playbooks may need manual curation."
+
+  # ---------------------------------------------------------------------------
+  # Backup system
+  # Design spec §8.4: alert if backup age > 2x interval (default = 60 min)
+  # ---------------------------------------------------------------------------
+  - name: boss.backup
+    interval: 60s
+    rules:
+
+      - alert: BackupStale
+        expr: (time() - backup_last_success_timestamp{job="boss-worker"}) > 3600
+        for: 5m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: "Last successful backup is more than 1 hour old"
+          description: "Last backup completed {{ $value | humanizeDuration }} ago. Expected interval: 30 minutes."
+
+      - alert: BackupCriticallyStale
+        expr: (time() - backup_last_success_timestamp{job="boss-worker"}) > 7200
+        for: 5m
+        labels:
+          severity: critical
+          service: backup
+        annotations:
+          summary: "Backup has not completed in over 2 hours"
+          description: "Last backup completed {{ $value | humanizeDuration }} ago. Data is at risk. Investigate immediately."
+
+      - alert: BackupRepeatedFailures
+        expr: increase(backup_runs_total{job="boss-worker", status="failure"}[1h]) > 2
+        for: 0m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: "More than 2 backup failures in the last hour"
+          description: "{{ $value }} backup runs failed in the last hour."
+
+  # ---------------------------------------------------------------------------
+  # Host resources
+  # ---------------------------------------------------------------------------
+  - name: boss.host
+    interval: 60s
+    rules:
+
+      - alert: HostHighCpuUsage
+        expr: |
+          100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+          service: host
+        annotations:
+          summary: "Host CPU usage above 85% for 10 minutes"
+          description: "Host CPU is at {{ $value | humanizePercentage }}."
+
+      - alert: HostHighMemoryUsage
+        expr: |
+          100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: host
+        annotations:
+          summary: "Host memory usage above 90%"
+          description: "Host memory is {{ $value | humanizePercentage }} used."
+
+      - alert: HostDiskSpaceLow
+        expr: |
+          100 * (1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: host
+        annotations:
+          summary: "Disk usage above 80% on /"
+          description: "Root filesystem is {{ $value | humanizePercentage }} full."
+
+      - alert: HostDiskSpaceCritical
+        expr: |
+          100 * (1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})) > 90
+        for: 5m
+        labels:
+          severity: critical
+          service: host
+        annotations:
+          summary: "Disk usage above 90% on /"
+          description: "Root filesystem is {{ $value | humanizePercentage }} full. Backup and log rotation may be failing."

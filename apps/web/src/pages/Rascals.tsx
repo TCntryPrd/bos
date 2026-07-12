@@ -11,17 +11,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Users,
   RefreshCw,
-  CheckCircle2,
-  CircleOff,
-  Bot,
-  Terminal,
   Plus,
   X,
-  Folder,
 } from 'lucide-react';
-import { AgentAvatar, agentHue } from '../components/AgentAvatar';
 import { PageLoader } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
 
@@ -40,8 +33,33 @@ interface Agent {
   updatedAt: string;
 }
 
-const KIND_LABEL: Record<AgentKind, string> = { rascal: 'Per-client', outsider: 'Staff' };
+const KIND_LABEL: Record<AgentKind, string> = { rascal: 'Client manager', outsider: 'Staff' };
 const KIND_HUE: Record<AgentKind, string> = { rascal: '#b56cff', outsider: '#4df5a5' };
+
+const DESK_POSITIONS = [
+  { left: '8.75%', top: '63%', depth: 12, tone: 'light' },
+  { left: '19.75%', top: '63%', depth: 12, tone: 'light' },
+  { left: '19.75%', top: '39%', depth: 10, tone: 'dark' },
+  { left: '30.75%', top: '39%', depth: 10, tone: 'dark' },
+  { left: '25.25%', top: '22%', depth: 8, tone: 'dark' },
+  { left: '36.25%', top: '22%', depth: 8, tone: 'dark' },
+  { left: '79%', top: '63%', depth: 12, tone: 'light' },
+  { left: '90%', top: '63%', depth: 12, tone: 'light' },
+  { left: '68%', top: '39%', depth: 10, tone: 'dark' },
+  { left: '79%', top: '39%', depth: 10, tone: 'dark' },
+  { left: '65.25%', top: '22%', depth: 8, tone: 'dark' },
+  { left: '73.5%', top: '22%', depth: 8, tone: 'dark' },
+];
+
+const WALL_OFFICE_POSITIONS = [
+  { left: '7%', top: '21%' },
+  { left: '19%', top: '12%' },
+  { left: '36%', top: '11%' },
+  { left: '52%', top: '10%' },
+  { left: '69%', top: '11%' },
+  { left: '84%', top: '12%' },
+  { left: '94%', top: '21%' },
+];
 
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem('boss_token') ?? '';
@@ -72,16 +90,6 @@ async function fetchAgents(): Promise<Agent[]> {
   return merged;
 }
 
-async function patchAgent(kind: AgentKind, handle: string, patch: { enabled: boolean }): Promise<void> {
-  const base = kind === 'rascal' ? 'rascals' : 'outsiders';
-  const res = await fetch(`api/agents/${base}/${handle}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-}
-
 interface CreateBody {
   handle: string;
   displayName: string;
@@ -104,67 +112,92 @@ async function createAgent(kind: AgentKind, body: CreateBody): Promise<void> {
   }
 }
 
-interface AgentCardProps {
+interface DeskTagProps {
   agent: Agent;
-  pending: boolean;
-  onToggle: () => void;
+  index: number;
 }
 
-function AgentCard({ agent, pending, onToggle }: AgentCardProps) {
-  const hue = agentHue(agent.handle);
+function DeskTag({ agent, index }: DeskTagProps) {
+  const position = DESK_POSITIONS[index];
   const to = agent.kind === 'rascal' ? `/rascals/${agent.handle}` : `/agents/${agent.handle}`;
-  const kindHue = KIND_HUE[agent.kind];
+  const darkTag = position.tone === 'dark';
+  const highContrastTag = agent.displayName === 'Buckwheat Magnussen' || agent.displayName === 'Porky Trusted';
   return (
     <Link
       to={to}
-      className="relative rounded-xl border border-border bg-surface-1/70 p-4 flex flex-col gap-3 hover:border-border-strong transition-colors block"
-      style={{ backdropFilter: 'blur(10px)' }}
+      className={`group absolute z-20 flex min-w-[88px] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-bold shadow-2xl ring-1 backdrop-blur-sm transition hover:-translate-y-[calc(50%+2px)] focus:outline-none focus:ring-2 focus:ring-emerald-200 sm:min-w-[96px] sm:text-[12px] ${
+        highContrastTag
+          ? 'border-[#ffe7a3]/95 bg-[#07140f]/96 text-white ring-[#ffe7a3]/35 hover:bg-[#0d2118]'
+          : darkTag
+            ? 'border-[#b7e2c8]/80 bg-[#10251f]/92 text-[#fff9e8] ring-white/15 hover:bg-[#18352d]'
+            : 'border-[#f3d99b] bg-[#fff5d6]/96 text-[#14201c] ring-black/10 hover:bg-white'
+      }`}
+      style={{
+        left: position.left,
+        top: position.top,
+        boxShadow: highContrastTag
+          ? '0 12px 28px rgba(0, 0, 0, 0.52), 0 0 0 1px rgba(255, 231, 163, 0.22), inset 0 1px 0 rgba(255,255,255,0.22)'
+          : darkTag
+            ? '0 10px 26px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255,255,255,0.18)'
+            : '0 10px 26px rgba(12, 16, 14, 0.35), inset 0 1px 0 rgba(255,255,255,0.72)',
+        textShadow: highContrastTag ? '0 1px 2px rgba(0,0,0,0.88)' : undefined,
+        zIndex: position.depth,
+      }}
       data-testid="agent-card"
+      title={`${agent.displayName} · ${agent.client || agent.handle}`}
     >
-      <div
-        className="absolute top-0 left-4 right-4 h-px"
-        style={{ background: `linear-gradient(90deg, transparent, ${hue}66, transparent)` }}
-        aria-hidden
-      />
-      <div className="flex items-start gap-3">
-        <AgentAvatar handle={agent.handle} displayName={agent.displayName} size={44} ring />
-        <div className="flex-1 min-w-0">
-          <div className="text-[14px] font-semibold text-text-primary leading-tight">{agent.displayName}</div>
-          <div className="vs-mono text-[11px] mt-0.5 text-text-muted truncate">{agent.handle}</div>
-        </div>
-        <button
-          type="button"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
-          disabled={pending}
-          className={`flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md transition-colors ${
-            agent.enabled ? 'bg-success/15 text-success border border-success/40' : 'bg-surface-2 text-text-muted border border-border hover:text-text-primary'
-          } disabled:opacity-50`}
-          aria-label={agent.enabled ? 'Disable agent' : 'Enable agent'}
-        >
-          {agent.enabled ? <CheckCircle2 className="w-3.5 h-3.5" /> : <CircleOff className="w-3.5 h-3.5" />}
-          {agent.enabled ? 'Enabled' : 'Disabled'}
-        </button>
+      <span className={`h-2 w-2 flex-shrink-0 rounded-full ring-1 ring-white/70 ${agent.enabled ? 'bg-emerald-500' : 'bg-zinc-400'}`} aria-hidden />
+      <span className="max-w-[124px] truncate sm:max-w-[168px]">{agent.displayName}</span>
+    </Link>
+  );
+}
+
+interface OverflowDockProps {
+  title: string;
+  agents: Agent[];
+}
+
+function OverflowDock({ title, agents }: OverflowDockProps) {
+  if (agents.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-white/35 bg-white/55 p-3 text-[#15201d] shadow-xl backdrop-blur-xl">
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#53655d]">{title}</div>
+      <div className="flex flex-wrap gap-2">
+        {agents.map((agent) => (
+          <Link
+            key={`${agent.kind}:${agent.handle}`}
+            to={agent.kind === 'rascal' ? `/rascals/${agent.handle}` : `/agents/${agent.handle}`}
+            className="rounded-md border border-[#1b2a26]/14 bg-white/76 px-2.5 py-1.5 text-[11px] font-semibold text-[#15201d] shadow-sm transition hover:bg-white"
+            title={`${agent.displayName} · ${agent.client || agent.handle}`}
+          >
+            {agent.displayName}
+          </Link>
+        ))}
       </div>
-      <div className="flex items-center gap-2">
-        <span
-          className="text-[9px] vs-mono uppercase tracking-[0.18em] px-2 py-0.5 rounded-full border"
-          style={{ color: kindHue, borderColor: `${kindHue}55`, background: `${kindHue}12` }}
-        >
-          {KIND_LABEL[agent.kind]}
-        </span>
-        <span className="flex items-center gap-1 text-[11px] text-text-muted">
-          {agent.cli === 'claude' ? <Bot className="w-3 h-3" /> : <Terminal className="w-3 h-3" />}
-          {agent.cli}
-        </span>
-      </div>
-      <div>
-        <div className="vs-mono text-[9px] uppercase tracking-[0.2em] text-text-muted">Client</div>
-        <div className="text-text-primary truncate mt-0.5 text-[11.5px]">{agent.client || '—'}</div>
-      </div>
-      <div className="flex items-start gap-1.5 text-[11px] text-text-muted truncate">
-        <Folder className="w-3 h-3 flex-shrink-0 mt-0.5" />
-        <span className="font-mono truncate" title={agent.projectDir}>{agent.projectDir}</span>
-      </div>
+    </div>
+  );
+}
+
+interface WallOfficeTagProps {
+  agent: Agent;
+  index: number;
+}
+
+function WallOfficeTag({ agent, index }: WallOfficeTagProps) {
+  const position = WALL_OFFICE_POSITIONS[index];
+  return (
+    <Link
+      to={`/agents/${agent.handle}`}
+      className="group absolute z-20 flex min-w-[90px] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-1.5 rounded-md border border-[#b7e2c8]/80 bg-[#12251f]/90 px-2.5 py-1.5 text-[10.5px] font-bold text-[#fff9e8] shadow-2xl ring-1 ring-white/15 backdrop-blur-md transition hover:-translate-y-[calc(50%+2px)] hover:bg-[#18352d] focus:outline-none focus:ring-2 focus:ring-amber-200"
+      style={{
+        left: position.left,
+        top: position.top,
+        boxShadow: '0 12px 30px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.18)',
+      }}
+      title={`${agent.displayName} · ${agent.client || agent.handle}`}
+    >
+      <span className={`h-2 w-2 flex-shrink-0 rounded-full ring-1 ring-white/50 ${agent.enabled ? 'bg-emerald-400' : 'bg-zinc-400'}`} aria-hidden />
+      <span className="max-w-[142px] truncate">{agent.displayName}</span>
     </Link>
   );
 }
@@ -231,7 +264,7 @@ function CreateModal({ open, onClose, onCreated }: CreateModalProps) {
         <header className="flex items-start justify-between mb-4">
           <div>
             <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">Action</div>
-            <h2 className="text-lg font-semibold mt-1">Add agent</h2>
+            <h2 className="text-lg font-semibold mt-1">Add client manager</h2>
           </div>
           <button type="button" onClick={onClose} className="text-text-muted hover:text-text-primary" aria-label="Close">
             <X className="w-4 h-4" />
@@ -251,7 +284,7 @@ function CreateModal({ open, onClose, onCreated }: CreateModalProps) {
                   }`}
                   style={kind === k ? { borderColor: `${KIND_HUE[k]}88`, background: `${KIND_HUE[k]}18`, color: KIND_HUE[k] } : undefined}
                 >
-                  {KIND_LABEL[k]}{k === 'rascal' ? ' (rascal)' : ' (outsider)'}
+                  {KIND_LABEL[k]}{k === 'rascal' ? ' (client manager)' : ' (staff)'}
                 </button>
               ))}
             </div>
@@ -342,7 +375,6 @@ export function Rascals() {
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [pending, setPending] = useState<Record<string, boolean>>({});
   const [createOpen, setCreateOpen] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -361,89 +393,84 @@ export function Rascals() {
     void refresh();
   }, [refresh]);
 
-  const toggleEnabled = useCallback(async (a: Agent) => {
-    const key = `${a.kind}:${a.handle}`;
-    setPending((p) => ({ ...p, [key]: true }));
-    try {
-      await patchAgent(a.kind, a.handle, { enabled: !a.enabled });
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to toggle');
-    } finally {
-      setPending((p) => {
-        const next = { ...p };
-        delete next[key];
-        return next;
-      });
-    }
-  }, [refresh]);
-
   if (agents === null && loading) {
     return <PageLoader />;
   }
 
   const rascalCount = (agents ?? []).filter((a) => a.kind === 'rascal').length;
   const staffCount = (agents ?? []).filter((a) => a.kind === 'outsider').length;
+  const rascals = (agents ?? []).filter((a) => a.kind === 'rascal');
+  const outsiders = (agents ?? []).filter((a) => a.kind === 'outsider');
+  const floorRascals = rascals.slice(0, DESK_POSITIONS.length);
+  const extraRascals = rascals.slice(DESK_POSITIONS.length);
+  const wallOffices = outsiders.slice(0, WALL_OFFICE_POSITIONS.length);
+  const extraOutsiders = outsiders.slice(WALL_OFFICE_POSITIONS.length);
 
   return (
-    <div className="px-6 py-5" data-testid="rascals-page">
-      <header className="flex items-start justify-between mb-5">
-        <div>
-          <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">Your Agents</div>
-          <h1 className="text-2xl font-semibold mt-1 flex items-center gap-2">
-            <Users className="w-5 h-5 text-accent" />
-            Rascals
-          </h1>
-          <p className="text-[12px] text-text-muted mt-1 max-w-2xl">
-            {rascalCount} per-client {rascalCount === 1 ? 'rascal' : 'rascals'} and {staffCount} staff {staffCount === 1 ? 'outsider' : 'outsiders'}. Click a card to open its workspace.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <div className="relative h-full min-h-[calc(100vh-2.5rem)] overflow-hidden px-4 py-4 text-white sm:px-5" data-testid="rascals-page">
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/14 via-transparent to-black/8" aria-hidden />
+
+      <div className="relative z-10 h-full">
+        <div className="absolute right-3 top-3 z-30 flex items-center gap-2 rounded-full border border-white/24 bg-[#101815]/44 p-1.5 text-[#fff9e8] shadow-2xl backdrop-blur-md">
+          <div
+            className="hidden items-center gap-1.5 rounded-full border border-white/14 bg-white/14 px-3 py-2 text-[11px] font-semibold text-white/88 sm:flex"
+            title={`${rascalCount} client manager desks, ${staffCount} wall offices`}
+          >
+            {rascalCount} client managers · {staffCount} offices
+          </div>
           <button
             type="button"
             onClick={() => void refresh()}
             disabled={loading}
-            className="flex items-center gap-1.5 text-[12px] text-text-secondary hover:text-text-primary px-3 py-1.5 rounded-md border border-border bg-surface-1/50 disabled:opacity-50"
-            aria-label="Refresh agents"
+            className="grid h-9 w-9 place-items-center rounded-full border border-white/18 bg-white/16 text-white shadow-sm transition hover:bg-white/28 disabled:opacity-50"
+            aria-label="Refresh client managers"
+            title="Refresh client managers"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button
             type="button"
             onClick={() => setCreateOpen(true)}
-            className="flex items-center gap-1.5 text-[12px] font-semibold text-[#0a0c12] px-3 py-1.5 rounded-md"
-            style={{ background: 'linear-gradient(135deg, #b56cff 0%, #5cc8ff 100%)' }}
+            className="grid h-9 w-9 place-items-center rounded-full text-[#0a0c12] shadow-lg"
+            style={{ background: 'linear-gradient(135deg, #f5d77b 0%, #5df0ae 100%)' }}
+            aria-label="Add client manager"
+            title="Add client manager"
           >
-            <Plus className="w-3.5 h-3.5" />
-            Add agent
+            <Plus className="h-4 w-4" />
           </button>
         </div>
-      </header>
 
-      {error && (
-        <div className="mb-4 p-3 rounded-md border border-danger/40 bg-danger/10 text-[12px] text-danger">
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className="absolute left-0 right-0 top-3 z-40 rounded-md border border-red-300/50 bg-red-100/82 p-3 text-[12px] font-medium text-red-900 shadow-xl backdrop-blur-md">
+            {error}
+          </div>
+        )}
 
-      {agents && agents.length === 0 ? (
-        <EmptyState
-          title="No agents yet"
-          description="Add an agent to get started — give it a handle, a display name, and a role."
-        />
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {(agents ?? []).map((a) => (
-            <AgentCard
-              key={`${a.kind}:${a.handle}`}
-              agent={a}
-              pending={!!pending[`${a.kind}:${a.handle}`]}
-              onToggle={() => void toggleEnabled(a)}
-            />
-          ))}
+        <div className="absolute inset-0">
+          {agents && agents.length === 0 ? (
+            <div className="absolute left-1/2 top-1/2 w-[min(520px,calc(100%-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/34 bg-white/68 p-6 text-[#15201d] shadow-xl backdrop-blur-md">
+              <EmptyState
+                title="No client managers yet"
+                description="Add a client manager to get started — give them a handle, a display name, and a role."
+              />
+            </div>
+          ) : (
+            <>
+              {floorRascals.map((agent, index) => (
+                <DeskTag key={`${agent.kind}:${agent.handle}`} agent={agent} index={index} />
+              ))}
+              {wallOffices.map((agent, index) => (
+                <WallOfficeTag key={`${agent.kind}:${agent.handle}`} agent={agent} index={index} />
+              ))}
+
+              <div className="absolute inset-x-0 bottom-0 grid gap-3 lg:grid-cols-2">
+                <OverflowDock title="Extra client manager desks" agents={extraRascals} />
+                <OverflowDock title="Additional wall offices" agents={extraOutsiders} />
+              </div>
+            </>
+          )}
         </div>
-      )}
+      </div>
 
       <CreateModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={() => void refresh()} />
     </div>

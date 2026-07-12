@@ -42,6 +42,7 @@ import {
   Copy,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import entranceElevatorScene from '../assets/entrance-elevator-scene.png';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -330,7 +331,7 @@ function OnboardingGuide({ step, session }: { step: number; session: OnboardingS
   }
 
   return (
-    <aside className="rounded-2xl border border-border bg-surface-3 p-5 shadow-lg lg:sticky lg:top-8">
+    <aside className="aios-panel p-5 lg:sticky lg:top-8">
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/10">
           <Bot className="h-5 w-5 text-accent" aria-hidden />
@@ -1896,10 +1897,19 @@ export function Onboarding() {
 
   return (
     <div
-      className="min-h-screen bg-surface-1 flex flex-col items-center justify-center p-4 sm:p-8"
+      className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden bg-[#030711] p-4 sm:p-8"
       aria-label="BOS onboarding"
     >
-      <div className="w-full max-w-6xl space-y-8">
+      <img
+        src={entranceElevatorScene}
+        alt=""
+        className="absolute inset-0 h-full w-full object-cover opacity-70"
+        style={{ filter: 'brightness(0.74) saturate(1.05) contrast(1.03)' }}
+        aria-hidden="true"
+      />
+      <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(3,7,17,0.88),rgba(6,16,36,0.46),rgba(3,7,17,0.78))]" aria-hidden="true" />
+      <div className="aios-atmosphere-grid absolute inset-0" aria-hidden="true" />
+      <div className="relative w-full max-w-6xl space-y-8">
         {/* Logo / wordmark */}
         <div className="text-center">
           <span className="text-lg font-bold tracking-tight text-text-primary">
@@ -1925,7 +1935,7 @@ export function Onboarding() {
           {/* Step content with fade-in animation */}
           <div
             key={step}
-            className="animate-fade-in rounded-2xl border border-border bg-surface-3 p-6 sm:p-8 shadow-lg"
+            className="aios-panel animate-fade-in p-6 sm:p-8"
           >
             {step === 0 && <StepWelcome onNext={handleWelcomeNext} />}
 

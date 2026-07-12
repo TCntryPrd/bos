@@ -18,7 +18,7 @@ interface Workspace {
   kind: 'boss-dev' | 'rascal' | 'outsider';
 }
 
-const DEFAULT_HOME = '/home/boss';
+const DEFAULT_HOME = '/home/tcntryprd';
 
 function listSubdirs(parent: string): string[] {
   try {

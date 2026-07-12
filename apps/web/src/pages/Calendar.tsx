@@ -49,13 +49,7 @@ type ViewMode = 'month' | 'week' | 'day';
 
 // ── Account color mapping ────────────────────────────────────────────────────
 
-const ACCOUNT_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-  'kevin@starrpartners.ai':           { bg: 'bg-blue-500/15', border: 'border-blue-500/40', text: 'text-blue-300', dot: 'bg-blue-500' },
-  'd.caine@dcaine.com':               { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-300', dot: 'bg-emerald-500' },
-  'kevinstarr@industryrockstar.com':  { bg: 'bg-purple-500/15', border: 'border-purple-500/40', text: 'text-purple-300', dot: 'bg-purple-500' },
-  'travelcraft.dc@gmail.com':         { bg: 'bg-orange-500/15', border: 'border-orange-500/40', text: 'text-orange-300', dot: 'bg-orange-500' },
-  'absoluterecoverybureau@gmail.com': { bg: 'bg-red-500/15', border: 'border-red-500/40', text: 'text-red-300', dot: 'bg-red-500' },
-};
+const ACCOUNT_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {};
 
 const FALLBACK_COLORS = [
   { bg: 'bg-cyan-500/15', border: 'border-cyan-500/40', text: 'text-cyan-300', dot: 'bg-cyan-500' },
@@ -187,7 +181,7 @@ function EventPopup({
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
       <div
         ref={popupRef}
-        className="relative bg-surface-1 border border-border rounded-xl shadow-2xl w-full max-w-md p-5"
+        className="aios-panel relative w-full max-w-md p-5 shadow-2xl"
       >
         <button
           className="absolute top-3 right-3 p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors"
@@ -197,7 +191,7 @@ function EventPopup({
           <X className="w-4 h-4" />
         </button>
 
-        <div className={cn('w-1 h-full absolute left-0 top-0 rounded-l-xl', colors.dot)} />
+        <div className={cn('w-1 h-full absolute left-0 top-0 rounded-l-lg', colors.dot)} />
 
         <h3 className="text-lg font-semibold text-text-primary pr-8 mb-3">{event.summary}</h3>
 
@@ -581,17 +575,20 @@ export function Calendar() {
   // ── Render ─────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="aios-page aios-page-pad flex flex-col h-full min-h-0 gap-3">
       {/* Header */}
-      <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-border bg-surface-1">
+      <div className="aios-command-hero flex-shrink-0 flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="flex items-center gap-3">
           <CalendarIcon className="w-5 h-5 text-accent" />
-          <h1 className="text-lg font-semibold text-text-primary">Calendar</h1>
+          <div>
+            <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">Schedule Command</div>
+            <h1 className="mt-1 text-lg font-semibold text-text-primary">Calendar</h1>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           {/* View toggle */}
-          <div className="flex rounded-lg border border-border overflow-hidden">
+          <div className="aios-segment">
             {(['month', 'week', 'day'] as ViewMode[]).map((v) => (
               <button
                 key={v}
@@ -612,22 +609,22 @@ export function Calendar() {
       </div>
 
       {/* Navigation bar */}
-      <div className="flex-shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border bg-surface-2">
+      <div className="aios-control-bar flex-shrink-0 flex flex-wrap items-center gap-3 px-3 py-2">
         <button
-          className="px-3 py-1 rounded-lg text-xs font-medium bg-surface-3 text-text-secondary hover:bg-surface-4 border border-border transition-colors"
+          className="btn-secondary !px-3 !py-1 text-xs"
           onClick={() => navigate(0)}
         >
           Today
         </button>
         <button
-          className="p-1.5 rounded-lg text-text-muted hover:bg-surface-3 hover:text-text-primary transition-colors"
+          className="btn-ghost !p-1.5 text-text-muted hover:text-text-primary"
           onClick={() => navigate(-1)}
           aria-label="Previous"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
         <button
-          className="p-1.5 rounded-lg text-text-muted hover:bg-surface-3 hover:text-text-primary transition-colors"
+          className="btn-ghost !p-1.5 text-text-muted hover:text-text-primary"
           onClick={() => navigate(1)}
           aria-label="Next"
         >
@@ -649,9 +646,9 @@ export function Calendar() {
       )}
 
       {/* Main area: sidebar + calendar */}
-      <div className="flex-1 flex min-h-0">
+      <div className="aios-workbench flex-1 flex min-h-0">
         {/* Left sidebar — calendar checkboxes */}
-        <div className="w-56 flex-shrink-0 border-r border-border bg-surface-1 overflow-y-auto p-3">
+        <div className="w-56 flex-shrink-0 border-r border-border/70 bg-surface-1/60 overflow-y-auto p-3">
           <p className="text-[10px] font-medium text-text-muted uppercase tracking-wider mb-2">Calendars</p>
           {accounts.map((acc, accIdx) => {
             const colors = getAccountColor(acc.email, accIdx);
@@ -690,12 +687,12 @@ export function Calendar() {
         </div>
 
         {/* Calendar grid */}
-        <div className="flex-1 overflow-auto min-h-0">
+        <div className="flex-1 overflow-auto min-h-0 bg-surface-1/35">
         {/* ── Month view ── */}
         {view === 'month' && (
           <div className="h-full flex flex-col">
             {/* Day-of-week headers */}
-            <div className="grid grid-cols-7 border-b border-border bg-surface-2 flex-shrink-0">
+            <div className="grid grid-cols-7 border-b border-border bg-surface-2/80 flex-shrink-0">
               {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
                 <div key={d} className="px-2 py-1.5 text-xs font-medium text-text-muted text-center">
                   {d}
@@ -771,7 +768,7 @@ export function Calendar() {
         {view === 'week' && (
           <div className="flex flex-col min-h-0">
             {/* Day headers */}
-            <div className="flex border-b border-border bg-surface-2 flex-shrink-0">
+            <div className="flex border-b border-border bg-surface-2/80 flex-shrink-0">
               <div className="w-14 flex-shrink-0" /> {/* gutter for time labels */}
               {weekDays.map((day, i) => (
                 <div

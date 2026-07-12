@@ -5,15 +5,15 @@
   "main": "dist/index.js",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
-    "@fastify/cors": "^11.0.0",
-    "@fastify/helmet": "^13.0.0",
     "@boss/brain": "*",
     "@boss/connectors": "*",
     "@boss/core": "*",
+    "@breezystack/lamejs": "^1.2.7",
+    "@fastify/cors": "^11.0.0",
+    "@fastify/helmet": "^13.0.0",
     "fastify": "^5.2.0",
-    "pg": "^8.20.0",
-    "lru-cache": "^11.0.2",
-    "croner": "^10.0.1"
+    "ioredis": "^5.11.1",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

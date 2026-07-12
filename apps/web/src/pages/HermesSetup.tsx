@@ -88,9 +88,9 @@ export function HermesSetup() {
   const prereqsReady = Boolean(status?.cliInstalled && status?.keyPresent);
 
   return (
-    <div className="h-full bg-[var(--v-base-bg,var(--v-base))]">
-      <div className="mx-auto flex h-full max-w-4xl flex-col px-4 py-5 sm:px-6 lg:px-8">
-        <header className="mb-5 border-b border-border pb-4">
+    <div className="aios-page h-full">
+      <div className="aios-page-pad mx-auto flex h-full max-w-4xl flex-col">
+        <header className="aios-command-hero mb-5 px-4 py-3">
           <p className="vs-mono text-[11px] uppercase tracking-[0.22em] text-accent">First-use setup</p>
           <h1 className="mt-1 text-2xl font-semibold text-text-primary">Hermes Agent</h1>
           <p className="mt-1 text-sm text-text-muted">
@@ -106,25 +106,25 @@ export function HermesSetup() {
         )}
 
         <section className="mb-5 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg border border-border bg-surface-2 px-3 py-3">
+          <div className="aios-stat px-3 py-3">
             <div className="text-xs text-text-muted">Hermes Agent</div>
             <div className={`mt-1 text-sm font-medium ${status?.cliInstalled ? 'text-success' : 'text-warning'}`}>
               {status ? (status.cliInstalled ? (status.cliVersion || 'Installed') : 'Not installed') : '-'}
             </div>
           </div>
-          <div className="rounded-lg border border-border bg-surface-2 px-3 py-3">
+          <div className="aios-stat px-3 py-3">
             <div className="text-xs text-text-muted">Gemini key</div>
             <div className={`mt-1 text-sm font-medium ${status?.keyPresent ? 'text-success' : 'text-warning'}`}>
               {status ? (status.keyPresent ? 'Loaded from Setup' : 'Missing — add it in Setup') : '-'}
             </div>
           </div>
-          <div className="rounded-lg border border-border bg-surface-2 px-3 py-3">
+          <div className="aios-stat px-3 py-3">
             <div className="text-xs text-text-muted">Brain</div>
             <div className="mt-1 truncate font-mono text-sm text-text-primary">{status?.model || '-'}</div>
           </div>
         </section>
 
-        <section className="flex flex-col items-center rounded-lg border border-border bg-surface-1 px-6 py-10 text-center">
+        <section className="aios-panel flex flex-col items-center px-6 py-10 text-center">
           {activated ? (
             <>
               <CheckCircle2 className="h-12 w-12 text-success" aria-hidden />

@@ -12,10 +12,9 @@
  */
 
 import crypto from 'node:crypto';
-import { LRUCache } from 'lru-cache';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { BrainRouter, ClaudeCodeAdapter, OpenClawAdapter, OpenAIAdapter, GeminiAdapter } from '@boss/brain';
-import type { BrainRequest, BrainAdapter, AdapterStatus, ConversationMessage, ContentBlock } from '@boss/brain';
+import { BrainRouter, ClaudeCodeAdapter, CodexCliAdapter, OpenClawAdapter, OpenAIAdapter, GeminiAdapter } from '@boss/brain';
+import type { BrainRequest, BrainResponse, BrainAdapter, AdapterStatus, ConversationMessage, ContentBlock } from '@boss/brain';
 import { setRuntimeConfig, getRuntimeConfig } from '../config-store.js';
 import { verifyCodexCliInBackground } from '../openclaw/codexSmoke.js';
 import { getAvailableTools, executeTool, tierFromRole } from '../tools/index.js';
@@ -43,6 +42,8 @@ interface ModelEntry {
 }
 
 const AVAILABLE_MODELS: ModelEntry[] = [
+  // Codex brain runtime
+  { id: 'codex-cli',          name: 'Codex CLI',          tier: 'balanced', context: 200_000,   maxOutput: 64_000,  status: 'available' },
   // Claude models
   { id: 'claude-haiku-4-5',  name: 'Haiku 4.5',  tier: 'fast',     context: 200_000,   maxOutput: 64_000,  status: 'available' },
   { id: 'claude-sonnet-4-5', name: 'Sonnet 4.5',  tier: 'balanced', context: 1_000_000, maxOutput: 64_000,  status: 'available' },
@@ -92,14 +93,8 @@ import { getPool } from '../db.js';
 // most messages are small. 500 messages ≈ ~1 week of heavy use.
 const MAX_HISTORY = 500;
 
-// In-memory cache to avoid DB reads on every message.
-// WS-1: bounded LRU (was an unbounded Map → slow OOM = outage). Postgres copy
-// is authoritative, so eviction just costs one re-read.
-const historyCache = new LRUCache<string, { messages: ConversationMessage[]; updatedAt: number }>({
-  max: 1000,
-  ttl: 1000 * 60 * 60, // 1h idle TTL
-  updateAgeOnGet: true,
-});
+// In-memory cache to avoid DB reads on every message
+const historyCache = new Map<string, { messages: ConversationMessage[]; updatedAt: number }>();
 
 async function ensureConversationTable(): Promise<void> {
   const pool = getPool();
@@ -170,11 +165,54 @@ async function getDefaultConversationId(userId: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Bootstrap helper — create + register a ClaudeCodeAdapter from env vars
-// whenever the router has no registered adapters yet.
+// Bootstrap helper — create + register the Codex CLI brain adapter.
+// Other adapters can exist for builder/client-manager surfaces, but BOS brain
+// chat is pinned to Codex by routeCodexBrain().
 // ---------------------------------------------------------------------------
 
+function codexBrainModel(): string {
+  return process.env.BOSS_BRAIN_CODEX_MODEL || process.env.CODEX_MODEL || 'codex-cli';
+}
+
+function ensureCodexAdapter(router: BrainRouter): void {
+  if (router.getAdapter('codex-cli')) return;
+  router.registerAdapter(new CodexCliAdapter({
+    bin: process.env.BOSS_BRAIN_CODEX_BIN || process.env.BOSS_GIO_BIN || 'codex',
+    codexHome: process.env.CODEX_HOME || '/home/boss/.codex',
+    workspace: process.env.BOSS_BRAIN_WORKSPACE || process.env.BOSS_GIO_WORKSPACE || '/home/boss/gio',
+    model: process.env.BOSS_BRAIN_CODEX_MODEL || process.env.CODEX_MODEL,
+    priority: 0,
+  }));
+}
+
+async function routeCodexBrain(router: BrainRouter, request: BrainRequest): Promise<BrainResponse> {
+  const adapter = router.getAdapter('codex-cli');
+  if (!adapter) {
+    return {
+      id: `err-${Date.now()}`,
+      requestId: request.id,
+      adapterId: 'codex-cli',
+      content: '',
+      latencyMs: 0,
+      error: 'Codex CLI brain adapter is not registered',
+    };
+  }
+  try {
+    return await adapter.execute(request);
+  } catch (err) {
+    return {
+      id: `err-${Date.now()}`,
+      requestId: request.id,
+      adapterId: 'codex-cli',
+      content: '',
+      latencyMs: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 function bootstrapAdapterFromEnv(router: BrainRouter): void {
+  ensureCodexAdapter(router);
   if (router.listAdapters().length > 0) return;
 
   // Claude adapter
@@ -216,6 +254,24 @@ function bootstrapAdapterFromEnv(router: BrainRouter): void {
     (openrouterAdapter as any).info.id = 'openrouter';
     (openrouterAdapter as any).info.name = 'OpenRouter';
     router.registerAdapter(openrouterAdapter);
+  }
+
+  // NVIDIA NIM adapter: OpenAI-compatible endpoint serving strong FREE models
+  // (Nemotron, DeepSeek, Qwen, Kimi...). Lets always-on agents run off the Claude
+  // Max sub at $0. Agents target it via a `nim:` model prefix (stripped by the
+  // scheduler) which routes here. Tool-calling works (same OpenAIAdapter the CFO
+  // uses via OpenRouter).
+  const nimKey = process.env.NVIDIA_NIM_API_KEY;
+  if (nimKey) {
+    const nimAdapter = new OpenAIAdapter({
+      apiKey: nimKey,
+      model: process.env.NIM_MODEL || 'nvidia/nemotron-3-super-120b-a12b',
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
+      priority: 25,
+    });
+    (nimAdapter as any).info.id = 'nim';
+    (nimAdapter as any).info.name = 'NVIDIA NIM';
+    router.registerAdapter(nimAdapter);
   }
 
   // Gemini adapter
@@ -281,7 +337,7 @@ const chatBodySchema = {
     // Per-agent overrides — honoured only for internal (X-BOSS-Internal) calls,
     // e.g. the persistent-agent scheduler running an Employee Agent on a cheaper
     // brain with a restricted tool grant. Ignored for normal portal chat.
-    provider: { type: 'string', enum: ['claude-code', 'openai', 'openrouter', 'gemini'] },
+    provider: { type: 'string', enum: ['codex-cli', 'claude-code', 'openai', 'openrouter', 'gemini', 'nim'] },
     model: { type: 'string' },
     allowedTools: { type: 'array', items: { type: 'string' } },
     attachments: {
@@ -346,7 +402,7 @@ interface ChatBody {
   voiceMode?: boolean;
   currentPage?: string;
   // Per-agent overrides (internal calls only)
-  provider?: 'claude-code' | 'openai' | 'openrouter' | 'gemini';
+  provider?: 'codex-cli' | 'claude-code' | 'openai' | 'openrouter' | 'gemini' | 'nim';
   model?: string;
   allowedTools?: string[];
 }
@@ -384,6 +440,7 @@ export async function brainRoutes(server: FastifyInstance) {
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const router = getRouter();
+      bootstrapAdapterFromEnv(router);
       const statuses = await router.checkHealth();
       const adaptersObj: Record<string, string> = {};
       for (const [id, status] of statuses) {
@@ -464,7 +521,7 @@ export async function brainRoutes(server: FastifyInstance) {
       },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const active = process.env.BRAIN_MODEL || 'claude-haiku-4-5';
+      const active = codexBrainModel();
       return reply.status(200).send({ models: AVAILABLE_MODELS, active });
     },
   );
@@ -610,38 +667,16 @@ export async function brainRoutes(server: FastifyInstance) {
       const conversationId = incomingConvId ?? await getDefaultConversationId(userId);
       const history = await getHistory(conversationId);
 
-      // Determine the model + adapter. Persistent agents (internal calls) may
-      // override provider/model per-request so an Employee Agent runs on a
-      // cheaper brain (e.g. OpenRouter) without changing the global BRAIN_PROVIDER
-      // the portal/COO chat uses. Backward-compatible: no override → global.
+      // Brain/Chief-of-Staff/EA traffic is Codex-only. Claude remains available
+      // to client-manager agents and direct builder routes, but this shared
+      // brain endpoint must not silently fall back to Claude or OpenRouter.
       const isInternal = request.auth?.authMethod === 'internal';
       const overrideProvider = isInternal ? request.body.provider : undefined;
-      const overrideModel = isInternal ? request.body.model : undefined;
-
-      let model = overrideModel || process.env.BRAIN_MODEL || 'claude-haiku-4-5';
-
-      // Route to the right adapter based on explicit provider override or prefix
-      let preferredAdapter: string | undefined = undefined;
-      if (overrideProvider === 'openrouter') {
-        preferredAdapter = 'openrouter';
-        if (!overrideModel) model = process.env.OPENROUTER_MODEL || model;
-      } else if (overrideProvider === 'openai') {
-        preferredAdapter = 'openai';
-      } else if (overrideProvider === 'gemini') {
-        preferredAdapter = 'gemini';
-      } else if (overrideProvider === 'claude-code' || model.startsWith('claude')) {
-        // Native claude-* models run on the Claude Max subscription via the
-        // ClaudeCode adapter (no API cost). Pin it explicitly so a transiently
-        // 'degraded' ClaudeCode doesn't lose the priority sort and silently fall
-        // back to the OpenAI adapter (which ignores the claude model id → garbage).
-        preferredAdapter = 'claude-code';
-      } else if (model.startsWith('grok')) {
-        preferredAdapter = 'xai-grok';
-      } else if (model.startsWith('gpt') || model.startsWith('o3')) {
-        preferredAdapter = 'openai';
-      } else if (model.startsWith('gemini')) {
-        preferredAdapter = 'gemini';
+      if (overrideProvider && overrideProvider !== 'codex-cli') {
+        request.log.warn({ overrideProvider }, 'brain/chat: ignored non-Codex provider override');
       }
+      const model = codexBrainModel();
+      const preferredAdapter = 'codex-cli';
 
       request.log.info(
         {
@@ -662,14 +697,13 @@ export async function brainRoutes(server: FastifyInstance) {
       // rebuilt when skills or connections change. The dynamic portion (current
       // time, active skills matched to this message, user context) is freshly
       // built on every request.
-      const systemInHistory = history.find((m) => m.role === 'system');
-      const systemPromptContent = systemInHistory ? null : await buildFullPrompt(userId, message);
-      const baseHistory: ConversationMessage[] = systemInHistory
-        ? history
-        : [
-            { role: 'system', content: systemPromptContent!, timestamp: Date.now() },
-            ...history,
-          ];
+      // Always rebuild the system prompt so persona/skills/integration changes apply to EXISTING
+      // conversations too (not only new ones). Strip any stale system message; prepend the current one.
+      const systemPromptContent = await buildFullPrompt(userId, message);
+      const baseHistory: ConversationMessage[] = [
+        { role: 'system', content: systemPromptContent, timestamp: Date.now() },
+        ...history.filter((m) => m.role !== 'system'),
+      ];
 
       // Build the user message — multi-content if attachments are present
       const hasAttachments = attachments && attachments.length > 0;
@@ -777,7 +811,7 @@ export async function brainRoutes(server: FastifyInstance) {
       try {
         while (iterationCount < MAX_TOOL_ITERATIONS) {
           iterationCount++;
-          brainResponse = await router.route(currentReq);
+          brainResponse = await routeCodexBrain(router, currentReq);
 
           if (brainResponse.error) {
             if (!retriedTransient && TRANSIENT_BRAIN_ERROR.test(brainResponse.error)) {
@@ -1011,6 +1045,7 @@ export async function brainRoutes(server: FastifyInstance) {
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const router = getRouter();
+      bootstrapAdapterFromEnv(router);
       return reply.status(200).send(router.listAdapters());
     },
   );
@@ -1280,17 +1315,8 @@ export async function brainRoutes(server: FastifyInstance) {
       const userId = request.auth?.userId ?? 'anonymous';
       const conversationId = incomingConvId ?? await getDefaultConversationId(userId);
       const history = await getHistory(conversationId);
-      const model = process.env.BRAIN_MODEL || 'claude-haiku-4-5';
-      
-      // Route to the right adapter based on model prefix
-      let preferredAdapter: string | undefined = undefined;
-      if (model.startsWith('grok')) {
-        preferredAdapter = 'xai-grok';
-      } else if (model.startsWith('gpt') || model.startsWith('o3')) {
-        preferredAdapter = 'openai';
-      } else if (model.startsWith('gemini')) {
-        preferredAdapter = 'gemini';
-      }
+      const model = codexBrainModel();
+      const preferredAdapter = 'codex-cli';
 
       request.log.info(
         { userId, conversationId, historyLength: history.length, model, messageLength: message.length, voiceMode },
@@ -1298,11 +1324,11 @@ export async function brainRoutes(server: FastifyInstance) {
       );
 
       // Build history with system prompt
-      const systemInHistory = history.find((m) => m.role === 'system');
-      let systemPromptContent = systemInHistory ? null : await buildFullPrompt(userId, message);
+      // Always rebuild (see /chat) so persona/skills changes apply to existing conversations.
+      let systemPromptContent = await buildFullPrompt(userId, message);
 
       // Inject voice context when voice mode is active
-      if (voiceMode && systemPromptContent) {
+      if (voiceMode) {
         const voiceContext = `
 
 ## Voice Mode Active
@@ -1320,12 +1346,10 @@ You are responding to SPOKEN input from the user's microphone. Your responses wi
 - Use your standard tools (calendar, email, tasks, Stripe, etc.) for direct questions — only route to agents when the user explicitly names one.`;
         systemPromptContent += voiceContext;
       }
-      const baseHistory: ConversationMessage[] = systemInHistory
-        ? history
-        : [
-            { role: 'system', content: systemPromptContent!, timestamp: Date.now() },
-            ...history,
-          ];
+      const baseHistory: ConversationMessage[] = [
+        { role: 'system', content: systemPromptContent!, timestamp: Date.now() },
+        ...history.filter((m) => m.role !== 'system'),
+      ];
 
       // Build user message (multi-content for attachments)
       const hasAttachments = attachments && attachments.length > 0;
@@ -1388,7 +1412,7 @@ You are responding to SPOKEN input from the user's microphone. Your responses wi
             sendEvent('thinking', { status: 'processing', iteration: iterationCount });
           }
 
-          brainResponse = await router.route(currentReq);
+          brainResponse = await routeCodexBrain(router, currentReq);
 
           if (brainResponse.error) {
             if (!retriedTransient && TRANSIENT_BRAIN_ERROR.test(brainResponse.error)) {

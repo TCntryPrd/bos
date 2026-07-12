@@ -14,7 +14,7 @@
  * which is invisible against chat turn cost.
  *
  * The key is mounted into the container via the existing
- * /home/boss -> /data/home bind. Reachable inside container at
+ * /home/tcntryprd -> /data/home bind. Reachable inside container at
  * /data/home/.ssh/boss-host-bridge.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -149,7 +149,7 @@ export function encodeJsonlSlug(projectDir: string): string {
 
 /** Directory under ~/.claude/projects/ where CC writes JSONLs for a project. */
 export function jsonlDirFor(projectDir: string): string {
-  const home = process.env.CLAUDE_HOME ?? process.env.HOME ?? '/home/boss';
+  const home = process.env.CLAUDE_HOME ?? process.env.HOME ?? '/home/tcntryprd';
   return `${home}/.claude/projects/${encodeJsonlSlug(projectDir)}`;
 }
 

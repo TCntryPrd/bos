@@ -258,7 +258,7 @@ export interface RascalConfig {
   clients_path?: string;
 }
 
-const CONFIG_ROOT = process.env.BOSS_CONFIG_ROOT ?? '/home/boss/sp-hub/config';
+const CONFIG_ROOT = process.env.BOSS_CONFIG_ROOT ?? '/home/tcntryprd/sp-hub/config';
 
 export async function loadAgentConfig(handle: string): Promise<RascalConfig> {
   for (const kind of ['rascals', 'outsiders']) {

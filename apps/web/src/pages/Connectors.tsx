@@ -9,12 +9,10 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  Plug, RefreshCw, ExternalLink, Trash2, CheckCircle2, Loader2, KeyRound,
+  Plug, RefreshCw, ExternalLink, Trash2, CheckCircle2, Loader2, KeyRound, Linkedin, MessageCircle,
 } from 'lucide-react';
 import { Card } from '../components/Card';
-import { connectorsApi } from '../lib/api';
-import { OAuthSetupWizard } from '../components/shell/OAuthSetupWizard';
-import { getOAuthGuide } from '../config/oauthProviders';
+import { connectorsApi, unipileApi, type UnipileAccountStatus } from '../lib/api';
 
 interface Integration {
   id: string;
@@ -42,6 +40,7 @@ const META: Record<string, { hue: string; initials: string; keyLabel: string; he
   github:        { hue: '#E8ECF4', initials: 'GH', keyLabel: 'Personal access token', help: 'GitHub → Settings → Developer settings → tokens.', helpUrl: 'https://github.com/settings/tokens' },
   youtube:       { hue: '#FF5C5C', initials: 'YT', keyLabel: 'API key', help: 'YouTube Data API key (can reuse your Gemini/Google key).', helpUrl: 'https://console.cloud.google.com/apis/credentials' },
   miro:          { hue: '#FFD02F', initials: 'Mi', keyLabel: 'Access token', help: 'Powers the Canvas board surface. Create an access token in your Miro app settings.', helpUrl: 'https://miro.com/app/settings/user-profile/apps' },
+  unipile:       { hue: '#20B26B', initials: 'Up', keyLabel: 'Unipile API key', help: 'Shared provider for live LinkedIn and WhatsApp accounts. Base URL is your DSN, for example https://api50.unipile.com:18056.', helpUrl: 'https://www.unipile.com/' },
 };
 
 function StatusPill({ on }: { on: boolean }) {
@@ -181,25 +180,71 @@ function IntegrationCard({ integ, onConnectOAuth, onChanged }: {
   );
 }
 
+function UnipileAccountCard({ status, onConnect }: { status: UnipileAccountStatus; onConnect: (provider: UnipileAccountStatus['provider']) => void }) {
+  const isLinkedIn = status.provider === 'LINKEDIN';
+  const Icon = isLinkedIn ? Linkedin : MessageCircle;
+  return (
+    <div className="card p-4">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white" style={{ background: isLinkedIn ? '#0A66C2' : '#20B26B' }}>
+          <Icon className="w-4 h-4" aria-hidden />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-text-primary">{isLinkedIn ? 'LinkedIn via Unipile' : 'WhatsApp via Unipile'}</span>
+            <StatusPill on={status.connected} />
+            <span className="text-[10px] uppercase tracking-wider text-text-muted">Unipile</span>
+          </div>
+          <p className="mt-1 text-[11.5px] text-text-muted">
+            {status.connected
+              ? `${status.name ?? status.accountId ?? 'Account connected'} · ${status.health}`
+              : status.configured
+                ? 'Shared Unipile key is ready. Connect this account with hosted auth.'
+                : 'Add the shared Unipile key and DSN first.'}
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onConnect(status.provider)}
+              disabled={!status.configured}
+              className="btn-secondary text-xs gap-1.5 disabled:opacity-50"
+            >
+              {status.connected ? 'Reconnect' : 'Connect'} <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+            {status.accountId && <span className="text-[10.5px] text-text-muted font-mono truncate max-w-[220px]">{status.accountId}</span>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Connectors() {
   const [list, setList] = useState<Integration[] | null>(null);
+  const [unipile, setUnipile] = useState<UnipileAccountStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [wizardProvider, setWizardProvider] = useState<string | null>(null);
 
   const load = React.useCallback(() => {
     setLoading(true);
-    connectorsApi.getIntegrations()
-      .then((d) => { setList(d); setErr(null); })
+    Promise.all([
+      connectorsApi.getIntegrations(),
+      unipileApi.getStatus().catch(() => null),
+    ])
+      .then(([d, up]) => {
+        setList(d);
+        setUnipile(up?.accounts ?? []);
+        setErr(up?.error ?? null);
+      })
       .catch((e) => setErr(e instanceof Error ? e.message : 'Failed to load connections'))
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  async function startOAuth(id: string) {
+  async function connectOAuth(id: string) {
     try {
-      // The OAuth connector id IS the provider (google | linkedin | slack | meta | microsoft).
+      // The OAuth connector id IS the provider (google | linkedin | microsoft).
       const { url } = await connectorsApi.getOAuthUrl(id);
       window.location.href = url;
     } catch (e) {
@@ -207,14 +252,16 @@ export function Connectors() {
     }
   }
 
-  // Connect opens the create-your-own-app setup wizard when a guide exists
-  // (LinkedIn/Meta/Slack/Google); otherwise starts OAuth directly.
-  function connectOAuth(id: string) {
-    if (getOAuthGuide(id)) setWizardProvider(id);
-    else void startOAuth(id);
+  async function connectUnipile(provider: UnipileAccountStatus['provider']) {
+    try {
+      const { url } = await unipileApi.getConnectLink(provider);
+      window.location.href = url;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not start Unipile hosted auth');
+    }
   }
 
-  const oauth = (list ?? []).filter((i) => i.type === 'oauth');
+  const oauth = (list ?? []).filter((i) => i.type === 'oauth' && i.id !== 'linkedin');
   const apikeys = (list ?? []).filter((i) => i.type === 'apikey');
   const connectedCount = (list ?? []).filter((i) => i.configured).length;
 
@@ -238,6 +285,14 @@ export function Connectors() {
         <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 className="w-4 h-4 animate-spin" /> Loading connections…</div>
       ) : list && list.length > 0 ? (
         <>
+          {unipile.length > 0 && (
+            <section>
+              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Live Unipile Accounts</h2>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {unipile.map((status) => <UnipileAccountCard key={status.provider} status={status} onConnect={connectUnipile} />)}
+              </div>
+            </section>
+          )}
           {oauth.length > 0 && (
             <section>
               <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Sign-in (OAuth)</h2>
@@ -265,13 +320,6 @@ export function Connectors() {
       <p className="text-[11.5px] text-text-muted flex items-center gap-1.5">
         <CheckCircle2 className="w-3.5 h-3.5 text-success" /> Keys are stored in your workspace config and used by your agents immediately. Disconnect any time.
       </p>
-
-      <OAuthSetupWizard
-        providerId={wizardProvider ?? ''}
-        open={!!wizardProvider}
-        onClose={() => setWizardProvider(null)}
-        onAuthorize={(p) => { setWizardProvider(null); void startOAuth(p); }}
-      />
     </div>
   );
 }

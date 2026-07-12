@@ -1,0 +1,221 @@
+{
+  "uid": "boss-api-latency",
+  "title": "IR Custom AIOS — API Latency",
+  "description": "HTTP request latency, error rates, and throughput for the IR Custom AIOS Fastify API. Includes per-route breakdowns and brain request timing.",
+  "tags": ["boss", "api", "latency"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "route",
+        "label": "Route",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(http_request_duration_seconds_count{job=\"boss-api\"}, route)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "method",
+        "label": "Method",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(http_request_duration_seconds_count{job=\"boss-api\"}, method)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "p50 Latency",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "green" }, { "value": 200, "color": "yellow" }, { "value": 500, "color": "red" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"boss-api\"}[5m])) by (le)) * 1000",
+        "legendFormat": "p50"
+      }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "p95 Latency",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "green" }, { "value": 500, "color": "yellow" }, { "value": 1000, "color": "red" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"boss-api\"}[5m])) by (le)) * 1000",
+        "legendFormat": "p95"
+      }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "p99 Latency",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "green" }, { "value": 1000, "color": "yellow" }, { "value": 2000, "color": "red" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"boss-api\"}[5m])) by (le)) * 1000",
+        "legendFormat": "p99"
+      }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Error Rate %",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "green" }, { "value": 1, "color": "yellow" }, { "value": 5, "color": "red" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "100 * sum(rate(http_requests_total{job=\"boss-api\", status=~\"5..\"}[5m])) / sum(rate(http_requests_total{job=\"boss-api\"}[5m]))",
+        "legendFormat": "Error %"
+      }]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Request Latency Percentiles (ms)",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      },
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"boss-api\"}[5m])) by (le)) * 1000",
+          "legendFormat": "p50"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"boss-api\"}[5m])) by (le)) * 1000",
+          "legendFormat": "p95"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"boss-api\"}[5m])) by (le)) * 1000",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Request Rate by Status Code (req/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      },
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (status) (rate(http_requests_total{job=\"boss-api\"}[2m]))",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Brain Request Latency (ms)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      },
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(brain_request_duration_seconds_bucket{job=\"boss-api\"}[5m])) by (le, provider)) * 1000",
+          "legendFormat": "p95 {{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Slowest Routes (p95, last 5m)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      },
+      "options": {
+        "sortBy": [{ "displayName": "p95", "desc": true }],
+        "footer": { "show": false }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "topk(10, histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"boss-api\"}[5m])) by (le, route, method)) * 1000)",
+        "legendFormat": "{{method}} {{route}}",
+        "instant": true,
+        "format": "table"
+      }]
+    }
+  ]
+}

@@ -8,6 +8,7 @@
  *   LINKEDIN_API_VERSION=YYYYMM  (default below). Bump if posts 400 on version.
  */
 import { getPool } from '../db.js';
+import { createUnipileLinkedInPost, getUnipileConnectionStatus, isUnipileConfigured } from './unipile.js';
 
 const REST = 'https://api.linkedin.com/rest';
 const apiVersion = () => process.env.LINKEDIN_API_VERSION || '202605';
@@ -21,7 +22,7 @@ function restHeaders(token: string): Record<string, string> {
   };
 }
 
-export interface LinkedInStatus { connected: boolean; email?: string; expiresAt?: string | null; }
+export interface LinkedInStatus { connected: boolean; email?: string; expiresAt?: string | null; source?: 'unipile' | 'oauth'; accountId?: string | null; }
 export interface MediaInput {
   type: 'image' | 'video' | 'document';
   url?: string;          // BOS fetches the bytes (agent path)
@@ -40,12 +41,26 @@ async function getStoredToken(): Promise<string | null> {
 }
 
 export async function getLinkedInStatus(): Promise<LinkedInStatus> {
+  if (isUnipileConfigured()) {
+    try {
+      const status = await getUnipileConnectionStatus('LINKEDIN');
+      return {
+        connected: status.connected,
+        email: status.name ?? status.accountId ?? undefined,
+        expiresAt: null,
+        source: 'unipile',
+        accountId: status.accountId,
+      };
+    } catch {
+      return { connected: false, source: 'unipile', accountId: null };
+    }
+  }
   try {
     const { rows } = await getPool().query<{ email: string; expires_at: string | null }>(
       `SELECT email, expires_at FROM boss_oauth_tokens WHERE provider = 'linkedin' ORDER BY created_at DESC LIMIT 1`,
     );
     if (!rows[0]) return { connected: false };
-    return { connected: true, email: rows[0].email, expiresAt: rows[0].expires_at };
+    return { connected: true, email: rows[0].email, expiresAt: rows[0].expires_at, source: 'oauth' };
   } catch { return { connected: false }; }
 }
 
@@ -191,6 +206,18 @@ export async function publishLinkedInPost(
   opts: { link?: string; media?: MediaInput } = {},
   tenantId = 'default',
 ): Promise<{ postId: string }> {
+  if (isUnipileConfigured()) {
+    const { postId, accountId } = await createUnipileLinkedInPost(text, { link: opts.link, media: opts.media });
+    try {
+      await ensureLinkedInPostsTable();
+      await getPool().query(
+        `INSERT INTO boss_linkedin_posts (tenant_id, text, link, post_id, author, media_kind) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [tenantId, text, opts.link ?? null, postId, `unipile:${accountId}`, opts.media?.type ?? 'text'],
+      );
+    } catch { /* best-effort log */ }
+    return { postId: postId ?? '' };
+  }
+
   const token = await getStoredToken();
   if (!token) throw new Error('LinkedIn is not connected — connect it in Settings → Connections first.');
   const sub = await getAuthorSub(token);

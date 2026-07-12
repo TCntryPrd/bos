@@ -24,7 +24,7 @@ export const bashTool: BrainTool = {
     'USE bash for: npm/node commands, docker operations, system status checks (df, free, uptime), ' +
     'curl/wget for API testing, process management (ps, kill), package installation.\n\n' +
     'Safety: blocks rm -rf /, sudo, shutdown, reboot, mkfs, dd. ' +
-    'Default cwd is /home/boss/boss-dev. Max timeout 5 minutes.',
+    'Default cwd is /home/tcntryprd/boss-dev. Max timeout 5 minutes.',
   parameters: {
     type: 'object',
     properties: {
@@ -34,7 +34,7 @@ export const bashTool: BrainTool = {
       },
       cwd: {
         type: 'string',
-        description: 'Working directory. Default: /home/boss/boss-dev. Use absolute paths.',
+        description: 'Working directory. Default: /home/tcntryprd/boss-dev. Use absolute paths.',
       },
       timeout: {
         type: 'number',
@@ -56,8 +56,8 @@ export const selfPatchTool: BrainTool = {
     'Provide more surrounding context to make it unique.\n' +
     '4. Prefer editing existing files over creating new ones.\n' +
     '5. Do not add comments, docstrings, or type annotations to code you did not change.\n\n' +
-    'Path resolution: relative paths resolve from /home/boss/boss-dev/. ' +
-    'Absolute paths starting with /home/boss/ also work.\n\n' +
+    'Path resolution: relative paths resolve from /home/tcntryprd/boss-dev/. ' +
+    'Absolute paths starting with /home/tcntryprd/ also work.\n\n' +
     'Common mistake: copying text from a previous read that has been modified since. Always re-read if unsure.',
   parameters: {
     type: 'object',

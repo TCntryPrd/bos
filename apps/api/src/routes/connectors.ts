@@ -30,6 +30,17 @@ import {
 import type { Provider } from '@boss/connectors';
 import crypto from 'node:crypto';
 import { getRuntimeConfig, setRuntimeConfig, deleteRuntimeConfig } from '../config-store.js';
+import {
+  QBO_AUTHORIZE_ENDPOINT,
+  QBO_SCOPE,
+  qboConfigured,
+  qboConnected,
+  qboRedirectUri,
+  exchangeQboCode,
+  storeQboTokens,
+  disconnectQbo,
+} from '../tools/quickbooks-auth.js';
+import { getQboFinancialSnapshot } from '../tools/quickbooks-snapshot.js';
 
 // ---------------------------------------------------------------------------
 // Token store initialisation (requires DB in production; skipped in Phase 1)
@@ -380,6 +391,7 @@ export async function connectorRoutes(server: FastifyInstance) {
     youtube: 'YOUTUBE_API_KEY',
     spotify: 'SPOTIFY_ACCESS_TOKEN',
     miro: 'MIRO_ACCESS_TOKEN',
+    unipile: 'UNIPILE_API_KEY',
   };
 
   /**
@@ -391,6 +403,7 @@ export async function connectorRoutes(server: FastifyInstance) {
     n8n: 'N8N_BASE_URL',
     homeassistant: 'HA_BASE_URL',
     airtable: 'AIRTABLE_BASE_URL',
+    unipile: 'UNIPILE_BASE_URL',
   };
 
   /** Full integration catalog — Google and Microsoft are OAuth-based, the rest use API keys. */
@@ -414,7 +427,9 @@ export async function connectorRoutes(server: FastifyInstance) {
     { id: 'github',        name: 'GitHub',           type: 'apikey', envVar: 'GITHUB_TOKEN' },
     { id: 'youtube',       name: 'YouTube',          type: 'apikey', envVar: 'YOUTUBE_API_KEY' },
     { id: 'spotify',       name: 'Spotify',          type: 'apikey', envVar: 'SPOTIFY_ACCESS_TOKEN' },
+    { id: 'quickbooks',    name: 'QuickBooks Online', type: 'oauth' },
     { id: 'miro',          name: 'Miro',             type: 'apikey', envVar: 'MIRO_ACCESS_TOKEN' },
+    { id: 'unipile',       name: 'Unipile (LinkedIn/WhatsApp)', type: 'apikey', envVar: 'UNIPILE_API_KEY' },
     { id: 'meta',          name: 'Meta (Facebook/IG/Threads/WhatsApp)', type: 'apikey', envVar: 'META_APP_ID' },
   ];
 
@@ -458,7 +473,11 @@ export async function connectorRoutes(server: FastifyInstance) {
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const result = INTEGRATION_CATALOG.map((entry) => {
         let configured = false;
-        if (entry.type === 'oauth') {
+        if (entry.id === 'quickbooks') {
+          // QuickBooks OAuth lives outside the google/microsoft token store —
+          // configured means Intuit app credentials are present in the env.
+          configured = qboConfigured();
+        } else if (entry.type === 'oauth') {
           const provider = entry.id as Provider; // 'google' | 'linkedin'
           configured = oauthClientConfigs.has(provider);
         } else if (entry.envVar) {
@@ -468,6 +487,9 @@ export async function connectorRoutes(server: FastifyInstance) {
           }
           const val = process.env[entry.envVar];
           configured = typeof val === 'string' && val.length > 0;
+          if (entry.id === 'unipile') {
+            configured = configured && typeof process.env.UNIPILE_BASE_URL === 'string' && process.env.UNIPILE_BASE_URL.length > 0;
+          }
         }
         const baseUrlVar = INTEGRATION_BASEURL_MAP[entry.id];
         const baseUrl = baseUrlVar ? (process.env[baseUrlVar] ?? '') : '';
@@ -691,7 +713,7 @@ export async function connectorRoutes(server: FastifyInstance) {
    *     {
    *       "accountId": "google-a2Nhaw...",
    *       "provider": "google",
-   *       "email": "d.caine@dcaine.com",
+   *       "email": "user@example.com",
    *       "scopes": ["https://www.googleapis.com/auth/gmail.readonly", ...],
    *       "connectedAt": "2025-11-01T12:00:00.000Z"
    *     }
@@ -784,7 +806,7 @@ export async function connectorRoutes(server: FastifyInstance) {
    *
    * Example request:
    *   POST /api/connectors/accounts/add
-   *   { "provider": "google", "email": "kevin@starrpartners.ai" }
+   *   { "provider": "google", "email": "user@example.com" }
    *
    * Example response:
    *   { "url": "https://accounts.google.com/o/oauth2/v2/auth?...", "state": "abc123" }
@@ -1448,6 +1470,156 @@ export async function connectorRoutes(server: FastifyInstance) {
       return reply.status(200).send({ status: 'ok', channels });
     },
   );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // QuickBooks Online OAuth + Connection Management
+  //
+  // Token lifecycle (rotating refresh tokens, runtime_config persistence)
+  // lives in tools/quickbooks-auth.ts. Intuit's callback carries a realmId
+  // query param identifying the connected company — it is stored alongside
+  // the tokens and required on every API call.
+  //
+  // SECURITY: states are only minted on the AUTHENTICATED /quickbooks/connect
+  // route (deliberately outside the public /oauth prefix). The callback must
+  // stay public for Intuit to reach it, so a valid state is the authorization
+  // bearer — without this, any anonymous caller could complete the flow with
+  // their own Intuit account and silently rebind the books.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const qboPendingStates = new Map<string, number>();
+  // 30 min: the authorize URL is handed to a human (often via chat) who may
+  // not click immediately; still short enough that a leaked state is useless.
+  const QBO_STATE_TTL_MS = 30 * 60_000;
+
+  /**
+   * GET /api/connectors/quickbooks/connect
+   * Returns the Intuit authorize URL to open in a browser. Auth required
+   * (admin/owner — rebinding the accounting connection is an admin action);
+   * NOT under /oauth so the auth middleware's public-path list doesn't apply.
+   */
+  server.get('/quickbooks/connect', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!qboConfigured()) {
+      return reply.status(503).send({ error: 'QuickBooks not configured — set QB_CLIENT_ID and QB_CLIENT_SECRET' });
+    }
+
+    // Admin-only guard (same convention as POST /configure)
+    const role = request.auth?.role;
+    if (role && role !== 'admin' && role !== 'owner') {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        message: 'Only admin users can connect QuickBooks',
+      });
+    }
+
+    // Prune expired states so the map can't grow unbounded
+    const now = Date.now();
+    for (const [st, issued] of qboPendingStates) {
+      if (now - issued > QBO_STATE_TTL_MS) qboPendingStates.delete(st);
+    }
+
+    const state = crypto.randomBytes(16).toString('hex');
+    qboPendingStates.set(state, now);
+
+    const url = `${QBO_AUTHORIZE_ENDPOINT}?${new URLSearchParams({
+      client_id: process.env.QB_CLIENT_ID!,
+      response_type: 'code',
+      scope: QBO_SCOPE,
+      redirect_uri: qboRedirectUri(),
+      state,
+    })}`;
+
+    return reply.status(200).send({ url, state });
+  });
+
+  server.get('/oauth/quickbooks/callback', {
+    config: { skipAuth: true },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { code, state, realmId, error: oauthError } = request.query as Record<string, string>;
+
+    if (oauthError || !code || !realmId) {
+      request.log.warn({ oauthError, hasCode: !!code, hasRealm: !!realmId }, 'QuickBooks OAuth callback rejected');
+      return reply.redirect('/boss/ui/#/?oauth=error&provider=quickbooks');
+    }
+
+    const issued = state ? qboPendingStates.get(state) : undefined;
+    qboPendingStates.delete(state ?? '');
+    if (issued === undefined || Date.now() - issued > QBO_STATE_TTL_MS) {
+      request.log.warn('QuickBooks OAuth callback: unknown or expired state');
+      return reply.redirect('/boss/ui/#/?oauth=error&provider=quickbooks');
+    }
+
+    try {
+      // Surface company rebinds loudly — a realm change means the books the
+      // brain reads just switched to a different QuickBooks company.
+      const previousRealm = await getRuntimeConfig('QB_REALM_ID', 'default');
+      if (previousRealm && previousRealm !== realmId) {
+        request.log.warn({ previousRealm, realmId }, 'QuickBooks connection rebound to a DIFFERENT company');
+      }
+      const tokens = await exchangeQboCode(code);
+      await storeQboTokens(tokens, realmId);
+      request.log.info({ realmId }, 'QuickBooks OAuth connected');
+      return reply.redirect('/boss/ui/#/?oauth=success&provider=quickbooks');
+    } catch (err) {
+      request.log.error({ err }, 'QuickBooks OAuth callback error');
+      return reply.redirect('/boss/ui/#/?oauth=error&provider=quickbooks');
+    }
+  });
+
+  /**
+   * GET /api/connectors/quickbooks/status
+   * Reports whether QuickBooks is configured (app credentials present) and
+   * connected (refresh token + realm ID stored).
+   */
+  server.get('/quickbooks/status', async (_request: FastifyRequest, reply: FastifyReply) => {
+    const configured = qboConfigured();
+    const connected = configured && (await qboConnected());
+    const realmId = connected ? await getRuntimeConfig('QB_REALM_ID', 'default') : null;
+    return reply.send({
+      configured,
+      connected,
+      environment: process.env.QB_ENVIRONMENT === 'production' ? 'production' : 'sandbox',
+      ...(realmId ? { realmId } : {}),
+    });
+  });
+
+  /**
+   * GET /api/connectors/quickbooks/financial-snapshot
+   * Structured financial numbers from the books (bank balances, P&L MTD,
+   * open AR). boss_financial_reason imports the function directly; this REST
+   * surface serves any other stack. The BOS API is the only holder of the
+   * rotating Intuit tokens.
+   * Auth required (internal callers use trusted-IP + X-BOSS-Internal).
+   */
+  server.get('/quickbooks/financial-snapshot', async (_request: FastifyRequest, reply: FastifyReply) => {
+    if (!qboConfigured() || !(await qboConnected())) {
+      return reply.status(503).send({ error: 'QuickBooks not connected' });
+    }
+    try {
+      const snapshot = await getQboFinancialSnapshot();
+      return reply.status(200).send(snapshot);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.status(502).send({ error: msg });
+    }
+  });
+
+  /**
+   * POST /api/connectors/quickbooks/disconnect
+   * Revokes the connection at Intuit (best-effort) and clears stored tokens.
+   * Admin-only — this requires a full OAuth redo to recover.
+   */
+  server.post('/quickbooks/disconnect', async (request: FastifyRequest, reply: FastifyReply) => {
+    const role = request.auth?.role;
+    if (role && role !== 'admin' && role !== 'owner') {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        message: 'Only admin users can disconnect QuickBooks',
+      });
+    }
+    await disconnectQbo();
+    request.log.info({ userId: request.auth?.userId }, 'QuickBooks disconnected');
+    return reply.status(200).send({ status: 'ok', connected: false });
+  });
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Spotify OAuth + Token Management
