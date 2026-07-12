@@ -5,6 +5,7 @@ import { NavRail } from './shell/NavRail';
 import { TopBar } from './shell/TopBar';
 import { BossOrb } from './shell/BossOrb';
 import { useVoiceCommands } from '../hooks/useVoiceCommands';
+import { isPlainBrand } from '../lib/brand';
 import officeScene from '../assets/office-scene.png';
 import boardroomScene from '../assets/boardroom-scene.png';
 import rascalsBullpenScene from '../assets/rascals-bullpen-scene.png';
@@ -164,7 +165,7 @@ export function Layout({ children }: LayoutProps) {
     if (rascalsImmersive) return rascalsBullpenScene;
     return null;
   }, [boardImmersive, deskImmersive, officeImmersive, rascalsImmersive]);
-  const immersive = !!immersiveScene;
+  const immersive = !isPlainBrand && !!immersiveScene;
   const roomScenes: Record<RoomTone, string> = {
     office: officeScene,
     lobby: lobbyScene,
@@ -201,7 +202,7 @@ export function Layout({ children }: LayoutProps) {
   };
   const roomScene = roomScenes[roomTone];
   const ambientRoom = !immersive;
-  const shellScene = immersiveScene ?? roomScene;
+  const shellScene = isPlainBrand ? null : (immersiveScene ?? roomScene);
   const glassShell = true;
   const roomObjectPosition = ambientRoom
     ? roomTone === 'office' ? 'center 38%' : roomTone === 'wellness' ? '30% center' : 'center center'

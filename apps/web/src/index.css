@@ -3712,3 +3712,7 @@
 [data-brand='plain'] .aios-whiteboard .dashboard-whiteboard-grid::before { display: none !important; }
 [data-brand='plain'] .login-entrance-page > img,
 [data-brand='plain'] .login-entrance-page > .aios-atmosphere-grid { display: none !important; }
+
+[data-brand='plain'] .aios-main,
+[data-brand='plain'] .aios-page,
+[data-brand='plain'] .aios-workbench { background-image: none !important; }
