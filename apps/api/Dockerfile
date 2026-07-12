@@ -56,7 +56,7 @@ FROM node:22-alpine AS runner
 # - jq: JSON wrangling on the command line
 RUN apk add --no-cache docker-cli git ripgrep bash openssh-client curl python3 jq chromium
 
-RUN npm install -g @openai/codex@0.142.5
+RUN npm install -g @openai/codex@0.144.1
 RUN ln -sf /usr/lib/node_modules/@openai/codex/bin/codex.js /usr/bin/codex
 
 # Claude Code CLI — invoked as a subprocess from the rascal-workspace
