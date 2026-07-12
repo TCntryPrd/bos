@@ -1,0 +1,14 @@
+{
+  "lead": {
+    "row": 121,
+    "business_name": "Pannell Associates Sales Co",
+    "contact_name": "Amber Pannell",
+    "email": "amber@pannellassociates.com"
+  },
+  "draft": {
+    "subject": "Quick idea for Pannell Associates",
+    "body": "Hi Amber,\n\nRepresentatives juggle a lot—tracking leads, following up with clients, managing inventory questions. Most of that follow-up is repetitive.\n\nWe help manufacturers' reps automate the intake process: a customer inquiry hits your system, an AI agent pulls the spec sheet and available stock, and sends the rep a one-page brief ready to act on. No more digging through emails.\n\nAlways good to work with local Oklahoma businesses. Want to see how this could cut your admin time this week?\n\nKevin Starr\nFounder, Starr & Partners",
+    "from": "d.caine@dcaine.com"
+  },
+  "personalization_notes": "Referenced manufacturers rep role, local Oklahoma location (Mustang), pain point around follow-up and data gathering"
+}

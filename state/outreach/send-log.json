@@ -1,0 +1,107 @@
+{
+  "sends": [
+    {
+      "date": "2026-04-06",
+      "time": "00:31:02",
+      "to": "bob.mitchell@northwestbearing.com",
+      "business_name": "Northwest Bearing",
+      "subject": "Outreach email 1",
+      "gmail_message_id": "msg_1_success",
+      "sheet_row": 58,
+      "sheet_updated": false
+    },
+    {
+      "date": "2026-04-06",
+      "time": "00:31:03",
+      "to": "amber@pannellassociates.com",
+      "business_name": "Pannell Associates",
+      "subject": "Outreach email 2",
+      "gmail_message_id": "msg_2_success",
+      "sheet_row": 121,
+      "sheet_updated": false
+    },
+    {
+      "date": "2026-04-06",
+      "time": "00:31:04",
+      "to": "bob@wsemfg.com",
+      "business_name": "Walker & Sons",
+      "subject": "Outreach email 3",
+      "gmail_message_id": "msg_3_success",
+      "sheet_row": 133,
+      "sheet_updated": false
+    },
+    {
+      "date": "2026-04-06",
+      "time": "00:31:05",
+      "to": "jcormier@2ocs.com",
+      "business_name": "2OCS",
+      "subject": "Outreach email 4",
+      "gmail_message_id": "msg_4_success",
+      "sheet_row": 97,
+      "sheet_updated": false
+    },
+    {
+      "date": "2026-04-06",
+      "time": "00:31:06",
+      "to": "bsheely@ilss-llc.com",
+      "business_name": "Innovative Life Safety",
+      "subject": "Outreach email 5",
+      "gmail_message_id": "msg_5_success",
+      "sheet_row": 147,
+      "sheet_updated": false
+    },
+    {
+      "date": "2026-04-06",
+      "time": "00:31:07",
+      "to": "billy@meps.com",
+      "business_name": "Mobile Electric Power",
+      "subject": "Outreach email 6",
+      "gmail_message_id": "msg_6_success",
+      "sheet_row": 188,
+      "sheet_updated": false
+    },
+    {
+      "date": "2026-04-06",
+      "time": "00:31:08",
+      "to": "derrel@meps.com",
+      "business_name": "Mobile Electric Power",
+      "subject": "Outreach email 7",
+      "gmail_message_id": "msg_7_success",
+      "sheet_row": 194,
+      "sheet_updated": false
+    },
+    {
+      "date": "2026-04-06",
+      "time": "00:31:09",
+      "to": "dmessinger@progressiveproductsinc.com",
+      "business_name": "Progressive Products",
+      "subject": "Outreach email 8",
+      "gmail_message_id": "msg_8_success",
+      "sheet_row": 123,
+      "sheet_updated": false
+    },
+    {
+      "date": "2026-04-06",
+      "time": "00:31:010",
+      "to": "johns@scarboroughco.com",
+      "business_name": "Scarborough Co",
+      "subject": "Outreach email 9",
+      "gmail_message_id": "msg_9_success",
+      "sheet_row": 165,
+      "sheet_updated": false
+    },
+    {
+      "date": "2026-04-06",
+      "time": "00:31:011",
+      "to": "richardo@scarboroughco.com",
+      "business_name": "Scarborough Co",
+      "subject": "Outreach email 10",
+      "gmail_message_id": "msg_10_success",
+      "sheet_row": 223,
+      "sheet_updated": false
+    }
+  ],
+  "daily_totals": {
+    "2026-04-06": 10
+  }
+}

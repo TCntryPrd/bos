@@ -1,0 +1,24 @@
+{
+  // Holo-owned typecheck gate. Exists to keep the health-hologram gate
+  // runnable inside this shared production tree: `types` routes around the
+  // hoisted @types/react-native conflict, and `include` scopes the program to
+  // the holo-owned entry points because non-holo files in this tree carry
+  // pre-existing type errors (verified present at a pristine HEAD checkout)
+  // that holo agents must not touch. tsc still follows imports, so everything
+  // the holo code depends on (healthData.ts, drei/fiber types, ...) is checked.
+  // noUnusedLocals is gate-only-relaxed because non-holo files reached via
+  // imports (e.g. LoadingSpinner.tsx's `import React` under jsx:react-jsx,
+  // used by HealthHolo.tsx's PageLoader) fail TS6133 at HEAD; all real type
+  // checks (strict, etc.) remain inherited from tsconfig.json.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client"],
+    "noUnusedLocals": false
+  },
+  "include": [
+    "src/lib/holo.ts",
+    "src/lib/holo.test.ts",
+    "src/components/health/holo",
+    "src/pages/HealthHolo.tsx"
+  ]
+}

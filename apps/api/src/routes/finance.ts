@@ -1,0 +1,99 @@
+/**
+ * Finance routes — /api/finance
+ *
+ * Serves the latest financial snapshot the CFO agent persisted (boss_finance_snapshot)
+ * for the dashboard finance card + the COO.
+ *
+ *   GET /api/finance/snapshot — the most recent snapshot { ...figures, created_at }
+ */
+
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { getPool } from '../db.js';
+import { executeEraTool } from '../tools/era.js';
+import { upsertTxnOverride, getTxnOverrideMap, ensureTxnOverridesTable } from '../lib/txn-overrides.js';
+
+/** Best-effort parse of the ERA transactions tool result (a JSON string of {transactions:[...]}). */
+function parseEraTxns(raw: string): Array<Record<string, any>> {
+  try {
+    const p = JSON.parse(raw) as any;
+    const arr = p.transactions ?? p;
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function financeRoutes(server: FastifyInstance): Promise<void> {
+  await ensureTxnOverridesTable().catch(() => {});
+
+  server.get('/snapshot', async (_req: FastifyRequest, reply: FastifyReply) => {
+    const pool = getPool();
+    const { rows } = await pool.query<{ snapshot: Record<string, unknown>; created_at: string }>(
+      `SELECT snapshot, created_at FROM boss_finance_snapshot ORDER BY created_at DESC LIMIT 1`,
+    );
+    if (rows.length === 0) {
+      return reply.send({ snapshot: null, created_at: null });
+    }
+    return reply.send({ ...rows[0].snapshot, created_at: rows[0].created_at });
+  });
+
+  // Month-to-date transactions for the tile, merged with Kevin's free-form labels.
+  server.get<{ Querystring: { limit?: string } }>('/transactions', async (request, reply) => {
+    const cap = Math.min(parseInt(request.query.limit ?? '200', 10) || 200, 300);
+    // Pull from the 1st of the current month (MTD), newest first.
+    const to = new Date();
+    const from = new Date(to.getFullYear(), to.getMonth(), 1);
+    const ymd = (d: Date) => d.toISOString().slice(0, 10);
+    let txns: Array<Record<string, any>> = [];
+    try {
+      const raw = await executeEraTool('boss_era_transactions', { from_date: ymd(from), to_date: ymd(to), page_size: 100 });
+      txns = parseEraTxns(raw);
+    } catch (err) {
+      request.log.error({ err }, 'finance/transactions ERA pull failed');
+      return reply.status(503).send({ error: 'ERA unavailable', transactions: [] });
+    }
+    // newest first
+    txns.sort((a, b) => String(b.transaction_date ?? b.posted_date ?? '').localeCompare(String(a.transaction_date ?? a.posted_date ?? '')));
+    const overrides = await getTxnOverrideMap();
+    const out = txns.slice(0, cap).map((t) => {
+      const id = String(t.transaction_id ?? '');
+      return {
+        transaction_id: id,
+        account: t.account_name ?? t.account_group_key ?? null,
+        date: t.transaction_date ?? t.posted_date ?? null,
+        amount: typeof t.amount === 'number' ? t.amount : Number(t.amount ?? 0),
+        description: t.description ?? t.merchant_name ?? '',
+        category: t.category ?? null,
+        label: overrides[id]?.label ?? null,      // Kevin's free-form classification, if set
+        note: overrides[id]?.note ?? null,
+      };
+    });
+    return reply.send({ transactions: out });
+  });
+
+  // Save Kevin's free-form label on a transaction (hard override the CFO honors + learns from).
+  server.post<{ Body: { transaction_id?: string; account?: string; date?: string; amount?: number; description?: string; label?: string; note?: string } }>(
+    '/classify',
+    async (request, reply) => {
+      const b = request.body ?? {};
+      const transactionId = String(b.transaction_id ?? '').trim();
+      const label = String(b.label ?? '').trim();
+      if (!transactionId) return reply.status(400).send({ error: 'transaction_id required' });
+      if (!label) return reply.status(400).send({ error: 'label required' });
+      try {
+        await upsertTxnOverride({
+          transactionId, label,
+          account: b.account, txnDate: b.date,
+          amount: typeof b.amount === 'number' ? b.amount : undefined,
+          description: b.description, note: b.note?.trim() || undefined,
+        });
+        return reply.send({ ok: true });
+      } catch (err) {
+        request.log.error({ err }, 'finance/classify failed');
+        return reply.status(500).send({ error: (err as Error).message });
+      }
+    },
+  );
+}
+
+export default financeRoutes;

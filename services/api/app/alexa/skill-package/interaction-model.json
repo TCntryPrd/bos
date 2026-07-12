@@ -1,0 +1,84 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "boss",
+      "intents": [
+        {
+          "name": "CatchAllIntent",
+          "slots": [
+            {
+              "name": "rawInput",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "{rawInput}",
+            "I {rawInput}",
+            "so {rawInput}",
+            "hey {rawInput}",
+            "ok {rawInput}",
+            "well {rawInput}",
+            "yeah {rawInput}",
+            "alright {rawInput}"
+          ]
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        }
+      ]
+    },
+    "dialog": {
+      "intents": [
+        {
+          "name": "CatchAllIntent",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "rawInput",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": {
+                "elicitation": "Elicit.rawInput"
+              }
+            }
+          ]
+        }
+      ],
+      "delegationStrategy": "SKILL_RESPONSE"
+    },
+    "prompts": [
+      {
+        "id": "Elicit.rawInput",
+        "variations": [
+          {
+            "type": "PlainText",
+            "value": "I'm listening. What do you need?"
+          },
+          {
+            "type": "PlainText",
+            "value": "Go ahead."
+          },
+          {
+            "type": "PlainText",
+            "value": "What can I do for you?"
+          }
+        ]
+      }
+    ]
+  }
+}

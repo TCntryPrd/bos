@@ -1,0 +1,20 @@
+{
+"hostname": "last-castle",
+"os": "Ubuntu 24.04.4 LTS",
+"kernel": "6.8.0-117-generic",
+"uptime": "up 4 days, 9 hours, 56 minutes",
+"load": "0.04 0.11 0.21",
+"cpu": "AMD Ryzen 5 8500G w/ Radeon 740M Graphics",
+"cpu_cores": 12,
+"memory_total_mb": 31401,
+"memory_used_mb": 6274,
+"memory_pct": 19.9,
+"disk_total": "937G",
+"disk_used": "439G",
+"disk_avail": "451G",
+"disk_pct": "50%",
+"docker_containers": [{"name": "boss_executor", "status": "Up 23 hours (healthy)", "image": "boss-v2-executor"}, {"name": "boss_api", "status": "Up 23 hours (healthy)", "image": "boss-v2-api"}, {"name": "boss_worker", "status": "Up 23 hours (healthy)", "image": "boss-v2-worker"}, {"name": "boss_weaviate", "status": "Up 23 hours (healthy)", "image": "semitechnologies/weaviate:1.28.2"}, {"name": "boss_web", "status": "Up 23 hours (healthy)", "image": "boss-v2-web"}, {"name": "boss_weaviate_console", "status": "Up 23 hours", "image": "semitechnologies/weaviate-console:latest"}, {"name": "boss_redis", "status": "Up 23 hours (healthy)", "image": "redis:7-alpine"}, {"name": "boss_stt", "status": "Up 23 hours (healthy)", "image": "boss-v2-stt"}, {"name": "boss_postgres", "status": "Up 23 hours (healthy)", "image": "postgres:16-alpine"}, {"name": "openwa-api", "status": "Up 4 days (healthy)", "image": "openwa-openwa-api"}, {"name": "omnivoice-studio", "status": "Up 4 days (healthy)", "image": "ghcr.io/debpalash/omnivoice-studio:latest"}, {"name": "n8n", "status": "Up 4 days", "image": "n8nio/n8n"}, {"name": "n8n-postgres-1", "status": "Up 4 days (healthy)", "image": "pgvector/pgvector:pg16"}, {"name": "boss_homeassistant", "status": "Up 4 days", "image": "ghcr.io/home-assistant/home-assistant:stable"}],
+"updates_available": 73,
+"tailscale_ip": "100.78.24.32",
+"tailscale_hostname": "last-castle.daggertooth-larch.ts.net."
+}

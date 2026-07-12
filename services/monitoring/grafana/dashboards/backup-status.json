@@ -1,0 +1,202 @@
+{
+  "uid": "boss-backup-status",
+  "title": "IR Custom AIOS — Backup Status",
+  "description": "Encrypted backup system health: last successful backup age, backup duration, destination success rates, retention policy compliance. Target: backup age < 2x interval.",
+  "tags": ["boss", "backup", "reliability"],
+  "timezone": "browser",
+  "refresh": "60s",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Last Successful Backup",
+      "description": "Time since last successful backup completed. Alert triggers if age > 2x the configured interval.",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 3600, "color": "yellow" },
+              { "value": 7200, "color": "red" }
+            ]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "time() - backup_last_success_timestamp{job=\"boss-worker\"}",
+        "legendFormat": "Age (seconds)"
+      }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Backups Completed (24h)",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"] },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "red" }, { "value": 24, "color": "yellow" }, { "value": 48, "color": "green" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "increase(backup_runs_total{job=\"boss-worker\", status=\"success\"}[24h])",
+        "legendFormat": "completions"
+      }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Backup Failures (24h)",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "green" }, { "value": 1, "color": "yellow" }, { "value": 3, "color": "red" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "increase(backup_runs_total{job=\"boss-worker\", status=\"failure\"}[24h])",
+        "legendFormat": "failures"
+      }]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Backup Duration (seconds)",
+      "description": "How long each backup run takes. Spikes may indicate database growth or slow destination writes.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "green" }, { "value": 120, "color": "yellow" }, { "value": 300, "color": "red" }]
+          }
+        }
+      },
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.50, sum(rate(backup_duration_seconds_bucket{job=\"boss-worker\"}[30m])) by (le, destination))",
+          "legendFormat": "p50 {{destination}}"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(backup_duration_seconds_bucket{job=\"boss-worker\"}[30m])) by (le, destination))",
+          "legendFormat": "p95 {{destination}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Backup Size (MB)",
+      "description": "Size of each backup artifact — Postgres dump + Weaviate export. Track for unexpected growth.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "decmbytes" }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "backup_artifact_size_bytes{job=\"boss-worker\", component=\"postgres\"} / 1024 / 1024",
+          "legendFormat": "postgres dump"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "backup_artifact_size_bytes{job=\"boss-worker\", component=\"weaviate\"} / 1024 / 1024",
+          "legendFormat": "weaviate export"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Backup Success Rate by Destination",
+      "description": "Tracks individual destination reliability. Git and S3 success rates should both stay near 100%.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "100 * sum by (destination) (rate(backup_runs_total{job=\"boss-worker\", status=\"success\"}[1h])) / sum by (destination) (rate(backup_runs_total{job=\"boss-worker\"}[1h]))",
+        "legendFormat": "{{destination}} success %"
+      }]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Backup System Status",
+      "description": "0 = healthy (recent backup exists). 1 = stale (needs attention).",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 20 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "HEALTHY", "color": "green" },
+                "1": { "text": "STALE — INVESTIGATE", "color": "red" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "green" }, { "value": 1, "color": "red" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "floor(clamp_min((time() - backup_last_success_timestamp{job=\"boss-worker\"}) / 7200, 0))",
+        "legendFormat": ""
+      }]
+    }
+  ]
+}

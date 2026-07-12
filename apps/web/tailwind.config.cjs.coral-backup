@@ -1,0 +1,101 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        // BOS — Light, Joyful theme
+        surface: {
+          DEFAULT: '#FAFBFC', // Soft Gray-Blue (v-base)
+          1: '#F5F7FA',       // Pure white
+          2: '#EDF2F7',       // Very light gray
+          3: '#E2E8F0',       // Light gray
+          4: '#CBD5E0',       // Medium light gray
+        },
+        base:   '#F7F9FC',
+        null:   '#FFFFFF',
+
+        border: {
+          DEFAULT: 'rgba(45, 55, 72, 0.08)',  // Subtle border
+          strong:  'rgba(45, 55, 72, 0.15)',  // Stronger border
+        },
+        text: {
+          primary:   '#1A202C',  // Dark text on light bg
+          secondary: '#718096',  // Muted text
+          muted:     '#A0AEC0',  // Dim text
+        },
+
+        // IR Aurora accent palette
+        v: {
+          purple: '#FF6B6B',  // Coral Red
+          pink:   '#FF8E53',  // Sunset Orange
+          green:  '#48BB78',  // Success Green
+          blue:   '#4ECDC4',  // Turquoise
+          amber:  '#FFE66D',  // Sunny Yellow
+        },
+
+        // Primary accent — IR Turquoise
+        accent: {
+          DEFAULT: '#4ECDC4',
+          hover:   '#44A08D',
+          muted:   'rgba(78, 205, 196, 0.12)',
+        },
+
+        success: {
+          DEFAULT: '#48BB78',
+          muted:   'rgba(72, 187, 120, 0.12)',
+        },
+        warning: {
+          DEFAULT: '#FFE66D',
+          muted:   'rgba(255, 230, 109, 0.12)',
+        },
+        danger: {
+          DEFAULT: '#FF6B6B',
+          muted:   'rgba(255, 107, 107, 0.12)',
+        },
+        info: {
+          DEFAULT: '#4ECDC4',
+          muted:   'rgba(78, 205, 196, 0.12)',
+        },
+      },
+      fontFamily: {
+        sans: [
+          'Space Grotesk',
+          'system-ui',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'Segoe UI',
+          'sans-serif',
+        ],
+        mono: [
+          'JetBrains Mono',
+          'ui-monospace',
+          'Fira Code',
+          'Consolas',
+          'monospace',
+        ],
+      },
+      backgroundImage: {
+        'grad-cool': 'linear-gradient(135deg, #4ECDC4 0%, #44A08D 100%)',
+        'grad-warm': 'linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)',
+        'grad-lime': 'linear-gradient(135deg, #FFE66D 0%, #4ECDC4 100%)',
+      },
+      animation: {
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'fade-in': 'fadeIn 0.2s ease-out',
+        'slide-in': 'slideIn 0.2s ease-out',
+      },
+      keyframes: {
+        fadeIn: {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        slideIn: {
+          from: { opacity: '0', transform: 'translateY(4px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+    },
+  },
+  plugins: [],
+};

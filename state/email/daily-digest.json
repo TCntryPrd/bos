@@ -1,0 +1,111 @@
+{
+  "date": "2026-04-07",
+  "total_processed": 2,
+  "by_category": {
+    "P1_URGENT": 1,
+    "P2_REPLY_NEEDED": 0,
+    "P3_EYES_ONLY": 1,
+    "AUTOMATED": 0,
+    "PROMO": 0
+  },
+  "drafts_created": 0,
+  "promo_archived": 0,
+  "accounts": {
+    "kevin@starrpartners.ai": { "processed": 0, "drafts": 0 },
+    "d.caine@dcaine.com": { "processed": 2, "drafts": 0 },
+    "absoluterecoverybureau@gmail.com": { "processed": 0, "drafts": 0 },
+    "travelcraft.dc@gmail.com": { "processed": 0, "drafts": 0 }
+  },
+  "runs": [
+    {
+      "run_id": "e6ef1189-6b33-4506-aa9e-e67607ad89fc",
+      "logger_run_id": "44f940be-2f3c-47b0-87be-3532cb097fff",
+      "timestamp": "2026-04-07T03:31:45.000Z",
+      "processed": 0,
+      "drafts": 0,
+      "by_category": {
+        "P1_URGENT": 0,
+        "P2_REPLY_NEEDED": 0,
+        "P3_EYES_ONLY": 0,
+        "AUTOMATED": 0,
+        "PROMO": 0
+      },
+      "accounts": [
+        "d.caine@dcaine.com"
+      ],
+      "notes": "1 P3_EYES_ONLY email (19d65e6d60a7d3d5 - Make.com GHL scenario warning for Kane Minkus) already logged in boss_email_log from prior cycle (logged at 03:17:48, category=other). Skipped Postgres insert (idempotent). Email already marked as read in Gmail. No new drafts generated. Accounts kevin@starrpartners.ai, absoluterecoverybureau@gmail.com, travelcraft.dc@gmail.com inaccessible via Gmail MCP."
+    },
+    {
+      "run_id": "7d7a5362-baae-48b3-ac2e-b9e740ff770a",
+      "logger_run_id": "f77edfb5-3476-4908-b472-8ed1c7a1185c",
+      "timestamp": "2026-04-07T03:15:45.000Z",
+      "processed": 1,
+      "drafts": 0,
+      "by_category": {
+        "P1_URGENT": 0,
+        "P2_REPLY_NEEDED": 0,
+        "P3_EYES_ONLY": 1,
+        "AUTOMATED": 0,
+        "PROMO": 0
+      },
+      "accounts": [
+        "d.caine@dcaine.com"
+      ],
+      "notes": "1 P3_EYES_ONLY email (19d65e6d60a7d3d5 - Make.com GHL scenario warning for Kane Minkus). Already in boss_email_log (logged by execution worker at 03:17:48, category=other). Marked as read. No draft created. Accounts kevin@starrpartners.ai, absoluterecoverybureau@gmail.com, travelcraft.dc@gmail.com inaccessible this run."
+    },
+    {
+      "run_id": "d2fd9ca6-8b27-4607-b242-91fd2dbaf523",
+      "logger_run_id": "3d76efe6-65d6-43b1-9f2b-7c91e300ce02",
+      "timestamp": "2026-04-07T01:00:43Z",
+      "processed": 0,
+      "drafts": 0,
+      "by_category": {
+        "P1_URGENT": 0,
+        "P2_REPLY_NEEDED": 0,
+        "P3_EYES_ONLY": 0,
+        "AUTOMATED": 0,
+        "PROMO": 0
+      },
+      "accounts": [
+        "d.caine@dcaine.com"
+      ],
+      "notes": "0 unread emails in d.caine@dcaine.com. Both p1-draft emails (19d636124ccf6ee6, 19d642808d646e6e) already in boss_email_log from prior cycles. p2-drafts: 0. No Postgres inserts or Gmail mark-as-read needed this cycle. Accounts kevin@starrpartners.ai, absoluterecoverybureau@gmail.com, travelcraft.dc@gmail.com inaccessible via Gmail MCP."
+    },
+    {
+      "run_id": "65dac1de-ed24-48c2-91be-fe6e6d3cc883",
+      "logger_run_id": "d9272c2c-3018-4346-8e94-d75469c7fc31",
+      "timestamp": "2026-04-07T00:31:57Z",
+      "processed": 0,
+      "drafts": 0,
+      "by_category": {
+        "P1_URGENT": 0,
+        "P2_REPLY_NEEDED": 0,
+        "P3_EYES_ONLY": 0,
+        "AUTOMATED": 0,
+        "PROMO": 0
+      },
+      "accounts": [
+        "d.caine@dcaine.com"
+      ],
+      "notes": "No unread emails found. Categorizer searched d.caine@dcaine.com only — kevin@starrpartners.ai, absoluterecoverybureau@gmail.com, travelcraft.dc@gmail.com inaccessible. No new DB inserts needed (0 emails). P1/P2 drafters also returned 0 items for this cycle."
+    },
+    {
+      "run_id": "ea6d52d6-84c3-4545-8f12-3a0267d7d8b0",
+      "logger_run_id": "bd70e8dc-dc8f-4343-b286-9f4af85a6226",
+      "timestamp": "2026-04-07T00:16:45Z",
+      "processed": 1,
+      "drafts": 0,
+      "by_category": {
+        "P1_URGENT": 1,
+        "P2_REPLY_NEEDED": 0,
+        "P3_EYES_ONLY": 0,
+        "AUTOMATED": 0,
+        "PROMO": 0
+      },
+      "accounts": [
+        "d.caine@dcaine.com"
+      ],
+      "notes": "1 P1_URGENT email (19d654b94e079851, Gamma failed payment $10 Mastercard 0760) — already in boss_email_log (logged by execution worker at 00:17:47, category=personal, needs_attention=true). Marked as read. No draft created (P1 drafter did not generate draft for this email this cycle). Accounts kevin@starrpartners.ai, absoluterecoverybureau@gmail.com, travelcraft.dc@gmail.com inaccessible this run."
+    }
+  ]
+}

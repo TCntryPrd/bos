@@ -1,0 +1,47 @@
+{
+  "week_of": "2026-04-06",
+  "timestamp": "2026-04-06T14:01:00Z",
+  "clients": {
+    "micazen": {
+      "status": "active",
+      "gitlab_activity": "No activity found this week — GitLab auth broken as of 2026-04-06 (invalid credentials, blocker tracked in VAS-15)",
+      "superslides": "blocked — deployment URL unknown; source at /home/tcntryprd/.openclaw/workspace/micazen/superslides-app/ but not live",
+      "sow_progress": "Micazen Roadmap meeting held Mar 31 (1h34m recorded via Zoom/Otter.ai) — Kevin presented BCAI Core plan. Sharon Ashley accepted 'Micazen Re-visit' follow-up for Apr 7. Kevin confirmed Google Meeting with Sharon and Jim (bodyshopconnect.com) for today Apr 6 morning.",
+      "last_contact": "2026-04-06",
+      "blockers": [
+        "GitLab auth broken — invalid credentials, cannot monitor repo activity (blocker VAS-15 assigned to COO)",
+        "SuperSlides deployment URL unknown — Kevin to provide live URL"
+      ],
+      "next_actions": [
+        "Follow up on today's Google Meeting with Sharon Ashley and Jim",
+        "Resolve GitLab credentials — unblock VAS-15",
+        "Get SuperSlides live deployment URL from Kevin"
+      ]
+    },
+    "magnussen": {
+      "status": "active",
+      "phase1_status": "Active — Power Automate template work ongoing. Apr 2: Kevin, Jenny Rosen, and Kristin Whitley confirmed data flow direction (MH_Samples → CP Snapshot). Kevin updated the flow and confirmed it is correct. Apr 3: Douglas Estremadoyro reported positive impressions from Jenny on overall progress.",
+      "phase2_status": "No documentation progress found this week",
+      "last_contact": "2026-04-03",
+      "blockers": [],
+      "next_actions": [
+        "Continue Phase 2 documentation",
+        "Follow up with Douglas Estremadoyro — separate AI project management discussion, call coordinated Apr 3"
+      ]
+    },
+    "pessy": {
+      "status": "blocked",
+      "whatsapp_setup": "Not mentioned this week. Main automation is pre-discovery call classification via Make. Scenario 'Pre-discovery call classification and qualification' errored and was stopped Apr 5–6. Apr 2: Chris approved testing, Kevin ready to connect multiple email inboxes after initial runs. Call with Chris and Beatriz scheduled today Apr 6 after 12:30pm EDT.",
+      "sow_status": "unknown — not determinable from this week's emails; active work in progress",
+      "last_contact": "2026-04-06",
+      "blockers": [
+        "Make scenario 'Pre-discovery call classification and qualification' stopped due to error (Apr 5–6) — needs diagnosis and restart before automation can be tested"
+      ],
+      "next_actions": [
+        "Diagnose and fix Make scenario error",
+        "Follow up on call with Chris Pessy and Beatriz today after 12:30pm EDT",
+        "After fix: run initial test with chris@chrispessy.com, then add additional email inboxes"
+      ]
+    }
+  }
+}

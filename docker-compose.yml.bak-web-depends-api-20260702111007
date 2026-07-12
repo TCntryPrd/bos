@@ -1,0 +1,222 @@
+services:
+  hermes-agent:
+    image: ghcr.io/hostinger/hvps-hermes-agent:latest
+    restart: unless-stopped
+    ports:
+    - '4860'
+    labels:
+    - traefik.enable=true
+    - traefik.http.routers.${COMPOSE_PROJECT_NAME}.rule=Host(`${COMPOSE_PROJECT_NAME}.${TRAEFIK_HOST}`)
+    - traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=websecure
+    - traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=letsencrypt
+    - traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=4860
+    - traefik.http.routers.hermes-gw.rule=Host(`gateway.vasari.starrpartners.ai`)
+    - traefik.http.routers.hermes-gw.entrypoints=websecure
+    - traefik.http.routers.hermes-gw.tls.certresolver=letsencrypt
+    - traefik.http.routers.hermes-gw.service=hermes-agent-qtbk
+    env_file:
+    - .env
+    volumes:
+    - ./data:/opt/data
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: boss
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: boss_ir
+    ports:
+    - 127.0.0.1:15435:5432
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+    - ./services/postgres/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U boss -d boss_ir
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+    - 127.0.0.1:16382:6379
+    volumes:
+    - redis_data:/data
+    healthcheck:
+      test:
+      - CMD
+      - redis-cli
+      - ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  weaviate:
+    image: semitechnologies/weaviate:1.28.2
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:18082:8080
+    - 100.79.204.28:18082:8080
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: node1
+    volumes:
+    - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - wget --spider -q http://localhost:8080/v1/.well-known/ready
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  stt:
+    build:
+      context: services/stt
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:18012:8000
+    volumes:
+    - stt_models:/app/models
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health',
+        timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  tts:
+    build:
+      context: services/tts
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:18013:8000
+  vasari_unipile:
+    build:
+      context: ./vasari_unipile
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    labels:
+    - traefik.enable=true
+    - traefik.http.routers.vasari-unipile-webhooks.rule=Host(`vasari.starrpartners.ai`) && PathPrefix(`/webhooks/unipile`)
+    - traefik.http.routers.vasari-unipile-webhooks.entrypoints=websecure
+    - traefik.http.routers.vasari-unipile-webhooks.tls.certresolver=letsencrypt
+    - traefik.http.routers.vasari-unipile-webhooks.priority=200
+    - traefik.http.routers.vasari-unipile-webhooks.service=vasari-unipile
+    - traefik.http.services.vasari-unipile.loadbalancer.server.port=8000
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://boss:${POSTGRES_PASSWORD}@postgres:5432/boss_ir
+      DB_SCHEMA: unipile
+      PUBLIC_BASE_URL: https://vasari.starrpartners.ai
+      TZ: America/Chicago
+    command: ["api"]
+    ports:
+    - 127.0.0.1:18017:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=5)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  vasari_unipile_worker:
+    build:
+      context: ./vasari_unipile
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://boss:${POSTGRES_PASSWORD}@postgres:5432/boss_ir
+      DB_SCHEMA: unipile
+      PUBLIC_BASE_URL: https://vasari.starrpartners.ai
+      TZ: America/Chicago
+    command: ["worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vasari_unipile:
+        condition: service_healthy
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BOSS_BACKGROUND_AGENTS: 'off'
+      TELEGRAM_BOT_TOKEN: ''
+      BOSS_HOME_OVERRIDE: /home/boss
+      BOSS_GIO_WORKSPACE: /home/boss/gio
+      BOSS_GIO_ATTACHMENT_ROOT: /home/boss/gio/.tmp
+      HERMES_AGENT_URL: http://hermes-agent:4860
+      CLAUDE_HOME: /home/tcntryprd
+      REDIS_URL: redis://redis:6379
+      VASARI_HEALTH_TZ: America/New_York
+    ports:
+    - 127.0.0.1:18011:8001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+    volumes:
+    - .:/home/boss/boss-dev
+    - .:/data/home/boss-dev
+    - ./gio-workspace:/home/boss/gio
+    - ./claude-home:/home/boss/.claude
+    - ./claude.json:/home/boss/.claude.json
+    - ./hermes-home:/home/boss/.hermes
+    - ./codex-home:/home/boss/.codex
+    - /home/tcntryprd/rascals:/home/tcntryprd/rascals
+    - ./ssh/boss-host-bridge:/data/home/.ssh/boss-host-bridge:ro
+    - /home/tcntryprd/.claude/projects:/home/tcntryprd/.claude/projects:ro
+    - /home/tcntryprd/outsiders:/home/tcntryprd/outsiders
+    - /home/tcntryprd/coo:/home/tcntryprd/coo
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8001/health
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    extra_hosts:
+    - host.docker.internal:host-gateway
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: https://vasari.starrpartners.ai
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:18015:80
+    labels:
+    - traefik.enable=true
+    - traefik.http.routers.hermes-web.rule=Host(`vasari.starrpartners.ai`)
+    - traefik.http.routers.hermes-web.entrypoints=websecure
+    - traefik.http.routers.hermes-web.tls.certresolver=letsencrypt
+    - traefik.http.services.hermes-web.loadbalancer.server.port=80
+    - traefik.http.routers.hermes-web-http.rule=Host(`vasari.starrpartners.ai`)
+    - traefik.http.routers.hermes-web-http.entrypoints=web
+    - traefik.http.routers.hermes-web-http.middlewares=hermes-redir
+    - traefik.http.middlewares.hermes-redir.redirectscheme.scheme=https
+volumes:
+  postgres_data: {}
+  redis_data: {}
+  weaviate_data: {}
+  stt_models: {}

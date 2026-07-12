@@ -1,0 +1,1602 @@
+/**
+ * Brain routes — /api/brain/*
+ *
+ * Exposes the BrainRouter as an HTTP API:
+ *   GET  /status         — router health and adapter statuses
+ *   GET  /config         — current router configuration
+ *   POST /chat           — send a message to the configured brain, with conversation history
+ *   GET  /adapters       — list registered adapters with capabilities
+ *
+ * The BrainRouter singleton is initialised lazily on first request so the
+ * process can start without every adapter credential being present.
+ */
+
+import crypto from 'node:crypto';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { BrainRouter, ClaudeCodeAdapter, CodexCliAdapter, OpenClawAdapter, OpenAIAdapter, GeminiAdapter } from '@boss/brain';
+import type { BrainRequest, BrainResponse, BrainAdapter, AdapterStatus, ConversationMessage, ContentBlock } from '@boss/brain';
+import { setRuntimeConfig, getRuntimeConfig } from '../config-store.js';
+import { verifyCodexCliInBackground } from '../openclaw/codexSmoke.js';
+import { getAvailableTools, executeTool, tierFromRole } from '../tools/index.js';
+import { buildFullPrompt } from '../prompt-cache.js';
+import { MAX_AGGREGATE_RESULT_CHARS } from '../tools/executor.js';
+import { getSharedRouter } from '../router-singleton.js';
+
+// ---------------------------------------------------------------------------
+// Transient upstream failures (rate limits, overload, network blips) get ONE
+// silent retry before surfacing an error to the user — a recovery path so a
+// momentary 429 from a free-tier brain does not become a user-facing failure.
+const TRANSIENT_BRAIN_ERROR = /(429|50[023]|rate.?limit|overloaded|timeout|timed out|fetch failed|ECONNRESET|UNAVAILABLE|RESOURCE_EXHAUSTED)/i;
+const TRANSIENT_RETRY_DELAY_MS = 1500;
+
+// Available models — static catalogue
+// ---------------------------------------------------------------------------
+
+interface ModelEntry {
+  id: string;
+  name: string;
+  tier: 'fast' | 'balanced' | 'premium';
+  context: number;
+  maxOutput: number;
+  status: 'available' | 'limited';
+}
+
+const AVAILABLE_MODELS: ModelEntry[] = [
+  // Codex brain runtime
+  { id: 'codex-cli',          name: 'Codex CLI',          tier: 'balanced', context: 200_000,   maxOutput: 64_000,  status: 'available' },
+  // Claude models
+  { id: 'claude-haiku-4-5',  name: 'Haiku 4.5',  tier: 'fast',     context: 200_000,   maxOutput: 64_000,  status: 'available' },
+  { id: 'claude-sonnet-4-5', name: 'Sonnet 4.5',  tier: 'balanced', context: 1_000_000, maxOutput: 64_000,  status: 'available' },
+  { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6',  tier: 'balanced', context: 1_000_000, maxOutput: 64_000,  status: 'available' },
+  { id: 'claude-opus-4-5',   name: 'Opus 4.5',    tier: 'premium',  context: 1_000_000, maxOutput: 128_000, status: 'available' },
+  { id: 'claude-opus-4-6',   name: 'Opus 4.6',    tier: 'premium',  context: 1_000_000, maxOutput: 128_000, status: 'available' },
+  // OpenAI models
+  { id: 'gpt-4o',             name: 'GPT-4o',             tier: 'balanced', context: 128_000,   maxOutput: 16_384,  status: 'available' },
+  { id: 'gpt-4o-mini',        name: 'GPT-4o Mini',        tier: 'fast',     context: 128_000,   maxOutput: 16_384,  status: 'available' },
+  { id: 'o3-mini',            name: 'o3 Mini',            tier: 'balanced', context: 200_000,   maxOutput: 100_000, status: 'available' },
+  // OpenRouter free/community default
+  { id: 'google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B Free', tier: 'fast', context: 262_000, maxOutput: 8_192, status: 'available' },
+  // Gemini models
+  { id: 'gemini-2.5-pro',     name: 'Gemini 2.5 Pro',     tier: 'balanced', context: 2_000_000, maxOutput: 8_192,   status: 'available' },
+  { id: 'gemini-2.5-flash',   name: 'Gemini 2.5 Flash',   tier: 'fast',     context: 1_000_000, maxOutput: 8_192,   status: 'available' },
+  { id: 'gemini-1.5-flash',   name: 'Gemini 1.5 Flash',   tier: 'fast',     context: 1_000_000, maxOutput: 8_192,   status: 'available' },
+  // xAI Grok models — all 14
+  { id: 'grok-4-0709',                   name: 'Grok 4',                tier: 'premium',  context: 2_000_000, maxOutput: 128_000, status: 'available' },
+  { id: 'grok-4-1-fast-non-reasoning',   name: 'Grok 4.1 Fast',        tier: 'fast',     context: 2_000_000, maxOutput: 128_000, status: 'available' },
+  { id: 'grok-4-1-fast-reasoning',       name: 'Grok 4.1 Reasoning',   tier: 'balanced', context: 2_000_000, maxOutput: 128_000, status: 'available' },
+  { id: 'grok-4-fast-non-reasoning',     name: 'Grok 4 Fast NR',       tier: 'fast',     context: 2_000_000, maxOutput: 128_000, status: 'available' },
+  { id: 'grok-4-fast-reasoning',         name: 'Grok 4 Fast R',        tier: 'balanced', context: 2_000_000, maxOutput: 128_000, status: 'available' },
+  { id: 'grok-4.20-0309-non-reasoning',  name: 'Grok 4.20 NR',         tier: 'fast',     context: 2_000_000, maxOutput: 128_000, status: 'available' },
+  { id: 'grok-4.20-0309-reasoning',      name: 'Grok 4.20 R',          tier: 'balanced', context: 2_000_000, maxOutput: 128_000, status: 'available' },
+  { id: 'grok-4.20-multi-agent-0309',    name: 'Grok 4.20 Multi-Agent',tier: 'premium',  context: 2_000_000, maxOutput: 128_000, status: 'available' },
+  { id: 'grok-3',                         name: 'Grok 3',               tier: 'balanced', context: 131_072,   maxOutput: 131_072, status: 'available' },
+  { id: 'grok-3-mini',                    name: 'Grok 3 Mini',          tier: 'fast',     context: 131_072,   maxOutput: 131_072, status: 'available' },
+  { id: 'grok-code-fast-1',               name: 'Grok Code',            tier: 'fast',     context: 131_072,   maxOutput: 131_072, status: 'available' },
+  { id: 'grok-imagine-image',             name: 'Grok Image',           tier: 'balanced', context: 8_000,     maxOutput: 4_096,   status: 'available' },
+  { id: 'grok-imagine-image-pro',         name: 'Grok Image Pro',       tier: 'premium',  context: 8_000,     maxOutput: 4_096,   status: 'available' },
+  { id: 'grok-imagine-video',             name: 'Grok Video',           tier: 'premium',  context: 8_000,     maxOutput: 4_096,   status: 'available' },
+];
+
+const VALID_MODEL_IDS = new Set(AVAILABLE_MODELS.map((m) => m.id));
+
+// ---------------------------------------------------------------------------
+// Conversation history — Postgres-backed with in-memory cache.
+// Persists across container restarts and chat resets.
+// Max 50 messages per conversation. Each user gets one default conversation
+// that survives chat clears (keyed by userId, not random UUID).
+// ---------------------------------------------------------------------------
+
+import { getPool } from '../db.js';
+
+// With 200K-1M context windows, we can hold a full week of conversation.
+// Tool call results are stripped from storage (only text preserved), so
+// most messages are small. 500 messages ≈ ~1 week of heavy use.
+const MAX_HISTORY = 500;
+
+// In-memory cache to avoid DB reads on every message
+const historyCache = new Map<string, { messages: ConversationMessage[]; updatedAt: number }>();
+
+async function ensureConversationTable(): Promise<void> {
+  const pool = getPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS boss_conversations (
+      conversation_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT 'anonymous',
+      messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+}
+
+let tableReady = false;
+
+async function getHistory(conversationId: string): Promise<ConversationMessage[]> {
+  // Check cache first
+  const cached = historyCache.get(conversationId);
+  if (cached) return cached.messages;
+
+  // Read from Postgres
+  try {
+    if (!tableReady) { await ensureConversationTable(); tableReady = true; }
+    const pool = getPool();
+    const { rows } = await pool.query<{ messages: ConversationMessage[] }>(
+      'SELECT messages FROM boss_conversations WHERE conversation_id = $1',
+      [conversationId],
+    );
+    const messages = rows[0]?.messages ?? [];
+    historyCache.set(conversationId, { messages, updatedAt: Date.now() });
+    return messages;
+  } catch {
+    return [];
+  }
+}
+
+async function saveHistory(conversationId: string, messages: ConversationMessage[], userId = 'anonymous'): Promise<void> {
+  const trimmed = messages.slice(-MAX_HISTORY);
+  historyCache.set(conversationId, { messages: trimmed, updatedAt: Date.now() });
+
+  try {
+    if (!tableReady) { await ensureConversationTable(); tableReady = true; }
+    const pool = getPool();
+    await pool.query(
+      `INSERT INTO boss_conversations (conversation_id, user_id, messages, updated_at)
+       VALUES ($1, $2, $3::jsonb, now())
+       ON CONFLICT (conversation_id) DO UPDATE
+       SET messages = $3::jsonb, updated_at = now()`,
+      [conversationId, userId, JSON.stringify(trimmed)],
+    );
+  } catch (err) {
+    console.error('[brain] failed to persist conversation:', err);
+  }
+}
+
+// Get or create a stable conversation ID for a user (so clearing chat UI doesn't lose server history)
+async function getDefaultConversationId(userId: string): Promise<string> {
+  try {
+    if (!tableReady) { await ensureConversationTable(); tableReady = true; }
+    const pool = getPool();
+    const { rows } = await pool.query<{ conversation_id: string }>(
+      'SELECT conversation_id FROM boss_conversations WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
+      [userId],
+    );
+    if (rows.length > 0) return rows[0].conversation_id;
+  } catch { /* fall through */ }
+  return `conv-${userId}-default`;
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrap helper — create + register the Codex CLI brain adapter.
+// Other adapters can exist for builder/client-manager surfaces, but BOS brain
+// chat is pinned to Codex by routeCodexBrain().
+// ---------------------------------------------------------------------------
+
+function codexBrainModel(): string {
+  return process.env.BOSS_BRAIN_CODEX_MODEL || process.env.CODEX_MODEL || 'codex-cli';
+}
+
+function ensureCodexAdapter(router: BrainRouter): void {
+  if (router.getAdapter('codex-cli')) return;
+  router.registerAdapter(new CodexCliAdapter({
+    bin: process.env.BOSS_BRAIN_CODEX_BIN || process.env.BOSS_GIO_BIN || 'codex',
+    codexHome: process.env.CODEX_HOME || '/home/boss/.codex',
+    workspace: process.env.BOSS_BRAIN_WORKSPACE || process.env.BOSS_GIO_WORKSPACE || '/home/boss/gio',
+    model: process.env.BOSS_BRAIN_CODEX_MODEL || process.env.CODEX_MODEL,
+    priority: 0,
+  }));
+}
+
+async function routeCodexBrain(router: BrainRouter, request: BrainRequest): Promise<BrainResponse> {
+  const adapter = router.getAdapter('codex-cli');
+  if (!adapter) {
+    return {
+      id: `err-${Date.now()}`,
+      requestId: request.id,
+      adapterId: 'codex-cli',
+      content: '',
+      latencyMs: 0,
+      error: 'Codex CLI brain adapter is not registered',
+    };
+  }
+  try {
+    return await adapter.execute(request);
+  } catch (err) {
+    return {
+      id: `err-${Date.now()}`,
+      requestId: request.id,
+      adapterId: 'codex-cli',
+      content: '',
+      latencyMs: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function bootstrapAdapterFromEnv(router: BrainRouter): void {
+  ensureCodexAdapter(router);
+  if (router.listAdapters().length > 0) return;
+
+  // Claude adapter
+  const apiKey = process.env.CLAUDE_API_KEY;
+  if (apiKey) {
+    const envModel = process.env.BRAIN_MODEL;
+    const isBearerToken = apiKey.startsWith('***');
+    const model = envModel || (isBearerToken ? 'claude-haiku-4-5' : undefined);
+
+    const adapter = new ClaudeCodeAdapter({
+      mode: 'api',
+      apiKey,
+      ...(model ? { model } : {}),
+      priority: 0,
+    });
+    router.registerAdapter(adapter);
+  }
+
+  // OpenAI adapter
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    const openaiAdapter = new OpenAIAdapter({
+      apiKey: openaiKey,
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      priority: 10,
+    });
+    router.registerAdapter(openaiAdapter);
+  }
+
+  // OpenRouter adapter: OpenAI-compatible API, defaulting to free Google Gemma 4.
+  const openrouterKey = process.env.OPENROUTER_API_KEY;
+  if (openrouterKey) {
+    const openrouterAdapter = new OpenAIAdapter({
+      apiKey: openrouterKey,
+      model: process.env.OPENROUTER_MODEL || 'google/gemma-4-26b-a4b-it:free',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      priority: 30,
+    });
+    (openrouterAdapter as any).info.id = 'openrouter';
+    (openrouterAdapter as any).info.name = 'OpenRouter';
+    router.registerAdapter(openrouterAdapter);
+  }
+
+  // NVIDIA NIM adapter: OpenAI-compatible endpoint serving strong FREE models
+  // (Nemotron, DeepSeek, Qwen, Kimi...). Lets always-on agents run off the Claude
+  // Max sub at $0. Agents target it via a `nim:` model prefix (stripped by the
+  // scheduler) which routes here. Tool-calling works (same OpenAIAdapter the CFO
+  // uses via OpenRouter).
+  const nimKey = process.env.NVIDIA_NIM_API_KEY;
+  if (nimKey) {
+    const nimAdapter = new OpenAIAdapter({
+      apiKey: nimKey,
+      model: process.env.NIM_MODEL || 'nvidia/nemotron-3-super-120b-a12b',
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
+      priority: 25,
+    });
+    (nimAdapter as any).info.id = 'nim';
+    (nimAdapter as any).info.name = 'NVIDIA NIM';
+    router.registerAdapter(nimAdapter);
+  }
+
+  // Gemini adapter
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    const geminiAdapter = new GeminiAdapter({
+      apiKey: geminiKey,
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+      priority: 20,
+    });
+    router.registerAdapter(geminiAdapter);
+  }
+
+  // OpenClaw adapter
+  const openclawKey = process.env.OPENCLAW_API_KEY || process.env.OPENCLAW_GATEWAY_TOKEN;
+  const openclawUrl = process.env.OPENCLAW_BASE_URL || process.env.OPENCLAW_GATEWAY_URL;
+  if (openclawKey && openclawUrl) {
+    const openclawAdapter = new OpenClawAdapter({
+      baseUrl: openclawUrl,
+      gatewayToken: openclawKey,
+    });
+    router.registerAdapter(openclawAdapter);
+  }
+
+  // xAI Grok adapter — uses OpenAI-compatible API
+  const xaiKey = process.env.XAI_API_KEY;
+  if (xaiKey) {
+    const xaiAdapter = new OpenAIAdapter({
+      apiKey: xaiKey,
+      model: 'grok-4-1-fast-non-reasoning',
+      baseUrl: 'https://api.x.ai/v1',
+      priority: 5,
+    });
+    // Override the adapter info to identify as xAI
+    (xaiAdapter as any).info.id = 'xai-grok';
+    (xaiAdapter as any).info.name = 'xAI Grok';
+    router.registerAdapter(xaiAdapter);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Singleton router — delegated to router-singleton.ts so agent handlers
+// in executor.ts can reach the same instance without a circular import.
+// ---------------------------------------------------------------------------
+
+function getRouter(): BrainRouter {
+  return getSharedRouter();
+}
+
+// ---------------------------------------------------------------------------
+// Schemas
+// ---------------------------------------------------------------------------
+
+const chatBodySchema = {
+  type: 'object',
+  required: ['message'],
+  properties: {
+    message: { type: 'string', minLength: 1, maxLength: 32_768 },
+    conversationId: { type: 'string' },
+    noTools: { type: "boolean" },
+    voiceMode: { type: 'boolean' },
+    currentPage: { type: 'string' },
+    // Per-agent overrides — honoured only for internal (X-BOSS-Internal) calls,
+    // e.g. the persistent-agent scheduler running an Employee Agent on a cheaper
+    // brain with a restricted tool grant. Ignored for normal portal chat.
+    provider: { type: 'string', enum: ['codex-cli', 'claude-code', 'openai', 'openrouter', 'gemini', 'nim'] },
+    model: { type: 'string' },
+    allowedTools: { type: 'array', items: { type: 'string' } },
+    attachments: {
+      type: 'array',
+      maxItems: 5,
+      items: {
+        type: 'object',
+        required: ['type', 'data', 'mediaType'],
+        properties: {
+          type: { type: 'string', enum: ['image'] },
+          data: { type: 'string' },
+          mediaType: { type: 'string', enum: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+const adapterInfoSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    name: { type: 'string' },
+    status: { type: 'string' },
+    priority: { type: 'number' },
+    capabilities: { type: 'object', additionalProperties: true },
+  },
+};
+
+const brainConfigureBodySchema = {
+  type: 'object',
+  required: ['provider', 'credentials'],
+  properties: {
+    provider: {
+      type: 'string',
+      enum: ['claude-code', 'openai', 'openrouter', 'gemini', 'openclaw', 'custom'],
+    },
+    credentials: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+interface ChatAttachment {
+  type: 'image';
+  data: string;
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+}
+
+interface ChatBody {
+  message: string;
+  conversationId?: string;
+  attachments?: ChatAttachment[];
+  voiceMode?: boolean;
+  currentPage?: string;
+  // Per-agent overrides (internal calls only)
+  provider?: 'codex-cli' | 'claude-code' | 'openai' | 'openrouter' | 'gemini' | 'nim';
+  model?: string;
+  allowedTools?: string[];
+}
+
+type BrainProvider = 'claude-code' | 'openai' | 'openrouter' | 'gemini' | 'openclaw' | 'custom';
+
+interface BrainConfigureBody {
+  provider: BrainProvider;
+  credentials: Record<string, string>;
+}
+
+export async function brainRoutes(server: FastifyInstance) {
+  /**
+   * GET /api/brain/status
+   * Returns adapter health statuses and overall router readiness.
+   *
+   * Example response:
+   *   { "ready": true, "adapterCount": 2, "adapters": { "claude-code": "ready" } }
+   */
+  server.get(
+    '/status',
+    {
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              ready: { type: 'boolean' },
+              adapterCount: { type: 'number' },
+              adapters: { type: 'object', additionalProperties: { type: 'string' } },
+            },
+          },
+        },
+      },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const router = getRouter();
+      bootstrapAdapterFromEnv(router);
+      const statuses = await router.checkHealth();
+      const adaptersObj: Record<string, string> = {};
+      for (const [id, status] of statuses) {
+        adaptersObj[id] = status;
+      }
+      return reply.status(200).send({
+        ready: statuses.size > 0,
+        adapterCount: statuses.size,
+        adapters: adaptersObj,
+      });
+    },
+  );
+
+  /**
+   * GET /api/brain/config
+   * Returns current router configuration (non-sensitive).
+   *
+   * Example response:
+   *   { "maxFallbackAttempts": 2, "adapterTimeoutMs": 30000, "preferStreaming": true }
+   */
+  server.get(
+    '/config',
+    {
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              maxFallbackAttempts: { type: 'number' },
+              adapterTimeoutMs: { type: 'number' },
+              preferStreaming: { type: 'boolean' },
+            },
+          },
+        },
+      },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      // Config is encoded in defaults; expose a static view for now
+      return reply.status(200).send({
+        maxFallbackAttempts: 2,
+        adapterTimeoutMs: 30_000,
+        preferStreaming: true,
+      });
+    },
+  );
+
+  /**
+   * GET /api/brain/models
+   * Returns the catalogue of available models and the currently active model.
+   * No auth required — the selector needs this before any chat interaction.
+   */
+  server.get(
+    '/models',
+    {
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              models: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    name: { type: 'string' },
+                    tier: { type: 'string' },
+                    context: { type: 'number' },
+                    maxOutput: { type: 'number' },
+                    status: { type: 'string' },
+                  },
+                },
+              },
+              active: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const active = codexBrainModel();
+      return reply.status(200).send({ models: AVAILABLE_MODELS, active });
+    },
+  );
+
+  /**
+   * POST /api/brain/model
+   * Switch the active model. Persists to runtime_config as BRAIN_MODEL.
+   *
+   * Example request:
+   *   POST /api/brain/model
+   *   Authorization: Bearer <access-token>
+   *   { "model": "claude-sonnet-4-6" }
+   *
+   * Example response:
+   *   { "model": "claude-sonnet-4-6", "status": "ok" }
+   */
+  server.post<{ Body: { model: string } }>(
+    '/model',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['model'],
+          properties: {
+            model: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              model: { type: 'string' },
+              status: { type: 'string' },
+            },
+          },
+          400: {
+            type: 'object',
+            properties: {
+              error: { type: 'string' },
+              validModels: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Body: { model: string } }>, reply: FastifyReply) => {
+      const { model } = request.body;
+
+      if (!VALID_MODEL_IDS.has(model)) {
+        return reply.status(400).send({
+          error: `Invalid model "${model}"`,
+          validModels: [...VALID_MODEL_IDS],
+        });
+      }
+
+      const tenantId = request.tenant?.tenantId ?? 'default';
+
+      // Persist to runtime_config and process.env
+      try {
+        await setRuntimeConfig('BRAIN_MODEL', model, tenantId);
+      } catch (err) {
+        request.log.warn({ err, model }, 'Failed to persist BRAIN_MODEL to Postgres');
+        // Still set in-memory so it takes effect immediately
+        process.env.BRAIN_MODEL = model;
+      }
+
+      request.log.info({ model, userId: request.auth?.userId }, 'brain/model: switched active model');
+
+      return reply.status(200).send({ model, status: 'ok' });
+    },
+  );
+
+  /**
+   * POST /api/brain/chat
+   * Send a message to the configured brain and receive a response.
+   * Conversation history is maintained in-memory, keyed by conversationId.
+   *
+   * Example request:
+   *   POST /api/brain/chat
+   *   Authorization: Bearer <access-token>
+   *   { "message": "What's on my calendar tomorrow?", "conversationId": "abc123" }
+   *
+   * Example response:
+   *   {
+   *     "response": "You have 2 meetings tomorrow...",
+   *     "conversationId": "abc123",
+   *     "model": "claude-haiku-4-5",
+   *     "usage": { "inputTokens": 120, "outputTokens": 84 }
+   *   }
+   *
+   * Returns 503 when no brain provider is configured.
+   */
+  server.post<{ Body: ChatBody }>(
+    '/chat',
+    {
+      bodyLimit: 30 * 1024 * 1024, // 30MB to accommodate base64-encoded images up to ~20MB
+      schema: {
+        body: chatBodySchema,
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              response: { type: 'string' },
+              conversationId: { type: 'string' },
+    noTools: { type: "boolean" },
+              model: { type: 'string' },
+              usage: {
+                type: 'object',
+                properties: {
+                  inputTokens: { type: 'number' },
+                  outputTokens: { type: 'number' },
+                },
+              },
+            },
+          },
+          503: {
+            type: 'object',
+            properties: {
+              error: { type: 'string' },
+              message: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Body: ChatBody }>, reply: FastifyReply) => {
+      const { message, conversationId: incomingConvId, attachments } = request.body;
+      const router = getRouter();
+
+      // Auto-bootstrap adapter from env vars if nothing is registered yet
+      bootstrapAdapterFromEnv(router);
+
+      if (router.listAdapters().length === 0) {
+        request.log.warn({ userId: request.auth?.userId }, 'brain/chat: no adapter configured');
+        return reply.status(503).send({
+          error: 'No brain configured',
+          message: 'Configure a brain provider in Settings',
+        });
+      }
+
+      const userId = request.auth?.userId ?? 'anonymous';
+      const conversationId = incomingConvId ?? await getDefaultConversationId(userId);
+      const history = await getHistory(conversationId);
+
+      // Brain/Chief-of-Staff/EA traffic is Codex-only. Claude remains available
+      // to client-manager agents and direct builder routes, but this shared
+      // brain endpoint must not silently fall back to Claude or OpenRouter.
+      const isInternal = request.auth?.authMethod === 'internal';
+      const overrideProvider = isInternal ? request.body.provider : undefined;
+      if (overrideProvider && overrideProvider !== 'codex-cli') {
+        request.log.warn({ overrideProvider }, 'brain/chat: ignored non-Codex provider override');
+      }
+      const model = codexBrainModel();
+      const preferredAdapter = 'codex-cli';
+
+      request.log.info(
+        {
+          userId: request.auth?.userId,
+          conversationId,
+          historyLength: history.length,
+          model,
+          messageLength: message.length,
+        },
+        'brain/chat: routing request',
+      );
+
+      // Build the full history including the BOS system prompt as the first
+      // system message (only prepended once — check if it is already present).
+      //
+      // The system prompt is assembled via the prompt cache: the static portion
+      // (identity, integrations, personality) is served from cache and only
+      // rebuilt when skills or connections change. The dynamic portion (current
+      // time, active skills matched to this message, user context) is freshly
+      // built on every request.
+      // Always rebuild the system prompt so persona/skills/integration changes apply to EXISTING
+      // conversations too (not only new ones). Strip any stale system message; prepend the current one.
+      const systemPromptContent = await buildFullPrompt(userId, message);
+      const baseHistory: ConversationMessage[] = [
+        { role: 'system', content: systemPromptContent, timestamp: Date.now() },
+        ...history.filter((m) => m.role !== 'system'),
+      ];
+
+      // Build the user message — multi-content if attachments are present
+      const hasAttachments = attachments && attachments.length > 0;
+      let userMessageContent: string | ContentBlock[];
+      if (hasAttachments) {
+        const contentBlocks: ContentBlock[] = [];
+        for (const att of attachments) {
+          if (att.type === 'image') {
+            contentBlocks.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: att.mediaType,
+                data: att.data,
+              },
+            });
+          }
+        }
+        contentBlocks.push({ type: 'text', text: message });
+        userMessageContent = contentBlocks;
+      } else {
+        userMessageContent = message;
+      }
+
+      // Append the current user message to history so multi-content blocks
+      // are passed through to the adapter (buildMessages will detect this
+      // and skip duplicating the prompt for multi-content messages).
+      const fullHistory: ConversationMessage[] = [
+        ...baseHistory,
+        { role: 'user', content: userMessageContent, timestamp: Date.now() },
+      ];
+
+      const tenantId = request.tenant?.tenantId ?? 'default';
+
+      // Derive trust tier from the authenticated user's role, then load only
+      // the tools that tier is allowed to use for this tenant.
+      const userRole = request.auth?.role;
+      const trustTier = tierFromRole(userRole);
+      const skipTools = (request.body as any).noTools === true;
+      let availableTools = skipTools ? [] : await getAvailableTools(tenantId, trustTier);
+
+      // Per-agent tool grant (internal calls only): restrict the brain to exactly
+      // the tools this Employee Agent is allowed to use. This is the HARD gate for
+      // phased autonomy — e.g. the email agent is granted draft + quick_ack but
+      // NOT boss_gmail_send/reply during the review phase.
+      const allowedTools = isInternal ? request.body.allowedTools : undefined;
+      if (isInternal) {
+        // Fail CLOSED: an internal agent run gets EXACTLY its granted tools.
+        // A '*' grant means full access (legacy agents like the Transcript
+        // Intelligence Agent); an empty/missing grant means NO tools. This makes
+        // the per-agent grant the authoritative phased-autonomy gate instead of
+        // silently defaulting to the full admin tool set.
+        const allow = new Set(allowedTools ?? []);
+        if (!allow.has('*')) {
+          availableTools = availableTools.filter((t) => allow.has(t.name));
+        }
+      }
+
+      // Authoritative allow-set for the EXECUTION layer (defense-in-depth):
+      // exactly the tools offered to the brain for this request. A tool call for
+      // anything not in here is refused at execution time, so an injected email
+      // (or a model slip) cannot run an un-granted tool even if it emits one.
+      const offeredToolNames = new Set(availableTools.map((t) => t.name));
+
+      request.log.debug(
+        { userId, userRole, trustTier, toolCount: availableTools.length, agentRestricted: !!(allowedTools && allowedTools.length) },
+        'brain/chat: tools filtered by trust tier',
+      );
+
+      const brainReq: BrainRequest = {
+        id: crypto.randomUUID(),
+        type: 'chat',
+        tenantId,
+        userId,
+        prompt: message,
+        context: {
+          tenantId,
+          userId,
+          conversationHistory: fullHistory,
+        },
+        tools: availableTools.length > 0 ? availableTools : undefined,
+        stream: false,
+        preferredAdapter,
+        model,
+      };
+
+      // ── Tool call loop ─────────────────────────────────────────────────────
+      // The brain may issue tool calls before producing a final text response.
+      // We execute each tool call and feed the results back as a follow-up
+      // prompt until the brain returns a plain text response or we hit the
+      // iteration cap (5), whichever comes first.
+      //
+      // Prompt structure for tool result turns:
+      //   "Tool results:\n<tool_name>: <result>\n..."
+      // This is a plain-text representation compatible with all adapters.
+      // ──────────────────────────────────────────────────────────────────────
+
+      const MAX_TOOL_ITERATIONS = 10;
+
+      let brainResponse;
+      let iterationCount = 0;
+      let currentReq = brainReq;
+      let retriedTransient = false;
+
+      try {
+        while (iterationCount < MAX_TOOL_ITERATIONS) {
+          iterationCount++;
+          brainResponse = await routeCodexBrain(router, currentReq);
+
+          if (brainResponse.error) {
+            if (!retriedTransient && TRANSIENT_BRAIN_ERROR.test(brainResponse.error)) {
+              retriedTransient = true;
+              iterationCount--;
+              request.log.warn(
+                { error: brainResponse.error, conversationId, userId },
+                'brain/chat: transient brain error — retrying once',
+              );
+              await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS));
+              continue;
+            }
+            request.log.warn(
+              { error: brainResponse.error, conversationId, userId, iteration: iterationCount },
+              'brain/chat: brain returned error during tool loop',
+            );
+            return reply.status(503).send({
+              error: 'Brain error',
+              message: brainResponse.error,
+            });
+          }
+
+          // No tool calls — brain produced a final text response
+          if (!brainResponse.toolCalls || brainResponse.toolCalls.length === 0) {
+            break;
+          }
+
+          request.log.info(
+            {
+              conversationId,
+              iteration: iterationCount,
+              toolCalls: brainResponse.toolCalls.map((tc) => tc.name),
+            },
+            'brain/chat: executing tool calls',
+          );
+
+          // Execute all tool calls in this turn, enforcing the aggregate
+          // result size limit to prevent context overflow.
+          const toolResults: string[] = [];
+          let aggregateResultChars = 0;
+          for (const toolCall of brainResponse.toolCalls) {
+            let result: string;
+            if (!offeredToolNames.has(toolCall.name)) {
+              // Execution-layer grant enforcement — see offeredToolNames above.
+              result = `Tool "${toolCall.name}" is not available to this agent and was not executed.`;
+              request.log.warn(
+                { tool: toolCall.name, conversationId, userId },
+                'brain/chat: blocked un-offered tool call (execution-layer grant)',
+              );
+            } else {
+              result = await executeTool(toolCall.name, toolCall.arguments, tenantId);
+            }
+            request.log.debug(
+              { tool: toolCall.name, resultLength: result.length },
+              'brain/chat: tool executed',
+            );
+
+            const remaining = MAX_AGGREGATE_RESULT_CHARS - aggregateResultChars;
+            if (remaining <= 0) {
+              toolResults.push(`${toolCall.name}:\n[truncated — result exceeded limit]`);
+              continue;
+            }
+
+            if (result.length > remaining) {
+              toolResults.push(`${toolCall.name}:\n${result.slice(0, remaining)}\n[truncated — result exceeded limit]`);
+              aggregateResultChars = MAX_AGGREGATE_RESULT_CHARS;
+            } else {
+              toolResults.push(`${toolCall.name}:\n${result}`);
+              aggregateResultChars += result.length;
+            }
+          }
+
+          // Build next request: inject tool results as the next user turn.
+          // We append the assistant's response (if any) and the tool results
+          // to the working history so the brain has full context.
+          const toolResultsPrompt = `Tool results:\n${toolResults.join('\n\n')}`;
+
+          const workingHistory: ConversationMessage[] = [
+            // Keep existing history that fed into the first request
+            ...(currentReq.context?.conversationHistory ?? []),
+            // The user message that triggered the chain
+            ...(iterationCount === 1
+              ? [{ role: 'user' as const, content: message, timestamp: Date.now() }]
+              : []),
+            // Assistant's partial response this turn (text only, may be empty)
+            ...(brainResponse.content
+              ? [{ role: 'assistant' as const, content: brainResponse.content, timestamp: Date.now() }]
+              : []),
+          ];
+
+          currentReq = {
+            ...brainReq,
+            id: crypto.randomUUID(),
+            prompt: toolResultsPrompt,
+            context: {
+              tenantId,
+              userId,
+              conversationHistory: workingHistory,
+            },
+            // Keep tools available so the brain can chain calls if needed
+            tools: availableTools.length > 0 ? availableTools : undefined,
+          };
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        request.log.error({ err, conversationId, userId }, 'brain/chat: router threw');
+        return reply.status(503).send({
+          error: 'Brain execution error',
+          message: msg,
+        });
+      }
+
+      if (!brainResponse) {
+        return reply.status(503).send({
+          error: 'Brain execution error',
+          message: 'No response produced',
+        });
+      }
+
+      // Persist the full exchange into conversation history.
+      // The user message is already in fullHistory (added above for multi-content support).
+      // For storage, convert multi-content back to plain text to keep history lean
+      // (base64 images would bloat localStorage/memory). The image was already sent to the brain.
+      const storageHistory: ConversationMessage[] = [
+        ...baseHistory,
+        { role: 'user', content: message, timestamp: Date.now() },
+        { role: 'assistant', content: brainResponse.content, timestamp: Date.now() },
+      ];
+      await saveHistory(conversationId, storageHistory, userId);
+
+      request.log.info(
+        {
+          conversationId,
+          adapterId: brainResponse.adapterId,
+          latencyMs: brainResponse.latencyMs,
+          inputTokens: brainResponse.usage?.inputTokens,
+          outputTokens: brainResponse.usage?.outputTokens,
+          toolIterations: iterationCount,
+          toolsOffered: availableTools.length,
+        },
+        'brain/chat: response delivered',
+      );
+
+      // ── Session logging (async, non-blocking) ──────────────────────────────
+      // Log tools used, track patterns. Don't block the response.
+      const toolsUsedInSession = new Set<string>();
+      // Collect from the tool loop iterations
+      if (brainResponse.toolCalls) {
+        for (const tc of brainResponse.toolCalls) toolsUsedInSession.add(tc.name);
+      }
+
+      void (async () => {
+        try {
+          const pool = getPool();
+          // Upsert session record for this conversation
+          await pool.query(
+            `INSERT INTO boss_sessions (conversation_id, user_id, summary, tools_used, message_count, model_used, started_at, ended_at, duration_ms)
+             VALUES ($1, $2, $3, $4, $5, $6, now(), now(), $7)
+             ON CONFLICT DO NOTHING`,
+            [
+              conversationId,
+              userId,
+              `User: ${message.substring(0, 200)}... → BOS: ${brainResponse.content.substring(0, 200)}...`,
+              [...toolsUsedInSession],
+              storageHistory.length,
+              model,
+              brainResponse.latencyMs ?? 0,
+            ],
+          );
+
+          // Extract learnings: if the user corrects BOS or provides preference info,
+          // save it to memory. Skip for internal/agent messages.
+          const lowerMsg = message.toLowerCase();
+          const isInternalMessage = message.startsWith('[PERSISTENT AGENT:') || userId === 'boss-internal';
+          const isCorrection = !isInternalMessage && (lowerMsg.includes('no,') || lowerMsg.includes('not that') || lowerMsg.includes("don't") || lowerMsg.includes('wrong') || lowerMsg.includes('actually'));
+          const isPreference = !isInternalMessage && (lowerMsg.includes('i prefer') || lowerMsg.includes('i like') || lowerMsg.includes('i want') || lowerMsg.includes('always') || lowerMsg.includes('never'));
+
+          if (isCorrection) {
+            await pool.query(
+              `INSERT INTO boss_memory (category, content, source, confidence, conversation_id)
+               VALUES ('correction', $1, 'conversation', 0.9, $2)`,
+              [`User corrected: "${message.substring(0, 500)}" → Response was: "${brainResponse.content.substring(0, 300)}"`, conversationId],
+            );
+          }
+          if (isPreference) {
+            await pool.query(
+              `INSERT INTO boss_memory (category, content, source, confidence, conversation_id)
+               VALUES ('preference', $1, 'conversation', 0.8, $2)`,
+              [message.substring(0, 500), conversationId],
+            );
+          }
+        } catch (err) {
+          request.log.warn({ err }, 'Session logging failed (non-critical)');
+        }
+      })();
+
+      return reply.status(200).send({
+        response: brainResponse.content,
+        conversationId,
+        model,
+        ...(brainResponse.usage
+          ? {
+              usage: {
+                inputTokens: brainResponse.usage.inputTokens,
+                outputTokens: brainResponse.usage.outputTokens,
+              },
+            }
+          : {}),
+      });
+    },
+  );
+
+  /**
+   * GET /api/brain/adapters
+   * List all registered adapters with their capabilities and current status.
+   *
+   * Example response:
+   *   [{ "id": "claude-code", "name": "Claude Code", "status": "ready", "priority": 1, ... }]
+   */
+  server.get(
+    '/adapters',
+    {
+      schema: {
+        response: {
+          200: {
+            type: 'array',
+            items: adapterInfoSchema,
+          },
+        },
+      },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const router = getRouter();
+      bootstrapAdapterFromEnv(router);
+      return reply.status(200).send(router.listAdapters());
+    },
+  );
+
+  /**
+   * POST /api/brain/configure
+   * Set the active brain provider and write credentials to process.env at
+   * runtime. Requires auth (any authenticated caller).
+   *
+   * Credential mapping:
+   *   claude-code → CLAUDE_API_KEY
+   *   openai      → OPENAI_API_KEY
+   *   openrouter  → OPENROUTER_API_KEY, OPENROUTER_MODEL
+   *   gemini      → GEMINI_API_KEY
+   *   openclaw    → OPENCLAW_BASE_URL, OPENCLAW_API_KEY
+   *   custom      → CUSTOM_BRAIN_ENDPOINT, CUSTOM_BRAIN_API_KEY
+   *
+   * Example request:
+   *   POST /api/brain/configure
+   *   Authorization: Bearer <access-token>
+   *   { "provider": "claude-code", "credentials": { "apiKey": "sk-ant-..." } }
+   *
+   * Example response:
+   *   { "provider": "claude-code", "configured": true }
+   */
+  server.post<{ Body: BrainConfigureBody }>(
+    '/configure',
+    {
+      schema: {
+        body: brainConfigureBodySchema,
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              provider: { type: 'string' },
+              configured: { type: 'boolean' },
+              // 'ready' | 'degraded' | 'unavailable' — mirrors AdapterStatus.
+              // 'degraded' means credentials saved but health check failed; the
+              // adapter is registered and will be retried on the next chat request.
+              status: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Body: BrainConfigureBody }>, reply: FastifyReply) => {
+      const { provider, credentials } = request.body;
+
+      // Map provider-specific credential keys into env vars
+      switch (provider) {
+        case 'claude-code':
+          if (credentials.apiKey) process.env.CLAUDE_API_KEY = credentials.apiKey;
+          break;
+        case 'openai':
+          if (credentials.apiKey) process.env.OPENAI_API_KEY = credentials.apiKey;
+          break;
+        case 'openrouter':
+          if (credentials.apiKey) process.env.OPENROUTER_API_KEY = credentials.apiKey;
+          process.env.OPENROUTER_MODEL = credentials.model || process.env.OPENROUTER_MODEL || 'google/gemma-4-26b-a4b-it:free';
+          break;
+        case 'gemini':
+          if (credentials.apiKey) process.env.GEMINI_API_KEY = credentials.apiKey;
+          break;
+        case 'openclaw':
+          if (credentials.baseUrl) process.env.OPENCLAW_BASE_URL = credentials.baseUrl;
+          if (credentials.apiKey) process.env.OPENCLAW_API_KEY = credentials.apiKey;
+          break;
+        case 'custom':
+          if (credentials.endpoint) process.env.CUSTOM_BRAIN_ENDPOINT = credentials.endpoint;
+          if (credentials.apiKey) process.env.CUSTOM_BRAIN_API_KEY = credentials.apiKey;
+          break;
+      }
+
+      // Always stamp the active provider
+      process.env.BRAIN_PROVIDER = provider;
+
+      // Persist provider and credentials to Postgres so they survive restarts.
+      // Failures are non-fatal — in-process env vars are already set above.
+      try {
+        const tenantId = request.tenant?.tenantId ?? 'default';
+        await setRuntimeConfig('BRAIN_PROVIDER', provider, tenantId);
+        switch (provider) {
+          case 'claude-code':
+            if (credentials.apiKey) await setRuntimeConfig('CLAUDE_API_KEY', credentials.apiKey, tenantId);
+            break;
+          case 'openai':
+            if (credentials.apiKey) {
+              await setRuntimeConfig('OPENAI_API_KEY', credentials.apiKey, tenantId);
+              await verifyCodexCliInBackground(credentials.apiKey, tenantId);
+            }
+            break;
+          case 'openrouter':
+            if (credentials.apiKey) await setRuntimeConfig('OPENROUTER_API_KEY', credentials.apiKey, tenantId);
+            await setRuntimeConfig('OPENROUTER_MODEL', process.env.OPENROUTER_MODEL || 'google/gemma-4-26b-a4b-it:free', tenantId);
+            break;
+          case 'gemini':
+            if (credentials.apiKey) await setRuntimeConfig('GEMINI_API_KEY', credentials.apiKey, tenantId);
+            break;
+          case 'openclaw':
+            if (credentials.baseUrl) await setRuntimeConfig('OPENCLAW_BASE_URL', credentials.baseUrl, tenantId);
+            if (credentials.apiKey) await setRuntimeConfig('OPENCLAW_API_KEY', credentials.apiKey, tenantId);
+            break;
+          case 'custom':
+            if (credentials.endpoint) await setRuntimeConfig('CUSTOM_BRAIN_ENDPOINT', credentials.endpoint, tenantId);
+            if (credentials.apiKey) await setRuntimeConfig('CUSTOM_BRAIN_API_KEY', credentials.apiKey, tenantId);
+            break;
+        }
+      } catch (err) {
+        request.log.warn({ err, provider }, 'Failed to persist brain config to Postgres — config is active in memory only');
+      }
+
+      // ── Health check — verify the credentials actually work ──────────────
+      // Build a throw-away adapter instance using the just-persisted env vars
+      // and run a cheap probe request. If the brain is unreachable or rejects
+      // the credentials we surface the error immediately instead of pretending
+      // everything is fine.
+      let healthStatus: AdapterStatus = 'ready';
+      let healthError: string | undefined;
+
+      try {
+        let probeAdapter: BrainAdapter | undefined;
+
+        switch (provider) {
+          case 'claude-code': {
+            const key = process.env.CLAUDE_API_KEY;
+            if (key) {
+              probeAdapter = new ClaudeCodeAdapter({ mode: 'api', apiKey: key });
+            }
+            break;
+          }
+          case 'openai': {
+            const key = process.env.OPENAI_API_KEY;
+            if (key) {
+              probeAdapter = new OpenAIAdapter({
+                apiKey: key,
+                model: process.env.OPENAI_MODEL || 'gpt-4o',
+              });
+            }
+            break;
+          }
+          case 'openrouter': {
+            const key = process.env.OPENROUTER_API_KEY;
+            if (key) {
+              probeAdapter = new OpenAIAdapter({
+                apiKey: key,
+                model: process.env.OPENROUTER_MODEL || 'google/gemma-4-26b-a4b-it:free',
+                baseUrl: 'https://openrouter.ai/api/v1',
+              });
+              (probeAdapter as any).info.id = 'openrouter';
+              (probeAdapter as any).info.name = 'OpenRouter';
+            }
+            break;
+          }
+          case 'gemini': {
+            const key = process.env.GEMINI_API_KEY;
+            if (key) {
+              probeAdapter = new GeminiAdapter({
+                apiKey: key,
+                model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+              });
+            }
+            break;
+          }
+          case 'openclaw': {
+            probeAdapter = new OpenClawAdapter({
+              baseUrl: process.env.OPENCLAW_BASE_URL,
+              gatewayToken: process.env.OPENCLAW_API_KEY,
+            });
+            break;
+          }
+          default:
+            break;
+        }
+
+        if (probeAdapter) {
+          request.log.info({ provider }, 'Running brain health check after configure');
+          healthStatus = await probeAdapter.healthCheck();
+
+          if (healthStatus === 'unavailable') {
+            healthError = `Brain health check failed for provider "${provider}". Check credentials and connectivity.`;
+          }
+
+          // Register the adapter into the live router regardless of health status.
+          // A degraded or unavailable adapter can recover once credentials are fixed
+          // without requiring a server restart.
+          const router = getRouter();
+          router.registerAdapter(probeAdapter);
+          request.log.info({ provider, status: healthStatus }, 'Adapter registered in live router');
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        request.log.warn({ err, provider }, 'Brain health check threw unexpectedly');
+        healthStatus = 'unavailable';
+        healthError = `Health check error: ${msg}`;
+      }
+
+      if (healthStatus === 'unavailable') {
+        request.log.warn(
+          { provider, healthError, userId: request.auth?.userId },
+          'Brain provider configured but health check failed — credentials saved, adapter registered as degraded',
+        );
+        // Credentials are already persisted above. Return 200 with degraded status
+        // so the onboarding UI can proceed; the user can fix credentials later.
+        return reply.status(200).send({ provider, configured: true, status: 'degraded' });
+      }
+
+      request.log.info(
+        { provider, healthStatus, userId: request.auth?.userId },
+        'Brain provider configured and verified',
+      );
+
+      return reply.status(200).send({ provider, configured: true, status: healthStatus });
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // POST /api/brain/chat/stream — SSE streaming chat
+  //
+  // Returns Server-Sent Events instead of a single JSON response.
+  // Events:
+  //   event: ack        — immediate acknowledgement (< 100ms)
+  //   event: thinking   — tool call status updates  { tool, status }
+  //   event: chunk      — text chunk                { text }
+  //   event: navigate   — frontend route change     { route }
+  //   event: ui_command — frontend action trigger   { action, target, args? }
+  //   event: done       — final metadata            { model, usage, conversationId }
+  //   event: error      — error                     { message }
+  //
+  // This solves the timeout problem: the connection stays alive with data
+  // flowing, so complex tool chains (10+ iterations) never time out.
+  // ---------------------------------------------------------------------------
+
+  server.post<{ Body: ChatBody }>(
+    '/chat/stream',
+    {
+      bodyLimit: 30 * 1024 * 1024,
+      schema: { body: chatBodySchema },
+    },
+    async (request: FastifyRequest<{ Body: ChatBody }>, reply: FastifyReply) => {
+      const { message, conversationId: incomingConvId, attachments, voiceMode, currentPage } = request.body;
+      const router = getRouter();
+
+      // SSE headers
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+
+      const sendEvent = (event: string, data: unknown) => {
+        reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      // Instant acknowledgement
+      sendEvent('ack', { status: 'received', timestamp: Date.now() });
+
+      // Bootstrap adapter
+      bootstrapAdapterFromEnv(router);
+
+      if (router.listAdapters().length === 0) {
+        sendEvent('error', { message: 'No brain configured. Configure a brain provider in Settings.' });
+        reply.raw.end();
+        return;
+      }
+
+      const userId = request.auth?.userId ?? 'anonymous';
+      const conversationId = incomingConvId ?? await getDefaultConversationId(userId);
+      const history = await getHistory(conversationId);
+      const model = codexBrainModel();
+      const preferredAdapter = 'codex-cli';
+
+      request.log.info(
+        { userId, conversationId, historyLength: history.length, model, messageLength: message.length, voiceMode },
+        'brain/chat/stream: routing request',
+      );
+
+      // Build history with system prompt
+      // Always rebuild (see /chat) so persona/skills changes apply to existing conversations.
+      let systemPromptContent = await buildFullPrompt(userId, message);
+
+      // Inject voice context when voice mode is active
+      if (voiceMode) {
+        const voiceContext = `
+
+## Voice Mode Active
+You are responding to SPOKEN input from the user's microphone. Your responses will be spoken aloud via TTS.
+
+**Rules for voice mode:**
+- Keep responses concise and conversational — they will be read aloud.
+- Do NOT use markdown formatting, code blocks, or bullet points — speak naturally.
+- When the user asks to navigate ("go to calendar", "open CRM", "show paperclip", "switch to code"), use the boss_voice_navigate tool. ALWAYS use the tool — never say you can't navigate.
+- When the user asks for something that happens on the current page (refresh, open/close a panel, scroll, click a button, toggle sidebar, etc.) use the boss_ui_command tool. The frontend has a registry of named targets — pick the most-likely target. If the registered targets don't match, use target "help" and the frontend will tell the user what IS registered. Prefer backend tools (boss_tasks_create, boss_gmail_send, etc.) when they can accomplish the goal without UI clicks.
+- When the user addresses an agent by name ("Hey Productions", "Ask Debbie", "Wake up Eric"), use the boss_voice_route_agent tool to route the request.
+- When the user asks "who can I talk to" or about available agents, use boss_voice_list_agents.
+- Available navigation routes: / (dashboard/command center/home), /calendar, /paperclip (agents), /crm (contacts), /code (terminal/claude code), /oc (COE - Gio, executive operator; user may say "COE" or "Gio"), /voice-devices.
+- Current page: ${currentPage || 'unknown'}
+- Use your standard tools (calendar, email, tasks, Stripe, etc.) for direct questions — only route to agents when the user explicitly names one.`;
+        systemPromptContent += voiceContext;
+      }
+      const baseHistory: ConversationMessage[] = [
+        { role: 'system', content: systemPromptContent!, timestamp: Date.now() },
+        ...history.filter((m) => m.role !== 'system'),
+      ];
+
+      // Build user message (multi-content for attachments)
+      const hasAttachments = attachments && attachments.length > 0;
+      let userMessageContent: string | ContentBlock[];
+      if (hasAttachments) {
+        const contentBlocks: ContentBlock[] = [];
+        for (const att of attachments!) {
+          if (att.type === 'image') {
+            contentBlocks.push({
+              type: 'image',
+              source: { type: 'base64', media_type: att.mediaType, data: att.data },
+            });
+          }
+        }
+        contentBlocks.push({ type: 'text', text: message });
+        userMessageContent = contentBlocks;
+      } else {
+        userMessageContent = message;
+      }
+
+      const fullHistory: ConversationMessage[] = [
+        ...baseHistory,
+        { role: 'user', content: userMessageContent, timestamp: Date.now() },
+      ];
+
+      const tenantId = request.tenant?.tenantId ?? 'default';
+      const userRole = request.auth?.role;
+      const trustTier = tierFromRole(userRole);
+      const skipTools = (request.body as any).noTools === true;
+      const availableTools = skipTools ? [] : await getAvailableTools(tenantId, trustTier);
+
+      let brainReq: BrainRequest = {
+        id: crypto.randomUUID(),
+        type: 'chat',
+        tenantId,
+        userId,
+        prompt: message,
+        context: { tenantId, userId, conversationHistory: fullHistory },
+        tools: availableTools.length > 0 ? availableTools : undefined,
+        stream: false,
+        preferredAdapter,
+        model,
+      };
+
+      // ── Streaming tool loop ────────────────────────────────────
+      const MAX_TOOL_ITERATIONS = 10;
+      let iterationCount = 0;
+      let currentReq = brainReq;
+      let brainResponse;
+      let fullContent = '';
+      let retriedTransient = false;
+      const toolsUsedInSession = new Set<string>();
+
+      try {
+        while (iterationCount < MAX_TOOL_ITERATIONS) {
+          iterationCount++;
+
+          // Keep-alive: send thinking event so client knows we're working
+          if (iterationCount > 1) {
+            sendEvent('thinking', { status: 'processing', iteration: iterationCount });
+          }
+
+          brainResponse = await routeCodexBrain(router, currentReq);
+
+          if (brainResponse.error) {
+            if (!retriedTransient && TRANSIENT_BRAIN_ERROR.test(brainResponse.error)) {
+              retriedTransient = true;
+              iterationCount--;
+              sendEvent('thinking', { status: 'retrying' });
+              await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS));
+              continue;
+            }
+            sendEvent('error', { message: brainResponse.error });
+            reply.raw.end();
+            return;
+          }
+
+          // Stream the text content
+          if (brainResponse.content) {
+            sendEvent('chunk', { text: brainResponse.content });
+            fullContent += brainResponse.content;
+          }
+
+          // No tool calls — done
+          if (!brainResponse.toolCalls || brainResponse.toolCalls.length === 0) {
+            break;
+          }
+
+          // Execute tool calls with status events
+          request.log.info(
+            { conversationId, iteration: iterationCount, toolCalls: brainResponse.toolCalls.map(tc => tc.name) },
+            'brain/chat/stream: executing tool calls',
+          );
+
+          const toolResults: string[] = [];
+          let aggregateResultChars = 0;
+
+          for (const toolCall of brainResponse.toolCalls) {
+            toolsUsedInSession.add(toolCall.name);
+            sendEvent('thinking', { tool: toolCall.name, status: 'running' });
+
+            let result = await executeTool(toolCall.name, toolCall.arguments, tenantId);
+
+            // Voice navigate tool returns __NAVIGATE__:route|confirmation
+            // Emit a navigate SSE event so the frontend can change pages
+            if (result.startsWith('__NAVIGATE__:')) {
+              const payload = result.slice('__NAVIGATE__:'.length);
+              const [route, confirmation] = payload.split('|', 2);
+              sendEvent('navigate', { route });
+              result = confirmation || 'Done.';
+            }
+
+            // UI command tool returns __UI_COMMAND__:{json}|confirmation
+            // Emit a ui_command SSE event so the frontend can trigger the
+            // registered callback for the named target.
+            if (result.startsWith('__UI_COMMAND__:')) {
+              const payload = result.slice('__UI_COMMAND__:'.length);
+              const sep = payload.lastIndexOf('|');
+              const jsonStr = sep >= 0 ? payload.slice(0, sep) : payload;
+              const confirmation = sep >= 0 ? payload.slice(sep + 1) : 'Done.';
+              try {
+                const parsed = JSON.parse(jsonStr) as { action: string; target: string; args?: Record<string, unknown> };
+                sendEvent('ui_command', parsed);
+              } catch (err) {
+                request.log.warn({ err, payload }, 'Failed to parse __UI_COMMAND__ payload');
+              }
+              result = confirmation;
+            }
+
+            sendEvent('thinking', { tool: toolCall.name, status: 'done', resultLength: result.length });
+
+            const remaining = MAX_AGGREGATE_RESULT_CHARS - aggregateResultChars;
+            if (remaining <= 0) {
+              toolResults.push(`${toolCall.name}:\n[truncated — result exceeded limit]`);
+            } else if (result.length > remaining) {
+              toolResults.push(`${toolCall.name}:\n${result.slice(0, remaining)}\n[truncated]`);
+              aggregateResultChars = MAX_AGGREGATE_RESULT_CHARS;
+            } else {
+              toolResults.push(`${toolCall.name}:\n${result}`);
+              aggregateResultChars += result.length;
+            }
+          }
+
+          // Build next iteration request with tool results
+          const toolResultsPrompt = `Tool results:\n${toolResults.join('\n\n')}`;
+          const workingHistory: ConversationMessage[] = [
+            ...(currentReq.context?.conversationHistory ?? []),
+            ...(iterationCount === 1
+              ? [{ role: 'user' as const, content: message, timestamp: Date.now() }]
+              : []),
+            ...(brainResponse.content
+              ? [{ role: 'assistant' as const, content: brainResponse.content, timestamp: Date.now() }]
+              : []),
+          ];
+
+          currentReq = {
+            ...brainReq,
+            id: crypto.randomUUID(),
+            prompt: toolResultsPrompt,
+            context: { tenantId, userId, conversationHistory: workingHistory },
+            tools: availableTools.length > 0 ? availableTools : undefined,
+          };
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        request.log.error({ err, conversationId, userId }, 'brain/chat/stream: error');
+        sendEvent('error', { message: msg });
+        reply.raw.end();
+        return;
+      }
+
+      // Save conversation history
+      const storageHistory: ConversationMessage[] = [
+        ...baseHistory,
+        { role: 'user', content: message, timestamp: Date.now() },
+        { role: 'assistant', content: fullContent, timestamp: Date.now() },
+      ];
+      await saveHistory(conversationId, storageHistory, userId);
+
+      // Send done event with metadata
+      sendEvent('done', {
+        conversationId,
+        model,
+        toolIterations: iterationCount,
+        usage: brainResponse?.usage
+          ? { inputTokens: brainResponse.usage.inputTokens, outputTokens: brainResponse.usage.outputTokens }
+          : undefined,
+      });
+
+      reply.raw.end();
+
+      // ── Async session logging (same as non-streaming) ──────────
+      void (async () => {
+        try {
+          const pool = getPool();
+          await pool.query(
+            `INSERT INTO boss_sessions (conversation_id, user_id, summary, tools_used, message_count, model_used, started_at, ended_at, duration_ms)
+             VALUES ($1, $2, $3, $4, $5, $6, now(), now(), $7)
+             ON CONFLICT DO NOTHING`,
+            [
+              conversationId, userId,
+              `User: ${message.substring(0, 200)}... → BOS: ${fullContent.substring(0, 200)}...`,
+              [...toolsUsedInSession], storageHistory.length, model,
+              brainResponse?.latencyMs ?? 0,
+            ],
+          );
+
+          const lowerMsg = message.toLowerCase();
+          const isInternalMsg = message.startsWith('[PERSISTENT AGENT:') || userId === 'boss-internal';
+          const isCorrection = !isInternalMsg && (lowerMsg.includes('no,') || lowerMsg.includes('not that') || lowerMsg.includes("don't") || lowerMsg.includes('wrong') || lowerMsg.includes('actually'));
+          const isPreference = !isInternalMsg && (lowerMsg.includes('i prefer') || lowerMsg.includes('i like') || lowerMsg.includes('i want') || lowerMsg.includes('always') || lowerMsg.includes('never'));
+
+          if (isCorrection) {
+            await pool.query(
+              `INSERT INTO boss_memory (category, content, source, confidence, conversation_id)
+               VALUES ('correction', $1, 'conversation', 0.9, $2)`,
+              [`User corrected: "${message.substring(0, 500)}" → Response was: "${fullContent.substring(0, 300)}"`, conversationId],
+            );
+          }
+          if (isPreference) {
+            await pool.query(
+              `INSERT INTO boss_memory (category, content, source, confidence, conversation_id)
+               VALUES ('preference', $1, 'conversation', 0.8, $2)`,
+              [message.substring(0, 500), conversationId],
+            );
+          }
+
+          // Save voice transcript for correction and training
+          if (voiceMode) {
+            await pool.query(
+              `INSERT INTO boss_voice_transcripts
+                 (conversation_id, user_id, user_speech, boss_response, current_page, tools_used, model_used, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+              [
+                conversationId, userId,
+                message,
+                fullContent.substring(0, 5000),
+                currentPage || null,
+                [...toolsUsedInSession],
+                model,
+              ],
+            );
+          }
+        } catch (err) {
+          request.log.warn({ err }, 'Session logging failed (non-critical)');
+        }
+      })();
+    },
+  );
+}

@@ -1,0 +1,3575 @@
+/**
+ * Dashboard — BOS v2 command center (v1.5.8).
+ *
+ * Full-width port of design_handoff_boss_v2/source/vs-dashboard.jsx.
+ * The docked ChatPanel is gone — chat-with-BOS now lives in the
+ * BossOrb (bottom-right glowing diamond, mounted in Layout). The
+ * voice mic is in the NavRail footer (v1.5.7). This page is purely a
+ * visual command center: greeting, stat strip, live activity, agent
+ * roster, kanban peek, inbox, connections, timeline.
+ *
+ * Data:
+ * - Connections grid wires to /api/connectors/integrations (real).
+ * - Everything else uses static seed data mirroring vs-shared.jsx.
+ *   "Static shell first, real data second" per the v1.5.x handoff.
+ *   Live data wiring (KPI numbers, live activity feed, kanban from
+ *   pipeline engine) ships in a follow-up.
+ */
+
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Bolt,
+  Columns3,
+  Cpu,
+  Mail,
+  Orbit,
+  Clock,
+  ArrowRight,
+  FileText,
+  MessageSquare,
+  LayoutGrid,
+  Calendar as CalendarIcon,
+  Check,
+  X,
+  Wallet,
+  Users,
+  Linkedin,
+  Send,
+} from 'lucide-react';
+import { AgentAvatar } from '../components/AgentAvatar';
+
+// ──────────────────────────────────────────────────────────────────────
+// Auth helper (v1.6.1)
+// ──────────────────────────────────────────────────────────────────────
+//
+// Every Dashboard panel reads from auth-gated API endpoints. Before
+// v1.6.1 a 401 silently fell through to "loaded with empty data",
+// which made an expired session look identical to "you legitimately
+// have no rascals/tasks/etc." Per the screenshot Kevin shared on
+// 2026-04-25, that produced an entirely zeroed Dashboard for an
+// authenticated user whose token had simply gone stale.
+//
+// authedFetch() centralises the header injection and dispatches a
+// window event the moment any request comes back 401. useAuthHealth()
+// listens for the event and returns true once it fires; the Dashboard
+// uses that flag to render a top-of-page "session expired" banner
+// rather than zeros. Hooks themselves keep returning empty arrays on
+// non-200 so they can render a sane loading→empty path independent of
+// the auth state.
+
+const AUTH_EXPIRED_EVENT = 'boss-auth-expired';
+
+async function authedFetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
+  const token = localStorage.getItem('boss_token') ?? '';
+  const headers = new Headers(init?.headers);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const res = await fetch(input, { ...init, headers });
+  if (res.status === 401) {
+    try { window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT)); } catch { /* SSR safety */ }
+  }
+  return res;
+}
+
+/**
+ * DASHBOARD_POLL_MS — how often tiles silently re-fetch in the background.
+ * Tiles update in place (React reconciles new data into the existing DOM), so
+ * there is no remount, no flicker, no scroll jump — the screen is not disrupted.
+ */
+const DASHBOARD_POLL_MS = 45_000;
+
+/**
+ * usePolledJson — fetch a JSON endpoint on mount and every `ms` thereafter,
+ * swapping the data in place. Crucially it KEEPS the last good data on a
+ * transient poll error (only surfaces `error` if the very first load failed),
+ * so a momentary blip never blanks a tile that already has data.
+ */
+function usePolledJson<T>(
+  url: string,
+  ms = DASHBOARD_POLL_MS,
+): { data: T | null; error: boolean; loaded: boolean } {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const okRef = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      const token = localStorage.getItem('boss_token') ?? '';
+      fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((d) => {
+          if (!alive) return;
+          setData(d as T);
+          setError(false);
+          setLoaded(true);
+          okRef.current = true;
+        })
+        .catch(() => {
+          if (!alive) return;
+          setLoaded(true);
+          if (!okRef.current) setError(true); // keep last good data after first success
+        });
+    };
+    load();
+    const iv = setInterval(load, ms);
+    return () => { alive = false; clearInterval(iv); };
+  }, [url, ms]);
+  return { data, error, loaded };
+}
+
+/**
+ * usePoll — run an arbitrary loader on mount and every `ms`, for panels whose
+ * fetch + parsing don't fit usePolledJson. The loader may return a cleanup that
+ * runs before each re-poll and on unmount (e.g. a `cancelled` flag). Loaders
+ * should keep the last good state on error so a transient poll doesn't blank.
+ */
+function usePoll(load: () => void | (() => void), ms = DASHBOARD_POLL_MS): void {
+  useEffect(() => {
+    let cleanup: void | (() => void);
+    const run = () => {
+      if (typeof cleanup === 'function') cleanup();
+      cleanup = load();
+    };
+    run();
+    const iv = setInterval(run, ms);
+    return () => { clearInterval(iv); if (typeof cleanup === 'function') cleanup(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
+function useAuthHealth(): { expired: boolean } {
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    const onExpired = () => setExpired(true);
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
+  return { expired };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Seed data (mirrors design_handoff_boss_v2/source/vs-shared.jsx)
+// ──────────────────────────────────────────────────────────────────────
+
+// Removed in v1.5.16: the design-source's fictional 6-agent roster
+// (Atlas, Nova, Pulse, Vector, Cipher, Echo) is no longer referenced
+// — every panel reads real data now. The actual rascal roster comes
+// from /api/agents/rascals via useRascals(); avatars come from the
+// AgentAvatar component (apps/web/src/components/AgentAvatar.tsx).
+
+// KanbanPeek + TASKS TODAY StatCard wire to /api/tasks (v1.5.12).
+// view_column on each row maps to a Kanban column; status drives the
+// "needs you" counter (blocked tasks) and "Tasks today" KPI (pending +
+// active rows due today). Real seed data was loaded into boss_tasks
+// during the Pipeline Engine work, so this is data-backed end to end.
+
+interface TaskRow {
+  id: string;
+  title: string;
+  current_stage: string;
+  status: 'pending' | 'active' | 'blocked' | 'done' | string;
+  assigned_agent: string | null;
+  assigned_client: string | null;
+  priority: number;
+  view_column: 'inbox' | 'today' | 'doing' | 'review' | 'done' | string;
+  due_at: string | null;
+  bucket: 'today' | 'tomorrow' | 'this_week' | 'next_week' | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const WO_BUCKET_LABELS: Record<'today'|'tomorrow'|'this_week'|'next_week', string> = {
+  today:     'Today',
+  tomorrow:  'Tomorrow',
+  this_week: 'This Week',
+  next_week: 'Next Week',
+};
+
+// InboxPanel reads /api/services/mail/attention which calls the Gmail
+// API with a stored OAuth token (configured via /connectors). The
+// endpoint returns [] cleanly when no Google account is connected, so
+// the panel tells the truth in either case rather than showing mock.
+interface InboxAttentionItem {
+  id: string;
+  sender: string;
+  subject: string;
+  timestamp: string;
+  preview: string;
+  category?: string;
+  gmailUrl?: string;
+}
+
+interface InboxState {
+  list: InboxAttentionItem[];
+  email: string | null;
+  loaded: boolean;
+}
+
+// Slack attention queue — Sodapop flags incoming DMs/mentions; Kevin
+// triages from this panel.
+interface SlackAttentionItem {
+  id: string;
+  flaggedBy: string;
+  channel: string;
+  ts: string;
+  userId: string | null;
+  userName: string | null;
+  preview: string;
+  reason: string | null;
+  permalink: string | null;
+  status: string;
+  createdAt: string;
+}
+
+interface SlackAttentionState {
+  list: SlackAttentionItem[];
+  loaded: boolean;
+}
+
+// WhatsApp unread threads for quick triage
+interface WhatsAppThread {
+  chat_id: string;
+  display_name: string | null;
+  phone: string | null;
+  is_group: boolean;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  last_message_from_me: boolean | null;
+  unread_count: number;
+}
+
+interface WhatsAppState {
+  list: WhatsAppThread[];
+  loaded: boolean;
+}
+
+// Event stats feed — attendance funnels posted to the team
+// #sales-event-stats Slack channel. Each post is an event (webinar/summit)
+// with attendance counts per funnel stage (Open → Start → Peak →
+// Offer/Pitch → Link(drop) → End/Close); not dollar sales. Surfaced live via
+// /api/slack-feed/sales.
+interface EventFunnel {
+  who: string | null;
+  postedAt: string;
+  name: string;
+  date: string | null;
+  stages: Record<string, number | null>;
+  hasData: boolean;
+}
+
+interface SalesFeed {
+  events: EventFunnel[];
+  totals: { events: number; start: number; peak: number; offer: number; link: number; end: number };
+}
+
+// Meta / Social — one endpoint (/api/meta/social) feeds both social tiles
+// (social_stats + social_feed). Facebook Page + Instagram Business: live
+// follower/engagement totals plus recent posts/media with their top comments.
+// Either network may be null when not connected.
+interface SocialFbComment {
+  from: string;
+  message: string;
+  created_time?: string;
+}
+interface SocialFbPost {
+  id: string;
+  message?: string;
+  story?: string;
+  type?: string;
+  created_time?: string;
+  permalink_url?: string;
+  reactions: number;
+  comments_count: number;
+  shares: number;
+  comments: SocialFbComment[];
+}
+interface SocialFacebook {
+  pageName: string;
+  followers: number;
+  postCount: number;
+  unreadMessages: number;
+  totals: { reactions: number; comments: number };
+  posts: SocialFbPost[];
+}
+interface SocialIgComment {
+  username: string;
+  text: string;
+}
+interface SocialIgMedia {
+  id: string;
+  caption?: string;
+  media_type?: string;
+  permalink?: string;
+  timestamp?: string;
+  like_count: number;
+  comments_count: number;
+  comments: SocialIgComment[];
+}
+interface SocialInstagram {
+  username: string;
+  followers: number;
+  mediaCount: number;
+  totals: { likes: number; comments: number };
+  media: SocialIgMedia[];
+}
+interface SocialData {
+  facebook: SocialFacebook | null;
+  instagram: SocialInstagram | null;
+}
+
+// LiveActivity reads /api/agents/rascals/recent-activity which scans every
+// rascal's output dir and reports the freshest writes across all agents.
+// Replaces the older stage-log-based feed: stages stop emitting as soon as
+// a pipeline finishes, but every rascal action produces a new file in
+// /home/tcntryprd/rascals/<handle>/output, so this is the live signal.
+interface RecentActivityEntry {
+  agent: string;
+  filename: string;
+  path: string;
+  mtime: string;
+  sizeBytes: number;
+  action: string;
+}
+
+interface RecentActivityState {
+  list: RecentActivityEntry[];
+  loaded: boolean;
+}
+
+// TimelinePanel reads /api/calendar/events for today (8AM-6PM range)
+// for the "You" lane, and uses the already-fetched tasksState for
+// per-rascal lanes. Agent lanes only render when the rascal has at
+// least one task with a due_at falling in today's range.
+interface CalendarEvent {
+  id: string;
+  summary: string;
+  description: string | null;
+  start: string;
+  end: string;
+  allDay: boolean;
+  account: string;
+  calendarName: string;
+  htmlLink?: string | null;
+}
+
+interface CalendarState {
+  list: CalendarEvent[];
+  loaded: boolean;
+}
+
+function useCalendarToday(): CalendarState {
+  const [state, setState] = useState<CalendarState>({ list: [], loaded: false });
+  usePoll(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const day = `${yyyy}-${mm}-${dd}`;
+        authedFetch(`api/calendar/events?start=${day}&end=${day}`)
+      .then((r) => (r.ok ? r.json() : { events: [] }))
+      .then((data: { events?: CalendarEvent[] }) => {
+        // Dedupe the same event appearing on multiple calendars/accounts so it
+        // shows once (not 15× across 15 calendars). Key on summary+start.
+        const raw = Array.isArray(data?.events) ? data.events : [];
+        const seen = new Set<string>();
+        const list = raw.filter((e) => {
+          const key = `${(e.summary || '').trim().toLowerCase()}|${e.start}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setState({ list, loaded: true });
+      })
+      .catch(() => setState((s) => ({ ...s, loaded: true }))); // keep last on poll error
+  });
+  return state;
+}
+
+// Slack user IDs we care about on the dashboard preview. Mentions of
+// either Kevin or Sodapop pass the filter; everything else is hidden.
+// Persisted in runtime_config (SLACK_KEVIN_USER_ID, SLACK_BOT_USER_ID).
+const SLACK_KEVIN_USER_ID = 'U0940RBRLPN';
+const SLACK_SODAPOP_USER_ID = 'U0B26SZ7CCT';
+
+function isMentionOfInterest(it: SlackAttentionItem): boolean {
+  // Sodapop's slack-socket flags app_mention with reason='mentioned the bot'.
+  if (it.reason === 'mentioned the bot') return true;
+  // DMs are implicitly to Kevin — always pass.
+  if (it.reason === 'direct message') return true;
+  const p = it.preview || '';
+  return p.includes(`<@${SLACK_KEVIN_USER_ID}>`) || p.includes(`<@${SLACK_SODAPOP_USER_ID}>`);
+}
+
+function useSlackAttention(): SlackAttentionState {
+  const [state, setState] = useState<SlackAttentionState>({ list: [], loaded: false });
+  const seenIdsRef = React.useRef<Set<string>>(new Set());
+  const firstLoadRef = React.useRef<boolean>(true);
+
+  // Ask once for browser-notification permission. Browser quietly denies
+  // if previously dismissed; we don't pester.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      void Notification.requestPermission().catch(() => { /* user dismissed */ });
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      authedFetch('api/slack/attention?status=open&limit=20')
+        .then((r) => (r.ok ? r.json() : { items: [] }))
+        .then((data: { items?: SlackAttentionItem[] }) => {
+          if (cancelled) return;
+          const raw = Array.isArray(data?.items) ? data.items : [];
+          const items = raw.filter(isMentionOfInterest);
+
+          // Browser-notify items we haven't seen before, but only after
+          // the first load completes — otherwise reloading the page
+          // would notify for every existing open item.
+          if (!firstLoadRef.current && typeof window !== 'undefined' && 'Notification' in window) {
+            if (Notification.permission === 'granted') {
+              for (const it of items) {
+                if (seenIdsRef.current.has(it.id)) continue;
+                try {
+                  const n = new Notification(`Slack — ${it.userName ?? 'unknown'}`, {
+                    body: it.preview.slice(0, 140) || it.reason || 'New message',
+                    tag: `slack-attn-${it.id}`,
+                    icon: '/boss/ui/favicon.ico',
+                  });
+                  if (it.permalink) {
+                    n.onclick = () => {
+                      window.open(it.permalink as string, '_blank');
+                      n.close();
+                    };
+                  }
+                } catch { /* notification failed; skip */ }
+              }
+            }
+          }
+
+          // Mark all current items as seen for next tick
+          seenIdsRef.current = new Set(items.map((i) => i.id));
+          firstLoadRef.current = false;
+          setState({ list: items, loaded: true });
+        })
+        .catch(() => { if (!cancelled) setState((s) => ({ ...s, loaded: true })); }); // keep last on poll error
+    };
+    load();
+    const id = window.setInterval(load, 15_000); // 15s poll
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  return state;
+}
+
+function useInbox(): InboxState {
+  const [state, setState] = useState<InboxState>({ list: [], email: null, loaded: false });
+  usePoll(() => {
+    // The Email Agent's triaged attention items (boss_email_log, needs_attention) —
+    // what the agent flagged for Kevin, with its category + note. This is the
+    // agent's output, not raw Gmail.
+    authedFetch('api/email/attention')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: unknown) => {
+        const arr = Array.isArray(data) ? (data as Array<Record<string, unknown>>) : [];
+        const list: InboxAttentionItem[] = arr.map((x) => {
+          const msgId = x.messageId ? String(x.messageId) : '';
+          const acct = x.accountEmail ? String(x.accountEmail) : '';
+          const gmailUrl = msgId
+            ? (acct
+                ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(acct)}#all/${msgId}`
+                : `https://mail.google.com/mail/u/0/#all/${msgId}`)
+            : undefined;
+          return {
+            id: String(x.id ?? ''),
+            sender: String(x.sender ?? ''),
+            subject: String(x.subject ?? ''),
+            timestamp: String(x.receivedAt ?? ''),
+            preview: String(x.bossNotes ?? ''),
+            category: x.category ? String(x.category) : undefined,
+            gmailUrl,
+          };
+        });
+        setState({ list, email: null, loaded: true });
+      })
+      .catch(() => setState((s) => ({ ...s, loaded: true }))); // keep last on poll error
+  });
+  return state;
+}
+
+function useWhatsApp(): WhatsAppState {
+  const [state, setState] = useState<WhatsAppState>({ list: [], loaded: false });
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      authedFetch('api/whatsapp/threads')
+        .then((r) => (r.ok ? r.json() : { threads: [] }))
+        .then((data: { threads?: WhatsAppThread[] }) => {
+          if (cancelled) return;
+          const threads = Array.isArray(data?.threads) ? data.threads : [];
+          // Only show threads with unread messages
+          const unread = threads.filter(t => t.unread_count > 0);
+          setState({ list: unread, loaded: true });
+        })
+        .catch(() => { if (!cancelled) setState((s) => ({ ...s, loaded: true })); }); // keep last on poll error
+    };
+    load();
+    const id = window.setInterval(load, 15_000); // Poll every 15s
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+  return state;
+}
+
+function useRecentActivity(): RecentActivityState {
+  const [state, setState] = useState<RecentActivityState>({ list: [], loaded: false });
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      authedFetch('api/agents/rascals/recent-activity?limit=10')
+        .then((r) => (r.ok ? r.json() : { entries: [] }))
+        .then((data: { entries?: RecentActivityEntry[] }) => {
+          if (cancelled) return;
+          setState({ list: Array.isArray(data?.entries) ? data.entries : [], loaded: true });
+        })
+        .catch(() => { if (!cancelled) setState((s) => ({ ...s, loaded: true })); }); // keep last on poll error
+    };
+    load();
+    const id = window.setInterval(load, 30_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+  return state;
+}
+
+/** Strip the "Name <email>" decoration; fall back to the raw value. */
+function senderName(raw: string): string {
+  if (!raw) return 'unknown';
+  const m = raw.match(/^"?([^"<]+?)"?\s*<.+>$/);
+  return (m?.[1] ?? raw).trim();
+}
+
+const INBOX_HUES = ['#FF4D8D', '#0EA5E9', '#7C3CFF', '#20B26B', '#FF8A3D', '#d6b6ff'];
+
+function inboxHue(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return INBOX_HUES[h % INBOX_HUES.length];
+}
+
+const DASH = {
+  panel: '#0B0E1D',
+  panel2: '#11152E',
+  panel3: '#181D3A',
+  border: '#232A4D',
+  borderSoft: 'rgba(139,92,246,0.16)',
+  text: '#F1F4FF',
+  textDim: '#AAB3D6',
+  textMuted: '#7681A8',
+  pink: '#D946EF',
+  orange: '#F5C542',
+  blue: '#4F6DF5',
+  green: '#22C55E',
+  yellow: '#F5C542',
+  violet: '#8B5CF6',
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// Utility components
+// ──────────────────────────────────────────────────────────────────────
+
+interface PanelProps {
+  title?: string;
+  icon?: React.ReactNode;
+  meta?: React.ReactNode;
+  accent?: string;
+  children: React.ReactNode;
+  className?: string;
+}
+
+function Panel({ title, icon, meta, accent, children, className = '' }: PanelProps) {
+  return (
+    <div
+      className={`relative rounded-[14px] overflow-hidden flex flex-col h-full ${className}`}
+      style={{
+        background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`,
+        border: `1px solid ${DASH.border}`,
+        boxShadow: '0 10px 30px rgba(24,34,53,0.08)',
+        color: DASH.text,
+      }}
+    >
+      {accent && (
+        <div
+          aria-hidden
+          className="absolute top-0 left-0 right-0"
+          style={{ height: 1.5, background: accent, opacity: 0.85 }}
+        />
+      )}
+      <div
+        aria-hidden
+        className="absolute top-0 pointer-events-none"
+        style={{
+          left: '10%',
+          right: '10%',
+          height: 1,
+          background:
+            'linear-gradient(90deg, transparent, rgba(14,165,233,0.24), transparent)',
+        }}
+      />
+      {title && (
+        <div
+          className="flex items-center gap-2.5 px-3.5 pt-3 pb-2.5 shrink-0"
+          style={{ borderBottom: `1px solid ${DASH.borderSoft}` }}
+        >
+          {icon && <div style={{ color: DASH.violet, opacity: 0.9 }}>{icon}</div>}
+          <div className="text-[15px] font-semibold tracking-[0.01em]">{title}</div>
+          {meta && <div className="ml-auto">{meta}</div>}
+        </div>
+      )}
+      <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
+    </div>
+  );
+}
+
+type SparkKind = 'rise' | 'wave' | 'split';
+
+function Spark({ kind = 'rise', color = '#7C3CFF' }: { kind?: SparkKind; color?: string }) {
+  const paths: Record<SparkKind, string> = {
+    rise:  'M1 18 L8 14 L14 15 L22 9 L30 11 L38 4 L46 6',
+    wave:  'M1 12 C5 4, 10 20, 14 12 S22 4, 26 12 S34 20, 38 12 S46 4, 48 12',
+    split: 'M1 12 L10 12 L14 6 L18 18 L22 8 L26 14 L30 12 L46 12',
+  };
+  const id = `sg-${kind}-${color.replace('#', '')}`;
+  return (
+    <svg width="48" height="22" viewBox="0 0 48 22" fill="none" className="block">
+      <defs>
+        <linearGradient id={id} x1="0" x2="1">
+          <stop offset="0" stopColor={color} stopOpacity="0.3" />
+          <stop offset="1" stopColor={color} />
+        </linearGradient>
+      </defs>
+      <path d={paths[kind]} stroke={`url(#${id})`} strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Stat cards
+// ──────────────────────────────────────────────────────────────────────
+
+interface StatCardProps {
+  label: string;
+  value: string;
+  sub: string;
+  hue: 'purple' | 'pink' | 'blue' | 'green';
+  spark: SparkKind;
+}
+
+const HUE_MAP: Record<StatCardProps['hue'], { color: string; grad: string }> = {
+  purple: { color: '#7C3CFF', grad: 'linear-gradient(135deg, #7C3CFF, #FF4D8D)' },
+  pink:   { color: '#FF4D8D', grad: 'linear-gradient(135deg, #FF4D8D, #7C3CFF)' },
+  blue:   { color: '#0EA5E9', grad: 'linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)' },
+  green:  { color: '#20B26B', grad: 'linear-gradient(135deg, #20B26B, #0EA5E9)' },
+};
+
+function StatCard({ label, value, sub, hue, spark }: StatCardProps) {
+  const { color, grad } = HUE_MAP[hue];
+  return (
+    <Panel className="p-3.5" accent={grad}>
+      <div className="flex items-center gap-2.5">
+        <div className="vs-mono text-[10px] tracking-[0.22em]" style={{ color: '#74849A' }}>
+          {label}
+        </div>
+        <div className="ml-auto">
+          <Spark kind={spark} color={color} />
+        </div>
+      </div>
+      <div className="flex items-baseline gap-2.5 mt-2">
+        <div
+          className="text-[36px] font-semibold leading-none"
+          style={{
+            letterSpacing: '-0.02em',
+            background: grad,
+            WebkitBackgroundClip: 'text',
+            backgroundClip: 'text',
+            color: 'transparent',
+          }}
+        >
+          {value}
+        </div>
+      </div>
+      <div className="text-[11.5px] mt-0.5" style={{ color: '#9AA8C2' }}>
+        {sub}
+      </div>
+    </Panel>
+  );
+}
+
+interface AutomationsCardProps {
+  state: AutomationsState;
+}
+
+function AutomationsCard({ state }: AutomationsCardProps) {
+  const { data, loaded } = state;
+  // Build the rows that get rendered. Each row reflects real status:
+  // configured + status → number; configured + error → "error";
+  // not configured → "—" with a hint. Per the standing rule: no mock.
+  const rows = [
+    { id: 'n8n',  label: 'n8n',  color: '#FF8A3D', plat: data?.n8n },
+    { id: 'make', label: 'Make', color: '#7C3CFF', plat: data?.make },
+  ];
+  const total =
+    (data?.n8n.status?.total ?? 0) + (data?.make.status?.total ?? 0);
+  return (
+    <div
+      className="relative rounded-[14px] px-3.5 pt-3 pb-3.5 overflow-hidden"
+      style={{
+        background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`,
+        border: `1px solid ${DASH.border}`,
+        boxShadow: '0 10px 30px rgba(24,34,53,0.08)',
+        color: DASH.text,
+      }}
+    >
+      <div
+        aria-hidden
+        className="absolute top-0 left-0 right-0"
+        style={{ height: 1.5, background: 'linear-gradient(90deg, #FF8A3D, #7C3CFF)', opacity: 0.7 }}
+      />
+      <div className="flex items-baseline gap-2">
+        <div className="vs-mono text-[9.5px] tracking-[0.22em] font-semibold" style={{ color: '#9AA8C2' }} data-testid="automations-card">
+          AUTOMATIONS
+        </div>
+        <div className="ml-auto flex items-baseline gap-1">
+          <span className="text-[20px] font-semibold " style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+            {loaded ? total : '—'}
+          </span>
+          <span className="vs-mono text-[9px] tracking-[0.1em]" style={{ color: '#74849A' }}>
+            total
+          </span>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 mt-2.5">
+        {rows.map((r) => {
+          const plat = r.plat;
+          const status = plat?.status;
+          const total = status?.total ?? 0;
+          const active = status?.active ?? 0;
+          const pct = total > 0 ? Math.min(1, active / Math.max(total, 1)) : 0;
+          // Right-side label adapts to the platform's real state.
+          let trailing: React.ReactNode;
+          if (!loaded) {
+            trailing = <span className="vs-mono text-[10px]" style={{ color: '#74849A' }}>loading</span>;
+          } else if (!plat?.configured) {
+            trailing = (
+              <span className="vs-mono text-[10px]" style={{ color: '#74849A' }} title={`Set ${r.id.toUpperCase()}_API_KEY to enable.`}>
+                not configured
+              </span>
+            );
+          } else if (plat.error || !status) {
+            trailing = (
+              <span className="vs-mono text-[10px]" style={{ color: '#FF8A3D' }} title={plat.error ?? 'unreachable'}>
+                error
+              </span>
+            );
+          } else {
+            trailing = (
+              <span className="vs-mono text-[10px]" style={{ color: '#9AA8C2', letterSpacing: '0.04em' }}>
+                <span style={{ color: r.color }}>{active}</span>{' '}
+                <span style={{ color: '#74849A' }}>/ {total}</span>
+              </span>
+            );
+          }
+          return (
+            <div key={r.id} data-platform={r.id}>
+              <div className="flex items-center gap-2 mb-1">
+                <span
+                  className="block w-1.5 h-1.5 rounded-[2px]"
+                  style={{ background: r.color, boxShadow: `0 0 6px ${r.color}` }}
+                />
+                <span className="text-[11.5px] font-medium" style={{ color: '#F1F4FF' }}>
+                  {r.label}
+                </span>
+                <span className="ml-auto">{trailing}</span>
+              </div>
+              <div className="h-[3px] rounded-[1px] overflow-hidden" style={{ background: 'rgba(216,228,240,0.95)' }}>
+                <div
+                  style={{
+                    width: `${pct * 100}%`,
+                    height: '100%',
+                    background: `linear-gradient(90deg, ${r.color}, ${r.color}aa)`,
+                    boxShadow: `0 0 6px ${r.color}`,
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Panels
+// ──────────────────────────────────────────────────────────────────────
+
+function LiveActivity({ state }: { state: RecentActivityState }) {
+  const { list, loaded } = state;
+  const navigate = useNavigate();
+  return (
+    <Panel
+      title="Live Activity"
+      icon={<Bolt size={14} />}
+      accent="conic-gradient(from 200deg at 50% 50%, #7C3CFF, #FF4D8D, #20B26B, #0EA5E9, #7C3CFF)"
+      meta={
+        <div className="vs-mono text-[10px] flex items-center gap-1.5" style={{ color: '#20B26B' }} data-testid="live-activity-meta">
+          <span
+            className="block w-1.5 h-1.5 rounded-full"
+            style={{ background: '#20B26B', boxShadow: '0 0 6px #20B26B', animation: 'vs-pulse 2s infinite' }}
+          />
+          {loaded ? `${list.length} RECENT` : 'LOADING…'}
+        </div>
+      }
+    >
+      <div data-testid="live-activity">
+        {!loaded && (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: '#74849A' }}>
+            loading recent activity…
+          </div>
+        )}
+        {loaded && list.length === 0 && (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: '#74849A' }}>
+            No agent output yet. Activity appears here as agents write files.
+          </div>
+        )}
+        {list.map((it, i) => (
+          <button
+            key={it.path}
+            type="button"
+            onClick={() => navigate(`/agents/${it.agent}`)}
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-white/5"
+            data-rascal-handle={it.agent}
+            data-recent-activity-row
+            style={{
+              borderBottom:
+                i < list.length - 1 ? '1px solid #232A4D' : 'none',
+            }}
+            title={`Open ${it.agent}'s workspace`}
+          >
+            <AgentAvatar handle={it.agent} displayName={it.agent} size={26} ring />
+            <div className="flex-1 min-w-0">
+              <div className="text-[12.5px] truncate" style={{ color: '#F1F4FF' }}>
+                <span className="font-semibold capitalize" style={{ color: '#F1F4FF' }}>
+                  {it.agent}
+                </span>
+                <span style={{ color: '#9AA8C2' }}> {it.action} </span>
+                <span className="vs-mono" style={{ color: '#7C3CFF' }}>{it.filename}</span>
+              </div>
+            </div>
+            <FileText
+              size={12}
+              style={{ color: '#74849A', flexShrink: 0 }}
+              aria-hidden
+            />
+            <span
+              className="vs-mono text-[10px] text-right"
+              style={{ color: '#74849A', minWidth: 56 }}
+            >
+              {timeAgo(it.mtime)}
+            </span>
+          </button>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+/** Format a due_at ISO string as "Today" / "Tmrw" / "Apr 28". */
+function formatDue(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const today = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(today.getDate() + 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  if (sameDay(d, today)) return 'Today';
+  if (sameDay(d, tomorrow)) return 'Tmrw';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const PEEK_COLS: { id: 'today' | 'overdue' | 'tomorrow'; title: string; hue: string }[] = [
+  { id: 'today',    title: 'TODAY',    hue: '#7C3CFF' },
+  { id: 'overdue',  title: 'OVERDUE',  hue: '#FF8A3D' },
+  { id: 'tomorrow', title: 'TOMORROW', hue: '#0EA5E9' },
+];
+
+function KanbanPeek({ state }: { state: TasksState }) {
+  const { list, loaded } = state;
+  const navigate = useNavigate();
+
+  // Bucket cards by Today / Overdue / Tomorrow.
+  //   Overdue = bucket 'today' that's been sitting since before today's
+  //             midnight (browser-local — Kevin is on Chicago time), OR a
+  //             due_at in the past with status != done.
+  //   Today   = bucket 'today' AND not overdue.
+  //   Tomorrow = bucket 'tomorrow'.
+  // Blocked/active/pending all count; done/failed/archived do not.
+  const grouped: Record<'today'|'overdue'|'tomorrow', TaskRow[]> = useMemo(() => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const startMs = startOfToday.getTime();
+    const acc = { today: [] as TaskRow[], overdue: [] as TaskRow[], tomorrow: [] as TaskRow[] };
+    for (const t of list) {
+      if (t.status === 'done' || t.status === 'failed') continue;
+      // Overdue strictly = a due date before today. Creation time has no bearing
+      // on which day-bucket a task belongs to (the old created_at heuristic was
+      // shoving still-due-today tasks into Overdue).
+      const dueOverdue = t.due_at !== null && Date.parse(t.due_at) < startMs;
+      if (dueOverdue) {
+        acc.overdue.push(t);
+      } else if (t.bucket === 'today') {
+        acc.today.push(t);
+      } else if (t.bucket === 'tomorrow') {
+        acc.tomorrow.push(t);
+      }
+    }
+    for (const k of Object.keys(acc) as Array<keyof typeof acc>) {
+      acc[k].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    }
+    return acc;
+  }, [list]);
+
+  return (
+    <Panel
+      title="Task Board · Today"
+      icon={<Columns3 size={14} />}
+      accent="linear-gradient(135deg, #FF4D8D, #FF8A3D)"
+      meta={
+        <button
+          type="button"
+          onClick={() => navigate('/kanban')}
+          className="flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-md border border-sky-200 hover:bg-sky-50 transition-colors"
+          style={{ color: '#F1F4FF' }}
+        >
+          Open board
+          <ArrowRight className="w-2.5 h-2.5" aria-hidden />
+        </button>
+      }
+    >
+      <div className="grid grid-cols-3 gap-2.5 p-3" data-testid="kanban-peek">
+        {PEEK_COLS.map((c) => {
+          const colTasks = grouped[c.id];
+          const cards = colTasks.slice(0, 5);
+          return (
+            <div key={c.id} data-kanban-column={c.id}>
+              <div className="flex items-center gap-1.5 mb-2">
+                <span
+                  className="block w-1.5 h-1.5 rounded-[2px]"
+                  style={{ background: c.hue, boxShadow: `0 0 8px ${c.hue}` }}
+                />
+                <span className="vs-mono text-[10px] tracking-[0.18em]" style={{ color: '#9AA8C2' }}>
+                  {c.title}
+                </span>
+                <span className="vs-mono text-[10px] ml-auto" style={{ color: '#74849A' }}>
+                  {colTasks.length}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {!loaded && (
+                  <div className="text-[11px] italic" style={{ color: '#74849A' }}>loading…</div>
+                )}
+                {loaded && cards.length === 0 && (
+                  <div className="text-[11px] italic" style={{ color: '#74849A' }}>none</div>
+                )}
+                {cards.map((k) => {
+                  const due = formatDue(k.due_at);
+                  return (
+                    <div
+                      key={k.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => navigate('/kanban')}
+                      className="relative p-2 rounded-md overflow-hidden cursor-pointer hover:bg-white/5 transition-colors"
+                      style={{
+                        background: '#181D3A',
+                        border: '1px solid #232A4D',
+                      }}
+                    >
+                      <div
+                        aria-hidden
+                        className="absolute top-0 bottom-0 left-0 w-[2px]"
+                        style={{ background: c.hue, opacity: 0.7 }}
+                      />
+                      <div className="text-[11.5px] leading-snug ml-1.5 truncate" title={k.title} style={{ color: '#F1F4FF' }}>
+                        {k.title}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1.5 ml-1.5">
+                        {k.assigned_agent ? (
+                          <>
+                            <AgentAvatar handle={k.assigned_agent} displayName={k.assigned_agent} size={16} />
+                            <span
+                              className="text-[10.5px] truncate"
+                              style={{ color: '#9aa3b5' }}
+                              title={k.assigned_agent}
+                            >
+                              {k.assigned_agent}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span
+                              className="w-4 h-4 rounded-full inline-block"
+                              style={{ background: 'rgba(14,165,233,0.14)' }}
+                              aria-hidden
+                            />
+                            <span className="text-[10.5px] italic" style={{ color: '#74849A' }}>
+                              unassigned
+                            </span>
+                          </>
+                        )}
+                        {k.status === 'blocked' && (
+                          <span className="vs-mono text-[9px]" style={{ color: '#FF8A3D' }}>BLOCKED</span>
+                        )}
+                        {due && (
+                          <span className="vs-mono text-[9px] ml-auto" style={{ color: '#74849A' }}>
+                            {due}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+interface RascalSummary {
+  handle: string;
+  displayName: string;
+  client: string;
+  enabled: boolean;
+}
+
+interface RascalsState {
+  list: RascalSummary[];
+  loaded: boolean;
+}
+
+interface TasksState {
+  list: TaskRow[];
+  loaded: boolean;
+}
+
+/** Format an ISO timestamp as "12s ago" / "4m ago" / "2h ago" / "3d ago". */
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+interface PlatformStatus {
+  configured: boolean;
+  status: { total: number; active: number } | null;
+  error: string | null;
+}
+
+interface AutomationsStatus {
+  n8n: PlatformStatus;
+  make: PlatformStatus;
+}
+
+interface AutomationsState {
+  data: AutomationsStatus | null;
+  loaded: boolean;
+}
+
+function useAutomations(): AutomationsState {
+  const [state, setState] = useState<AutomationsState>({ data: null, loaded: false });
+  usePoll(() => {
+        authedFetch('api/connectors/automations/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: AutomationsStatus | null) => {
+        setState({ data, loaded: true });
+      })
+      .catch(() => setState((s) => ({ ...s, loaded: true }))); // keep last on poll error
+  });
+  return state;
+}
+
+/**
+ * Fetch the workspace's tasks once and share across the sub-stat strip
+ * (blocked-count → "threads need you"), the TASKS TODAY StatCard, and
+ * KanbanPeek. The /api/tasks endpoint already filters by tenant via
+ * the JWT — no additional gating needed here.
+ */
+function useTasks(): TasksState {
+  const [state, setState] = useState<TasksState>({ list: [], loaded: false });
+  usePoll(() => {
+        authedFetch('api/tasks')
+      .then((r) => (r.ok ? r.json() : { tasks: [] }))
+      .then((data: { tasks?: TaskRow[] }) => {
+        if (Array.isArray(data?.tasks)) setState({ list: data.tasks, loaded: true });
+        else setState((s) => ({ ...s, loaded: true }));
+      })
+      .catch(() => setState((s) => ({ ...s, loaded: true }))); // keep last on poll error
+  });
+  return state;
+}
+
+/**
+ * Fetch the workspace's rascals once and share the result across panels.
+ * Keeps StatCard and AgentRoster in sync without two parallel fetches.
+ */
+function useRascals(): RascalsState {
+  const [state, setState] = useState<RascalsState>({ list: [], loaded: false });
+  usePoll(() => {
+        authedFetch('api/agents/rascals')
+      .then((r) => (r.ok ? r.json() : { rascals: [] }))
+      .then((data: { rascals?: RascalSummary[] }) => {
+        if (Array.isArray(data?.rascals)) setState({ list: data.rascals, loaded: true });
+        else setState((s) => ({ ...s, loaded: true }));
+      })
+      .catch(() => setState((s) => ({ ...s, loaded: true }))); // keep last on poll error
+  });
+  return state;
+}
+
+interface EmpAgent {
+  id: string; name: string; status: string; model: string | null;
+  last_run_at: string | null; run_count: number; error_count: number;
+  cost_24h: string | number; last_status: string | null;
+}
+function useEmployeeAgents(): { list: EmpAgent[]; loaded: boolean } {
+  const [state, setState] = useState<{ list: EmpAgent[]; loaded: boolean }>({ list: [], loaded: false });
+  usePoll(() => {
+    authedFetch('api/employee-agents')
+      .then((r) => (r.ok ? r.json() : { agents: [] }))
+      .then((data: { agents?: EmpAgent[] }) => setState({ list: Array.isArray(data?.agents) ? data.agents : [], loaded: true }))
+      .catch(() => setState((s) => ({ ...s, loaded: true }))); // keep last on poll error
+  });
+  return state;
+}
+
+function empDot(a: EmpAgent): string {
+  if (a.last_status === 'error') return '#FF5C5C';
+  if (a.status === 'active') return '#20B26B';
+  if (a.status === 'paused') return '#FFB020';
+  return '#74849A';
+}
+
+function AgentRoster() {
+  // Real Employee Agents (boss_persistent_agents via /api/employee-agents).
+  // Rascals/Outsiders live on the Rascals surface only — not here.
+  const { list, loaded } = useEmployeeAgents();
+  const active = list.filter((a) => a.status === 'active').length;
+  return (
+    <Panel
+      title="Employee Agents"
+      icon={<Cpu size={14} />}
+      accent="linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)"
+      meta={
+        <span className="vs-mono text-[10px]" style={{ color: '#9AA8C2' }} data-testid="agent-roster-meta">
+          {loaded ? `${active} ONLINE` : '…'}
+        </span>
+      }
+    >
+      <div className="p-2.5 overflow-y-auto h-full" data-testid="agent-roster-grid">
+        {!loaded ? (
+          <div className="text-[12px] px-1 py-2" style={{ color: '#74849A' }}>loading agents…</div>
+        ) : list.length === 0 ? (
+          <div className="text-[12px] px-1 py-2" style={{ color: '#74849A' }}>No Employee Agents yet.</div>
+        ) : (
+          <div className="space-y-1.5">
+            {list.map((a) => (
+              <div key={a.id} className="flex items-center gap-2.5 p-2 rounded-[10px]" style={{ background: '#141937', border: '1px solid #232A4D' }}>
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: empDot(a), boxShadow: `0 0 6px ${empDot(a)}` }} aria-hidden />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-semibold truncate" style={{ color: '#F1F4FF' }}>{a.name}</div>
+                  <div className="text-[10.5px] truncate" style={{ color: '#74849A' }}>
+                    {a.status} · {a.last_run_at ? timeAgo(a.last_run_at) : 'never run'}{a.error_count > 0 ? ` · ${a.error_count} err` : ''}
+                  </div>
+                </div>
+                <span className="vs-mono text-[10px] shrink-0" style={{ color: '#9AA8C2' }}>${Number(a.cost_24h ?? 0).toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function timeAgoIso(iso: string): string {
+  try {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 60_000) return 'just now';
+    if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+    if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h`;
+    return `${Math.floor(ms / 86_400_000)}d`;
+  } catch { return ''; }
+}
+
+function SlackAttentionPanel({ state }: { state: SlackAttentionState }) {
+  const { list, loaded } = state;
+  // Optimistic removal — drop from the visible list the moment the click
+  // lands so Kevin doesn't think the button is broken while the 15s poll
+  // catches up.
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const ack = (id: string, mode: 'ack' | 'dismiss') => {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    authedFetch(`api/slack/attention/${id}/${mode}`, { method: 'POST' })
+      .then((r) => {
+        // If the server rejected, un-hide so the user can retry
+        if (!r.ok) {
+          setHidden((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }
+      })
+      .catch(() => {
+        setHidden((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      });
+  };
+  const visible = list.filter((m) => !hidden.has(m.id));
+  return (
+    <Panel
+      title="Slack"
+      icon={<MessageSquare size={14} />}
+      accent="linear-gradient(135deg, #0EA5E9, #7C3CFF)"
+      meta={
+        <div className="flex items-center gap-2 vs-mono text-[10px]" data-testid="slack-attn-meta">
+          <span style={{ color: loaded && visible.length > 0 ? '#0EA5E9' : '#74849A' }}>
+            {!loaded ? 'CONNECTING…' : visible.length === 0 ? 'CLEAR' : `${visible.length} OPEN`}
+          </span>
+        </div>
+      }
+    >
+      <div data-testid="slack-attention-panel">
+        {!loaded && (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: '#74849A' }}>
+            checking Slack…
+          </div>
+        )}
+        {loaded && visible.length === 0 && (
+          <div className="px-3.5 py-3 text-[12px]" style={{ color: '#74849A' }}>
+            No DMs or @-mentions to handle. Quiet inbox.
+          </div>
+        )}
+        {visible.slice(0, 6).map((m, i) => (
+          <div
+            key={m.id}
+            className="flex items-start gap-2.5 px-3.5 py-2"
+            data-slack-attn-item
+            style={{
+              borderBottom:
+                i < Math.min(visible.length, 6) - 1
+                  ? '1px solid rgba(216,228,240,0.85)'
+                  : 'none',
+            }}
+          >
+            <span
+              className="block rounded-[2px] flex-shrink-0 mt-1"
+              style={{ width: 3, height: 22, background: '#0EA5E9', boxShadow: '0 0 6px #0EA5E9' }}
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] font-medium truncate" style={{ color: '#F1F4FF' }}>
+                  {m.userName ?? m.userId ?? 'unknown'}
+                </span>
+                <span className="vs-mono text-[10px]" style={{ color: '#74849A' }}>
+                  {m.reason ?? ''}
+                </span>
+              </div>
+              <div className="text-[11.5px] truncate" style={{ color: '#9AA8C2' }} title={m.preview}>
+                {m.preview || '(empty)'}
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                {m.permalink && (
+                  <a
+                    href={m.permalink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="vs-mono text-[10px]"
+                    style={{ color: '#0EA5E9' }}
+                  >
+                    open ↗
+                  </a>
+                )}
+                <button
+                  onClick={() => ack(m.id, 'ack')}
+                  className="vs-mono text-[10px]"
+                  style={{ color: '#20B26B' }}
+                >
+                  ack
+                </button>
+                <button
+                  onClick={() => ack(m.id, 'dismiss')}
+                  className="vs-mono text-[10px]"
+                  style={{ color: '#FF4D8D' }}
+                >
+                  dismiss
+                </button>
+              </div>
+            </div>
+            <span className="vs-mono text-[10px]" style={{ color: '#74849A' }}>
+              {timeAgoIso(m.createdAt)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function InboxPanel({ state }: { state: InboxState }) {
+  const { list, loaded, email } = state;
+  return (
+    <Panel
+      title="Inbox"
+      icon={<Mail size={14} />}
+      accent="linear-gradient(135deg, #20B26B, #0EA5E9)"
+      meta={
+        <div className="flex items-center gap-2 vs-mono text-[10px]" data-testid="inbox-meta">
+          {email && (
+            <span
+              className="truncate max-w-[160px]"
+              style={{ color: '#9AA8C2' }}
+              title={email}
+            >
+              {email}
+            </span>
+          )}
+          <span
+            style={{ color: loaded && list.length > 0 ? '#20B26B' : '#74849A' }}
+          >
+            {!loaded ? 'LOADING…' : list.length === 0 ? 'CLEAR' : `${list.length} FLAGGED`}
+          </span>
+        </div>
+      }
+    >
+      <div data-testid="inbox-panel">
+        {!loaded && (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: '#74849A' }}>
+            checking inbox…
+          </div>
+        )}
+        {loaded && list.length === 0 && (
+          <div className="px-3.5 py-3 text-[12px]" style={{ color: '#74849A' }}>
+            Nothing flagged for attention — the email agent is handling the rest.
+          </div>
+        )}
+        {list.slice(0, 5).map((m, i) => {
+          const hue = inboxHue(m.id);
+          const border = i < Math.min(list.length, 5) - 1 ? '1px solid rgba(216,228,240,0.85)' : 'none';
+          return (
+            <a
+              key={m.id}
+              href={m.gmailUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`flex items-center gap-2.5 px-3.5 py-2 ${m.gmailUrl ? 'cursor-pointer hover:bg-[rgba(124,60,255,0.07)]' : ''}`}
+              data-inbox-item
+              style={{ borderBottom: border, textDecoration: 'none' }}
+              title={m.gmailUrl ? 'Open in Gmail' : undefined}
+            >
+              <span
+                className="block rounded-[2px] flex-shrink-0"
+                style={{ width: 3, height: 22, background: hue, boxShadow: `0 0 6px ${hue}` }}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <div className="text-[12px] font-medium truncate" style={{ color: '#F1F4FF' }}>
+                    {senderName(m.sender)}
+                  </div>
+                  {m.category && (
+                    <span
+                      className="vs-mono text-[8.5px] uppercase px-1.5 py-0.5 rounded shrink-0"
+                      style={{ background: 'rgba(124,60,255,0.18)', color: '#B79CFF' }}
+                    >
+                      {m.category}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11.5px] truncate" style={{ color: '#9AA8C2' }} title={m.subject}>
+                  {m.subject || '(no subject)'}
+                </div>
+                {m.preview && (
+                  <div className="text-[10.5px] truncate" style={{ color: '#74849A' }} title={m.preview}>
+                    {m.preview}
+                  </div>
+                )}
+              </div>
+              <span className="vs-mono text-[10px] shrink-0" style={{ color: '#74849A' }}>
+                {timeAgo(m.timestamp)}
+              </span>
+            </a>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+// Sales tile — a clean stats roll-up of #sales-event-stats: a prominent Today
+// block (revenue + count), an All / Event row (revenue, count, avg deal), a
+// short Top reps list, and a tiny recent-sales strip. Self-fetching via
+// usePolledJson (15s), keeps last good data on a transient error so it never
+// blanks mid-day.
+// Funnel stages rendered per event, in attendance order. "End" falls back to
+// the "close" count when the post used Close instead of End.
+const FUNNEL_STAGES: { key: string; label: string; alt?: string }[] = [
+  { key: 'start', label: 'Start' },
+  { key: 'peak', label: 'Peak' },
+  { key: 'offer', label: 'Offer' },
+  { key: 'link', label: 'Link' },
+  { key: 'end', label: 'End', alt: 'close' },
+];
+
+/** A number that's actually present (non-null) on a stages record. */
+function stageVal(stages: Record<string, number | null>, key: string, alt?: string): number | null {
+  const v = stages[key];
+  if (v !== null && v !== undefined) return v;
+  if (alt) {
+    const a = stages[alt];
+    if (a !== null && a !== undefined) return a;
+  }
+  return null;
+}
+
+interface LinkedInStatusT { connected: boolean; email?: string; expiresAt?: string | null; }
+interface LinkedInPostT { id: string; text: string; link: string | null; post_id: string | null; posted_at: string; }
+
+function LinkedInPanel() {
+  const { data: status, loaded } = usePolledJson<LinkedInStatusT>('api/linkedin/status', 30_000);
+  const { data: postsData } = usePolledJson<{ posts: LinkedInPostT[] }>('api/linkedin/posts', 30_000);
+  const posts = postsData?.posts ?? [];
+  const connected = !!status?.connected;
+  const [text, setText] = useState('');
+  const [link, setLink] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [media, setMedia] = useState<{ name: string; mtype: 'image' | 'video' | 'document'; b64: string } | null>(null);
+
+  function onPickFile(f: File | null) {
+    if (!f) { setMedia(null); return; }
+    const mtype: 'image' | 'video' | 'document' = f.type.startsWith('image/') ? 'image' : f.type.startsWith('video/') ? 'video' : 'document';
+    const reader = new FileReader();
+    reader.onload = () => setMedia({ name: f.name, mtype, b64: String(reader.result) });
+    reader.readAsDataURL(f);
+  }
+
+  async function publish() {
+    if ((!text.trim() && !media) || busy) return;
+    setBusy(true); setMsg(null);
+    try {
+      const token = localStorage.getItem('boss_token') ?? '';
+      const r = await fetch('api/linkedin/post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          text: text.trim(),
+          link: link.trim() || undefined,
+          media: media ? { type: media.mtype, dataBase64: media.b64, filename: media.name } : undefined,
+        }),
+      });
+      const d = await r.json().catch(() => ({})) as { error?: string };
+      if (r.ok) { setMsg({ ok: true, text: 'Posted to LinkedIn.' }); setText(''); setLink(''); setMedia(null); }
+      else setMsg({ ok: false, text: d.error || `Failed (${r.status})` });
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed to post' });
+    } finally { setBusy(false); }
+  }
+
+  const inputStyle = { background: 'rgba(255,255,255,0.04)', border: `1px solid ${DASH.borderSoft}`, color: DASH.text } as const;
+
+  return (
+    <Panel
+      title="LinkedIn"
+      icon={<Linkedin size={14} />}
+      accent="linear-gradient(135deg, #0A66C2, #4F9BE8)"
+      meta={
+        <span className="vs-mono text-[10px]" style={{ color: connected ? DASH.green : DASH.textMuted }}>
+          {!loaded ? 'LOADING…' : connected ? `CONNECTED${status?.email ? ' · ' + status.email : ''}` : 'NOT CONNECTED'}
+        </span>
+      }
+    >
+      <div className="px-3.5 py-3 space-y-2.5">
+        {!connected ? (
+          <div className="text-[12px]" style={{ color: DASH.textMuted }}>
+            Connect LinkedIn in Settings → Connections to post.
+          </div>
+        ) : (
+          <>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Write a LinkedIn post…"
+              rows={3}
+              maxLength={3000}
+              className="w-full resize-none rounded-md px-2.5 py-2 text-[12.5px] outline-none"
+              style={inputStyle}
+            />
+            <input
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+              placeholder="Optional link (https://…)"
+              className="w-full rounded-md px-2.5 py-1.5 text-[11.5px] outline-none"
+              style={inputStyle}
+            />
+            <div className="flex items-center gap-2">
+              <label className="inline-flex items-center gap-1.5 text-[11px] cursor-pointer rounded-md px-2 py-1" style={{ color: DASH.textMuted, border: `1px solid ${DASH.borderSoft}` }}>
+                <input
+                  type="file"
+                  accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx"
+                  className="hidden"
+                  onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+                />
+                📎 {media ? `${media.name.slice(0, 22)}` : 'Image / video / doc'}
+              </label>
+              {media && (
+                <button onClick={() => setMedia(null)} className="text-[11px]" style={{ color: '#F5736B' }} title="Remove attachment">✕</button>
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="vs-mono text-[10px]" style={{ color: msg ? (msg.ok ? DASH.green : '#F5736B') : DASH.textMuted }}>
+                {msg ? msg.text : `${text.length}/3000`}
+              </span>
+              <button
+                onClick={publish}
+                disabled={busy || (!text.trim() && !media)}
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
+                style={{ background: '#0A66C2', color: '#fff' }}
+              >
+                <Send size={12} /> {busy ? 'Posting…' : 'Post'}
+              </button>
+            </div>
+          </>
+        )}
+        {posts.length > 0 && (
+          <div className="pt-1.5" style={{ borderTop: `1px solid ${DASH.borderSoft}` }}>
+            <div className="vs-mono text-[9px] uppercase tracking-[0.16em] pt-2 pb-1" style={{ color: DASH.textMuted }}>Recent posts</div>
+            <ul className="space-y-1.5">
+              {posts.slice(0, 4).map((p) => (
+                <li key={p.id} className="text-[11.5px] leading-snug" style={{ color: DASH.text }}>
+                  <span className="vs-mono text-[9px] mr-1.5" style={{ color: DASH.textMuted }}>
+                    {new Date(p.posted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </span>
+                  {p.text.slice(0, 90)}{p.text.length > 90 ? '…' : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+interface LinkedInPostFullT { id: string; text: string; post_id: string | null; media_kind: string | null; viewUrl: string | null; posted_at: string; }
+
+function LinkedInPostsPanel() {
+  const [refresh, setRefresh] = useState(0);
+  const { data, loaded } = usePolledJson<{ posts: LinkedInPostFullT[] }>(`api/linkedin/posts?limit=20&v=${refresh}`, 30_000);
+  const posts = data?.posts ?? [];
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function authFetch(url: string, opts: RequestInit) {
+    const token = localStorage.getItem('boss_token') ?? '';
+    return fetch(url, { ...opts, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+  }
+  async function del(id: string) {
+    if (busy) return; setBusy(id);
+    try { await authFetch(`api/linkedin/posts/${id}`, { method: 'DELETE' }); setRefresh((v) => v + 1); }
+    finally { setBusy(null); }
+  }
+  async function saveEdit(id: string) {
+    if (busy || !editText.trim()) return; setBusy(id);
+    try {
+      const r = await authFetch(`api/linkedin/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ text: editText.trim() }) });
+      if (r.ok) { setEditId(null); setRefresh((v) => v + 1); }
+    } finally { setBusy(null); }
+  }
+
+  return (
+    <Panel
+      title="LinkedIn Posts"
+      icon={<Linkedin size={14} />}
+      accent="linear-gradient(135deg, #0A66C2, #4F9BE8)"
+      meta={<span className="vs-mono text-[10px]" style={{ color: DASH.textMuted }}>{!loaded ? 'LOADING…' : `${posts.length} POSTS`}</span>}
+    >
+      <div className="px-3.5 py-3">
+        {!loaded ? (
+          <div className="text-[12px]" style={{ color: DASH.textMuted }}>loading…</div>
+        ) : posts.length === 0 ? (
+          <div className="text-[12px]" style={{ color: DASH.textMuted }}>No posts yet — publish from the LinkedIn tile.</div>
+        ) : (
+          <ul className="space-y-2.5">
+            {posts.map((p) => (
+              <li key={p.id} className="pb-2" style={{ borderBottom: `1px solid ${DASH.borderSoft}` }}>
+                {editId === p.id ? (
+                  <div className="space-y-1.5">
+                    <textarea
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      rows={2}
+                      className="w-full resize-none rounded-md px-2 py-1.5 text-[12px] outline-none"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${DASH.borderSoft}`, color: DASH.text }}
+                    />
+                    <div className="flex gap-3 text-[11px]">
+                      <button onClick={() => saveEdit(p.id)} disabled={busy === p.id} style={{ color: DASH.green }}>{busy === p.id ? 'Saving…' : 'Save'}</button>
+                      <button onClick={() => setEditId(null)} style={{ color: DASH.textMuted }}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-[12px] leading-snug" style={{ color: DASH.text }}>
+                      {p.text.slice(0, 160)}{p.text.length > 160 ? '…' : ''}
+                      {p.media_kind && p.media_kind !== 'text' && (
+                        <span className="vs-mono text-[9px] ml-1.5 px-1 rounded" style={{ background: 'rgba(10,102,194,0.18)', color: '#4F9BE8' }}>{p.media_kind}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 text-[10px]">
+                      <span className="vs-mono" style={{ color: DASH.textMuted }}>{new Date(p.posted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      {p.viewUrl && <a href={p.viewUrl} target="_blank" rel="noreferrer" style={{ color: '#4F9BE8' }}>View ↗</a>}
+                      <button onClick={() => { setEditId(p.id); setEditText(p.text); }} style={{ color: DASH.textMuted }}>Edit</button>
+                      <button onClick={() => del(p.id)} disabled={busy === p.id} style={{ color: '#F5736B' }}>{busy === p.id ? '…' : 'Delete'}</button>
+                    </div>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+interface EmailDraftT { id: string; account: string; to_addr: string | null; subject: string | null; reply_subject: string | null; body: string; rating: number | null; rating_note: string | null; created_at: string; verdict: 'pass' | 'needs_human' | 'block' | null; verdict_issues: { severity: string; detail: string }[] | null; flags: string[] | null; }
+
+function VerdictBadge({ verdict }: { verdict: EmailDraftT['verdict'] }) {
+  if (!verdict) return null;
+  const map: Record<NonNullable<EmailDraftT['verdict']>, { label: string; color: string; bg: string }> = {
+    pass:        { label: 'PASS',        color: DASH.green, bg: 'rgba(60,200,140,0.15)' },
+    needs_human: { label: 'NEEDS HUMAN', color: '#E2B341', bg: 'rgba(226,179,65,0.15)' },
+    block:       { label: 'BLOCK',       color: '#F5736B', bg: 'rgba(245,115,107,0.16)' },
+  };
+  const v = map[verdict];
+  return (
+    <span className="vs-mono text-[9px] px-1 rounded" style={{ color: v.color, background: v.bg }}>{v.label}</span>
+  );
+}
+
+function EmailDraftsPanel() {
+  const [refresh, setRefresh] = useState(0);
+  const { data, loaded } = usePolledJson<{ drafts: EmailDraftT[] }>(`api/email-drafts/list?limit=30&v=${refresh}`, 30_000);
+  const drafts = data?.drafts ?? [];
+  const [noteFor, setNoteFor] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function rate(id: string, rating: number, note?: string) {
+    if (busy) return; setBusy(id);
+    try {
+      const token = localStorage.getItem('boss_token') ?? '';
+      await fetch(`api/email-drafts/${id}/rate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ rating, note }),
+      });
+      setNoteFor(null); setNoteText(''); setRefresh((v) => v + 1);
+    } finally { setBusy(null); }
+  }
+
+  const unrated = drafts.filter((d) => d.rating == null).length;
+
+  return (
+    <Panel
+      title="Email Drafts"
+      icon={<Mail size={14} />}
+      accent="linear-gradient(135deg,#8B7FE8,#B9A6FF)"
+      meta={<span className="vs-mono text-[10px]" style={{ color: DASH.textMuted }}>{!loaded ? 'LOADING…' : `${unrated} TO RATE`}</span>}
+    >
+      <div className="px-3.5 py-3">
+        {!loaded ? (
+          <div className="text-[12px]" style={{ color: DASH.textMuted }}>loading…</div>
+        ) : drafts.length === 0 ? (
+          <div className="text-[12px]" style={{ color: DASH.textMuted }}>No drafts yet — the Email Agent records reply drafts here for you to rate, and learns from your 👍/👎.</div>
+        ) : (
+          <ul className="space-y-3">
+            {drafts.slice(0, 12).map((d) => (
+              <li key={d.id} className="pb-2.5" style={{ borderBottom: `1px solid ${DASH.borderSoft}` }}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="vs-mono text-[9px] px-1 rounded" style={{ background: 'rgba(139,127,232,0.18)', color: '#B9A6FF' }}>{d.account.split('@')[0]}</span>
+                  <VerdictBadge verdict={d.verdict} />
+                  <span className="text-[11px] truncate" style={{ color: DASH.textMuted }}>{d.subject ?? d.reply_subject ?? '(no subject)'}</span>
+                </div>
+                <div className="text-[12px] leading-snug mb-1.5" style={{ color: DASH.text }}>{d.body.slice(0, 220)}{d.body.length > 220 ? '…' : ''}</div>
+                {d.rating != null ? (
+                  <div className="text-[10px]" style={{ color: d.rating > 0 ? DASH.green : '#F5736B' }}>
+                    {d.rating > 0 ? '👍 rated good' : '👎 needs work'}{d.rating_note ? ` — ${d.rating_note}` : ''}
+                  </div>
+                ) : noteFor === d.id ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={noteText}
+                      onChange={(e) => setNoteText(e.target.value)}
+                      placeholder="What to fix? (optional)"
+                      autoFocus
+                      className="flex-1 rounded-md px-2 py-1 text-[11px] outline-none"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${DASH.borderSoft}`, color: DASH.text }}
+                    />
+                    <button onClick={() => rate(d.id, -1, noteText.trim() || undefined)} disabled={busy === d.id} className="text-[11px]" style={{ color: '#F5736B' }}>👎 Save</button>
+                    <button onClick={() => setNoteFor(null)} className="text-[11px]" style={{ color: DASH.textMuted }}>✕</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-4 text-[14px]">
+                    <button onClick={() => rate(d.id, 1)} disabled={busy === d.id} title="Good draft" style={{ color: DASH.green }}>👍</button>
+                    <button onClick={() => { setNoteFor(d.id); setNoteText(''); }} disabled={busy === d.id} title="Needs work (+ note)" style={{ color: '#F5736B' }}>👎</button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function SalesPanel() {
+  const { data, loaded } = usePolledJson<SalesFeed>('api/slack-feed/sales', 15_000);
+  const events = data?.events ?? [];
+  const totals = data?.totals ?? { events: 0, start: 0, peak: 0, offer: 0, link: 0, end: 0 };
+  return (
+    <Panel
+      title="Event Stats"
+      icon={<Users size={14} />}
+      accent="linear-gradient(135deg, #20B26B, #F5C542)"
+      meta={
+        <span
+          className="vs-mono text-[10px]"
+          style={{ color: loaded && totals.events > 0 ? DASH.green : DASH.textMuted }}
+          data-testid="slack-sales-meta"
+        >
+          {!loaded ? 'LOADING…' : totals.events === 0 ? 'QUIET' : `${totals.events} EVENTS`}
+        </span>
+      }
+    >
+      <div data-testid="slack-sales-panel">
+        {!loaded ? (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: DASH.textMuted }}>
+            loading event stats…
+          </div>
+        ) : events.length === 0 ? (
+          <div className="px-3.5 py-3 text-[12px]" style={{ color: DASH.textMuted }}>
+            No event stats yet — posts in #sales-event-stats will appear here.
+          </div>
+        ) : (
+          <>
+            {/* Aggregate header — events count + compact attendance metrics */}
+            <div
+              className="grid grid-cols-4 gap-2 px-3.5 pt-3 pb-2.5"
+              style={{ borderBottom: `1px solid ${DASH.borderSoft}` }}
+            >
+              <div>
+                <div className="vs-mono text-[9px] uppercase tracking-[0.16em]" style={{ color: DASH.textMuted }}>
+                  events
+                </div>
+                <div className="text-[18px] font-semibold leading-none mt-1" style={{ color: DASH.green }}>
+                  {totals.events.toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div className="vs-mono text-[9px] uppercase tracking-[0.16em]" style={{ color: DASH.textMuted }}>
+                  avg peak
+                </div>
+                <div className="text-[18px] font-semibold leading-none mt-1" style={{ color: DASH.text }}>
+                  {(totals.events ? Math.round(totals.peak / totals.events) : 0).toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div className="vs-mono text-[9px] uppercase tracking-[0.16em]" style={{ color: DASH.textMuted }}>
+                  avg offer
+                </div>
+                <div className="text-[18px] font-semibold leading-none mt-1" style={{ color: DASH.text }}>
+                  {(totals.events ? Math.round(totals.offer / totals.events) : 0).toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div className="vs-mono text-[9px] uppercase tracking-[0.16em]" style={{ color: DASH.textMuted }}>
+                  avg link
+                </div>
+                <div className="text-[18px] font-semibold leading-none mt-1" style={{ color: DASH.text }}>
+                  {(totals.events ? Math.round(totals.link / totals.events) : 0).toLocaleString()}
+                </div>
+              </div>
+            </div>
+            {/* Per-event funnel list */}
+            <div>
+              {events.map((ev, idx) => {
+                const peak = stageVal(ev.stages, 'peak');
+                const offer = stageVal(ev.stages, 'offer');
+                const offerRate =
+                  peak !== null && peak > 0 && offer !== null
+                    ? Math.round((offer / peak) * 100)
+                    : null;
+                const name = ev.name && ev.name.length > 38 ? `${ev.name.slice(0, 38)}…` : (ev.name || 'Untitled event');
+                const when = ev.date ?? (ev.postedAt ? timeAgo(ev.postedAt) : '');
+                const chips = FUNNEL_STAGES
+                  .map((s) => ({ label: s.label, val: stageVal(ev.stages, s.key, s.alt) }))
+                  .filter((c) => c.val !== null);
+                return (
+                  <div
+                    key={`${ev.postedAt}-${idx}`}
+                    className="px-3.5 py-2.5"
+                    data-slack-sales-item
+                    style={{ borderTop: idx > 0 ? `1px solid ${DASH.borderSoft}` : 'none' }}
+                  >
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[12.5px] font-medium truncate" style={{ color: DASH.text }} title={ev.name || undefined}>
+                        {name}
+                      </span>
+                      {offerRate !== null && (
+                        <span
+                          className="vs-mono text-[9px] px-1.5 py-0.5 rounded-[4px] shrink-0"
+                          style={{ color: DASH.green, background: 'rgba(34,197,94,0.12)' }}
+                          title="offers ÷ peak attendance"
+                        >
+                          offer rate {offerRate}%
+                        </span>
+                      )}
+                      {when && (
+                        <span className="vs-mono text-[10px] shrink-0 ml-auto" style={{ color: DASH.textMuted }}>
+                          {when}
+                        </span>
+                      )}
+                    </div>
+                    {chips.length > 0 ? (
+                      <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1">
+                        {chips.map((c, i) => (
+                          <span key={c.label} className="vs-mono text-[10.5px]" style={{ color: DASH.textDim }}>
+                            {i > 0 && <span style={{ color: DASH.textMuted }}>· </span>}
+                            {c.label} <span style={{ color: DASH.text }}>{(c.val as number).toLocaleString()}</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="vs-mono text-[10.5px] mt-1 italic" style={{ color: DASH.textMuted }}>
+                        no stage data
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+// Social tiles — both fed by one endpoint (/api/meta/social). The small
+// SocialStatsPanel shows compact FB + IG analytics; the large SocialFeedPanel
+// shows recent posts/media with top comments plus a Facebook post composer.
+// Both self-fetch via usePolledJson (30s) and keep last good data on a
+// transient error so they never blank.
+
+/** Small two-column metric row used inside SocialStatsPanel. */
+function SocialMetric({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="vs-mono text-[9.5px] uppercase tracking-[0.1em]" style={{ color: DASH.textMuted }}>
+        {label}
+      </span>
+      <span className="text-[12px] font-medium" style={{ color: accent ?? DASH.text }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function SocialStatsPanel() {
+  const { data, loaded } = usePolledJson<SocialData>('api/meta/social', 30_000);
+  const fb = data?.facebook ?? null;
+  const ig = data?.instagram ?? null;
+  const linked = (fb ? 1 : 0) + (ig ? 1 : 0);
+  return (
+    <Panel
+      title="Social"
+      icon={<Orbit size={14} />}
+      accent="linear-gradient(135deg, #4F6DF5, #8B5CF6)"
+      meta={
+        <span
+          className="vs-mono text-[10px]"
+          style={{ color: loaded && linked > 0 ? DASH.blue : DASH.textMuted }}
+          data-testid="social-stats-meta"
+        >
+          {!loaded ? 'LOADING…' : linked === 0 ? 'OFFLINE' : `${linked}/2 LINKED`}
+        </span>
+      }
+    >
+      <div className="px-3.5 py-3" data-testid="social-stats-panel">
+        {!loaded ? (
+          <div className="text-[12px] italic" style={{ color: DASH.textMuted }}>checking social…</div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {/* Facebook column */}
+            <div data-social-network="facebook">
+              <div className="text-[11.5px] font-semibold mb-1.5 truncate" style={{ color: DASH.blue }}>
+                {fb ? fb.pageName || 'Facebook' : 'Facebook'}
+              </div>
+              {fb ? (
+                <div className="space-y-1">
+                  <SocialMetric label="followers" value={fb.followers.toLocaleString()} />
+                  <SocialMetric label="posts" value={fb.postCount.toLocaleString()} />
+                  <SocialMetric label="reactions" value={fb.totals.reactions.toLocaleString()} />
+                  <SocialMetric label="comments" value={fb.totals.comments.toLocaleString()} />
+                  <SocialMetric
+                    label="unread DMs"
+                    value={fb.unreadMessages.toLocaleString()}
+                    accent={fb.unreadMessages > 0 ? DASH.orange : undefined}
+                  />
+                </div>
+              ) : (
+                <div className="text-[11px] italic" style={{ color: DASH.textMuted }}>not connected</div>
+              )}
+            </div>
+            {/* Instagram column */}
+            <div data-social-network="instagram">
+              <div className="text-[11.5px] font-semibold mb-1.5 truncate" style={{ color: DASH.pink }}>
+                {ig ? `@${ig.username}` : 'Instagram'}
+              </div>
+              {ig ? (
+                <div className="space-y-1">
+                  <SocialMetric label="followers" value={ig.followers.toLocaleString()} />
+                  <SocialMetric label="media" value={ig.mediaCount.toLocaleString()} />
+                  <SocialMetric label="likes" value={ig.totals.likes.toLocaleString()} />
+                  <SocialMetric label="comments" value={ig.totals.comments.toLocaleString()} />
+                </div>
+              ) : (
+                <div className="text-[11px] italic" style={{ color: DASH.textMuted }}>not connected</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+/** Small badge used for FB post type / IG media type. */
+function SocialBadge({ label, hue }: { label: string; hue: string }) {
+  return (
+    <span
+      className="vs-mono text-[8.5px] uppercase tracking-[0.1em] px-1.5 py-0.5 rounded shrink-0"
+      style={{ background: `${hue}22`, color: hue, border: `1px solid ${hue}55` }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function SocialFeedPanel() {
+  // pollKey is folded into the URL so a successful post re-keys usePolledJson
+  // (its effect depends on `url`), forcing an immediate fresh fetch.
+  const [pollKey, setPollKey] = useState(0);
+  const url = pollKey === 0 ? 'api/meta/social' : `api/meta/social?r=${pollKey}`;
+  const { data, loaded } = usePolledJson<SocialData>(url, 30_000);
+  const fb = data?.facebook ?? null;
+  const ig = data?.instagram ?? null;
+  const fbPosts = fb?.posts ?? [];
+  const igMedia = ig?.media ?? [];
+
+  const [draft, setDraft] = useState('');
+  const [posting, setPosting] = useState(false);
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  const submit = async () => {
+    const message = draft.trim();
+    if (!message || posting) return;
+    if (!window.confirm('Publish to the Facebook Page now?')) return;
+    setPosting(true);
+    setNotice(null);
+    try {
+      const token = localStorage.getItem('boss_token') ?? '';
+      const headers = new Headers({ 'Content-Type': 'application/json' });
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+      const res = await fetch('api/meta/fb/post', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ message }),
+      });
+      const body = await res.json().catch(() => null);
+      if (res.ok && body?.ok) {
+        setDraft('');
+        setNotice({ kind: 'ok', text: 'Posted ✓' });
+        setPollKey((k) => k + 1); // trigger a re-poll of the feed
+      } else if (res.status === 409) {
+        setNotice({ kind: 'err', text: 'Facebook Page not connected — link it in Connections.' });
+      } else {
+        setNotice({ kind: 'err', text: body?.error || `Post failed (${res.status})` });
+      }
+    } catch {
+      setNotice({ kind: 'err', text: 'Network error — post not sent.' });
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const empty = loaded && fbPosts.length === 0 && igMedia.length === 0;
+
+  return (
+    <Panel
+      title="Social Feed"
+      icon={<Orbit size={14} />}
+      accent="linear-gradient(135deg, #4F6DF5, #D946EF)"
+      meta={
+        <span
+          className="vs-mono text-[10px]"
+          style={{ color: loaded && !empty ? DASH.blue : DASH.textMuted }}
+          data-testid="social-feed-meta"
+        >
+          {!loaded ? 'LOADING…' : `${fbPosts.length + igMedia.length} POSTS`}
+        </span>
+      }
+    >
+      <div className="flex flex-col h-full" data-testid="social-feed-panel">
+        {/* Feed (scrollable) */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {!loaded ? (
+            <div className="px-3.5 py-3 text-[12px] italic" style={{ color: DASH.textMuted }}>
+              loading feed…
+            </div>
+          ) : empty ? (
+            <div className="px-3.5 py-3 text-[12px]" style={{ color: DASH.textMuted }}>
+              No recent posts or media. Connect Facebook / Instagram in Connections.
+            </div>
+          ) : (
+            <>
+              {/* Facebook section */}
+              {fbPosts.length > 0 && (
+                <div data-social-section="facebook">
+                  <div
+                    className="vs-mono text-[9px] uppercase tracking-[0.18em] px-3.5 pt-2.5 pb-1"
+                    style={{ color: DASH.blue }}
+                  >
+                    Facebook{fb?.pageName ? ` · ${fb.pageName}` : ''}
+                  </div>
+                  {fbPosts.map((p) => {
+                    const body = (p.message || p.story || '').slice(0, 140);
+                    return (
+                      <a
+                        key={p.id}
+                        href={p.permalink_url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="block px-3.5 py-2"
+                        data-fb-post={p.id}
+                        style={{ borderTop: `1px solid ${DASH.borderSoft}` }}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          {p.type && <SocialBadge label={p.type} hue={DASH.blue} />}
+                          <span className="vs-mono text-[10px]" style={{ color: DASH.textMuted }}>
+                            {p.created_time ? timeAgo(p.created_time) : ''}
+                          </span>
+                        </div>
+                        <div className="text-[12px]" style={{ color: DASH.textDim }}>
+                          {body || '(no text)'}
+                        </div>
+                        <div className="vs-mono text-[10px] mt-1" style={{ color: DASH.textMuted }}>
+                          👍 {p.reactions} · 💬 {p.comments_count} · ↗ {p.shares}
+                        </div>
+                        {p.comments.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {p.comments.slice(0, 3).map((c, ci) => (
+                              <div key={ci} className="text-[10.5px] truncate" style={{ color: DASH.textMuted }}>
+                                <span style={{ color: DASH.textDim }}>{c.from}</span>: {c.message.slice(0, 100)}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+              {/* Instagram section */}
+              {igMedia.length > 0 && (
+                <div data-social-section="instagram">
+                  <div
+                    className="vs-mono text-[9px] uppercase tracking-[0.18em] px-3.5 pt-2.5 pb-1"
+                    style={{ color: DASH.pink }}
+                  >
+                    Instagram{ig?.username ? ` · @${ig.username}` : ''}
+                  </div>
+                  {igMedia.map((m) => {
+                    const cap = (m.caption || '').slice(0, 140);
+                    return (
+                      <a
+                        key={m.id}
+                        href={m.permalink}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="block px-3.5 py-2"
+                        data-ig-media={m.id}
+                        style={{ borderTop: `1px solid ${DASH.borderSoft}` }}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          {m.media_type && <SocialBadge label={m.media_type} hue={DASH.pink} />}
+                          <span className="vs-mono text-[10px]" style={{ color: DASH.textMuted }}>
+                            {m.timestamp ? timeAgo(m.timestamp) : ''}
+                          </span>
+                        </div>
+                        <div className="text-[12px]" style={{ color: DASH.textDim }}>
+                          {cap || '(no caption)'}
+                        </div>
+                        <div className="vs-mono text-[10px] mt-1" style={{ color: DASH.textMuted }}>
+                          ♥ {m.like_count} · 💬 {m.comments_count}
+                        </div>
+                        {m.comments.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {m.comments.slice(0, 3).map((c, ci) => (
+                              <div key={ci} className="text-[10.5px] truncate" style={{ color: DASH.textMuted }}>
+                                <span style={{ color: DASH.textDim }}>@{c.username}</span>: {c.text.slice(0, 100)}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Facebook composer */}
+        <div className="px-3.5 py-2.5 shrink-0" style={{ borderTop: `1px solid ${DASH.borderSoft}` }}>
+          <textarea
+            value={draft}
+            onChange={(e) => { setDraft(e.target.value); if (notice) setNotice(null); }}
+            placeholder="Write a post to the Facebook Page…"
+            rows={2}
+            disabled={posting}
+            data-testid="social-composer"
+            className="w-full resize-none rounded-md px-2.5 py-1.5 text-[12px] outline-none"
+            style={{
+              background: DASH.panel3,
+              border: `1px solid ${DASH.border}`,
+              color: DASH.text,
+            }}
+          />
+          <div className="flex items-center gap-2 mt-1.5">
+            {notice && (
+              <span
+                className="text-[11px]"
+                style={{ color: notice.kind === 'ok' ? DASH.green : DASH.orange }}
+                data-testid="social-notice"
+              >
+                {notice.text}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={submit}
+              disabled={posting || draft.trim().length === 0}
+              data-testid="social-post-btn"
+              className="ml-auto px-3 py-1.5 rounded-md text-[12px] font-medium"
+              style={{
+                background: posting || draft.trim().length === 0 ? DASH.panel3 : DASH.blue,
+                color: posting || draft.trim().length === 0 ? DASH.textMuted : '#fff',
+                border: `1px solid ${posting || draft.trim().length === 0 ? DASH.border : DASH.blue}`,
+                cursor: posting || draft.trim().length === 0 ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {posting ? 'Posting…' : 'Post'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function WhatsAppPanel({ state }: { state: WhatsAppState }) {
+  const { list, loaded } = state;
+  const navigate = useNavigate();
+  const totalUnread = list.reduce((sum, t) => sum + t.unread_count, 0);
+
+  return (
+    <Panel
+      title="WhatsApp"
+      icon={<MessageSquare size={14} />}
+      accent="linear-gradient(135deg, #25d366, #128C7E)"
+      meta={
+        <div className="flex items-center gap-2 vs-mono text-[10px]">
+          <span style={{ color: loaded && totalUnread > 0 ? '#25d366' : '#74849A' }}>
+            {!loaded ? 'LOADING…' : totalUnread === 0 ? 'CLEAR' : `${totalUnread} UNREAD`}
+          </span>
+        </div>
+      }
+    >
+      <div>
+        {!loaded && (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: '#74849A' }}>
+            checking messages…
+          </div>
+        )}
+        {loaded && list.length === 0 && (
+          <div className="px-3.5 py-3 text-[12px]" style={{ color: '#74849A' }}>
+            No unread messages.
+          </div>
+        )}
+        {list.slice(0, 5).map((thread, i) => (
+          <div
+            key={thread.chat_id}
+            onClick={() => navigate('/whatsapp')}
+            className="flex items-center gap-2.5 px-3.5 py-2 cursor-pointer hover:bg-sky-50 transition-colors"
+            style={{
+              borderBottom:
+                i < Math.min(list.length, 5) - 1
+                  ? '1px solid rgba(216,228,240,0.85)'
+                  : 'none',
+            }}
+          >
+            <span
+              className="block rounded-[2px] flex-shrink-0"
+              style={{
+                width: 3,
+                height: 22,
+                background: '#25d366',
+                boxShadow: '0 0 6px #25d366',
+              }}
+            />
+            <div className="flex-1 min-w-0">
+              <div className="text-[12px] font-medium truncate" style={{ color: '#F1F4FF' }}>
+                {thread.display_name || thread.phone || 'Unknown'}
+                {thread.is_group && ' (Group)'}
+              </div>
+              <div className="text-[11.5px] truncate" style={{ color: '#9AA8C2' }} title={thread.last_message_preview || ''}>
+                {thread.last_message_preview || '(no preview)'}
+              </div>
+            </div>
+            <div className="flex flex-col items-end gap-1">
+              {thread.unread_count > 0 && (
+                <span
+                  className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+                  style={{ background: '#25d366', color: '#FFFFFF' }}
+                >
+                  {thread.unread_count}
+                </span>
+              )}
+              <span className="vs-mono text-[10px]" style={{ color: '#74849A' }}>
+                {timeAgo(thread.last_message_at || '')}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+interface IntegrationStatus {
+  id: string;
+  name?: string;
+  configured: boolean;
+}
+
+const CONNECTOR_HUES: Record<string, string> = {
+  google:           '#ea4335',
+  google_workspace: '#ea4335',
+  workspace:        '#ea4335',
+  n8n:              '#FF8A3D',
+  airtable:         '#FF8A3D',
+  notion:           '#182235',
+  slack:            '#FF4D8D',
+  telegram:         '#0EA5E9',
+  make:             '#7C3CFF',
+  stripe:           '#9d8bff',
+  homeassistant:    '#20B26B',
+  home_assistant:   '#20B26B',
+  ha:               '#20B26B',
+  gemini:           '#0EA5E9',
+  github:           '#182235',
+  youtube:          '#ff5c5c',
+  spotify:          '#20B26B',
+};
+
+function hueFor(id: string): string {
+  return CONNECTOR_HUES[id] ?? '#9AA8C2';
+}
+
+function ConnectionsGrid() {
+  const [list, setList] = useState<IntegrationStatus[]>([]);
+  usePoll(() => {
+        authedFetch('api/connectors/integrations')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: unknown) => {
+        if (Array.isArray(data)) setList(data as IntegrationStatus[]);
+      })
+      .catch(() => { /* silent — keep last on poll error */ });
+  });
+
+  const configured = list.filter((c) => c.configured).length;
+  const slice = list.slice(0, 9);
+
+  return (
+    <Panel
+      title="Connections"
+      icon={<Orbit size={14} />}
+      accent="linear-gradient(135deg, #FF4D8D, #FF8A3D)"
+      meta={
+        <span className="vs-mono text-[10px]" style={{ color: '#20B26B' }}>
+          {configured}/{list.length || '—'} HEALTHY
+        </span>
+      }
+    >
+      <div className="grid grid-cols-3 gap-1.5 p-2.5">
+        {slice.length === 0 && (
+          <div className="col-span-3 px-2 py-3 text-[11px] text-center" style={{ color: '#74849A' }}>
+            No connectors configured.
+          </div>
+        )}
+        {slice.map((c) => (
+          <div
+            key={c.id}
+            className="flex items-center gap-2 px-2.5 py-2 rounded-md"
+            style={{
+              background: 'rgba(255,255,255,0.86)',
+              border: '1px solid rgba(216,228,240,0.95)',
+            }}
+          >
+            <span
+              className="block w-2 h-2 rounded-[2px]"
+              style={{ background: hueFor(c.id), boxShadow: `0 0 6px ${hueFor(c.id)}99` }}
+            />
+            <span className="text-[11px] flex-1 truncate" style={{ color: '#F1F4FF' }}>
+              {c.name ?? c.id}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+/** Convert an ISO-or-date string to a fractional hour-of-day, or null. */
+function isoToHour(iso: string): number | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.getHours() + d.getMinutes() / 60;
+}
+
+interface TimelineBlock {
+  laneKey: string;
+  label: string;
+  hue: string;
+  startH: number;
+  endH: number;
+  source: 'event' | 'task';
+  href?: string;
+}
+
+/**
+ * Greedy pack overlapping blocks into vertical rows so nothing renders on
+ * top of anything else. Returns each block annotated with its row index
+ * and the total row count needed for the lane.
+ *
+ * Used by the timeline lanes (especially "You", which can have stacked
+ * meetings) so a busy day grows downward instead of overlapping.
+ */
+function packBlocksIntoRows(blocks: TimelineBlock[]): {
+  packed: Array<TimelineBlock & { row: number }>;
+  rowCount: number;
+} {
+  const sorted = [...blocks].sort((a, b) => a.startH - b.startH || a.endH - b.endH);
+  const rowEnds: number[] = []; // row index → end hour of last block placed
+  const packed = sorted.map((b) => {
+    let row = rowEnds.findIndex((end) => end <= b.startH);
+    if (row === -1) {
+      row = rowEnds.length;
+      rowEnds.push(b.endH);
+    } else {
+      rowEnds[row] = b.endH;
+    }
+    return { ...b, row };
+  });
+  return { packed, rowCount: Math.max(1, rowEnds.length) };
+}
+
+interface TimelinePanelProps {
+  calendar: CalendarState;
+  tasks: TasksState;
+  rascals: RascalsState;
+}
+
+function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
+  // Visible window. Could be config later; design uses 8 AM - 5:30 PM.
+  const startH = 8;
+  const endH = 17.5;
+  const hours = Array.from({ length: 10 }, (_, i) => startH + i);
+  const pct = (h: number) => ((h - startH) / (endH - startH)) * 100;
+
+  const today = new Date();
+  const isToday = (iso: string | null): boolean => {
+    if (!iso) return false;
+    const d = new Date(iso);
+    return (
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate()
+    );
+  };
+
+  // Live "now" marker — a red vertical line at the current time across all lanes.
+  // Re-renders with the dashboard's 1s clock tick, so it tracks the real time.
+  const nowH = today.getHours() + today.getMinutes() / 60;
+  const showNow = nowH >= startH && nowH <= endH;
+  const nowPct = pct(nowH);
+  const nowLabel = `${(today.getHours() % 12) || 12}:${String(today.getMinutes()).padStart(2, '0')}${today.getHours() < 12 ? 'a' : 'p'}`;
+
+  // Build calendar blocks for the You lane. Skip all-day events from the
+  // hour-axis; they show up in the lane label as a count instead.
+  const youBlocks: TimelineBlock[] = [];
+  let allDayCount = 0;
+  for (const ev of calendar.list) {
+    if (ev.allDay) {
+      allDayCount += 1;
+      continue;
+    }
+    const sh = isoToHour(ev.start);
+    const eh = isoToHour(ev.end);
+    if (sh == null || eh == null) continue;
+    if (eh <= startH || sh >= endH) continue;
+    youBlocks.push({
+      laneKey: 'you',
+      label: ev.summary || '(untitled event)',
+      hue: '#0EA5E9',
+      startH: Math.max(startH, sh),
+      endH: Math.min(endH, eh),
+      source: 'event',
+      href: ev.htmlLink ?? undefined,
+    });
+  }
+
+  // Per-rascal task blocks. Tasks have due_at but not start/end — render
+  // each as a 30-min marker at its due hour. Today only.
+  const taskByAgent: Record<string, TimelineBlock[]> = {};
+  for (const t of tasks.list) {
+    if (!t.assigned_agent) continue;
+    if (t.status === 'done') continue;
+    if (!isToday(t.due_at)) continue;
+    const sh = isoToHour(t.due_at!);
+    if (sh == null) continue;
+    if (sh < startH - 0.25 || sh > endH + 0.25) continue;
+    const lane = taskByAgent[t.assigned_agent] ?? [];
+    lane.push({
+      laneKey: t.assigned_agent,
+      label: t.title,
+      hue: agentHueFromDashboard(t.assigned_agent),
+      startH: Math.max(startH, sh - 0.25),
+      endH: Math.min(endH, sh + 0.25),
+      source: 'task',
+    });
+    taskByAgent[t.assigned_agent] = lane;
+  }
+
+  // Compose lane list: You (always), then each rascal that has tasks today.
+  // Sort agents with tasks alphabetically for stable order.
+  const agentLaneKeys = Object.keys(taskByAgent).sort();
+  type Lane = { title: string; agent?: string; blocks: TimelineBlock[]; allDay?: number };
+  const lanes: Lane[] = [
+    { title: 'You', blocks: youBlocks, allDay: allDayCount },
+    ...agentLaneKeys.map((handle) => {
+      const r = rascals.list.find((x) => x.handle === handle);
+      return {
+        title: r?.displayName ?? handle,
+        agent: handle,
+        blocks: taskByAgent[handle],
+      };
+    }),
+  ];
+
+  const loading = !calendar.loaded || !tasks.loaded;
+  const empty =
+    calendar.loaded && tasks.loaded && lanes.length === 1 && lanes[0].blocks.length === 0 && !allDayCount;
+
+  return (
+    <Panel
+      title="Today · Timeline (from Calendar)"
+      icon={<Clock size={14} />}
+      accent="linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)"
+      className="flex-1"
+      meta={
+        <span className="vs-mono text-[10px]" style={{ color: '#9AA8C2' }} data-testid="timeline-meta">
+          {loading
+            ? 'LOADING…'
+            : `${youBlocks.length} EVENTS · ${Object.values(taskByAgent).reduce((s, b) => s + b.length, 0)} TASKS`}
+        </span>
+      }
+    >
+      <div className="px-3.5 pt-2.5 pb-4 relative" data-testid="timeline-panel">
+        {empty && (
+          <div className="text-[12px] italic py-3" style={{ color: '#74849A' }}>
+            No events or tasks scheduled in the {startH}–{endH}:00 window today.
+          </div>
+        )}
+        {!empty && (
+          <>
+            <div className="flex relative h-4 ml-[110px]" style={{ color: '#74849A' }}>
+              {hours.map((h) => (
+                <div key={h} className="vs-mono flex-1 text-[10px]">
+                  {h}:00
+                </div>
+              ))}
+              {showNow && (
+                <div
+                  className="absolute -top-0.5 pointer-events-none"
+                  style={{ left: `${nowPct}%`, transform: 'translateX(-50%)', zIndex: 6 }}
+                  data-testid="timeline-now-label"
+                >
+                  <span
+                    className="vs-mono text-[8px] leading-none px-1 py-[1px] rounded whitespace-nowrap"
+                    style={{ background: '#FF5C5C', color: '#fff', boxShadow: '0 0 6px rgba(255,92,92,0.6)' }}
+                  >
+                    {nowLabel}
+                  </span>
+                </div>
+              )}
+            </div>
+            {lanes.map((lane) => {
+              const { packed, rowCount } = packBlocksIntoRows(lane.blocks);
+              const rowHeight = 22; // px per row of blocks
+              const rowGap = 3;
+              const trackHeight = rowCount * rowHeight + Math.max(0, rowCount - 1) * rowGap;
+              return (
+              <div
+                key={lane.agent ?? 'you'}
+                className="flex items-center gap-2.5 relative py-1.5"
+                data-timeline-lane={lane.agent ?? 'you'}
+                data-row-count={rowCount}
+              >
+                <div className="w-[100px] flex items-center gap-2 min-w-0 self-start pt-1">
+                  {lane.agent ? (
+                    <AgentAvatar handle={lane.agent} displayName={lane.title} size={18} />
+                  ) : (
+                    <div
+                      className="w-[18px] h-[18px] rounded-full"
+                      style={{ background: 'linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)' }}
+                    />
+                  )}
+                  <span className="text-[11px] truncate" style={{ color: '#F1F4FF' }}>
+                    {lane.title}
+                    {lane.allDay ? (
+                      <span className="vs-mono ml-1 text-[9px]" style={{ color: '#74849A' }}>
+                        +{lane.allDay}d
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+                <div
+                  className="flex-1 relative"
+                  style={{
+                    borderLeft: '1px solid rgba(216,228,240,0.95)',
+                    height: trackHeight,
+                  }}
+                >
+                  {hours.map((_, i) => (
+                    <div
+                      key={i}
+                      className="absolute top-0 bottom-0"
+                      style={{
+                        left: `${(i / hours.length) * 100}%`,
+                        borderLeft: '1px dashed rgba(14,165,233,0.12)',
+                      }}
+                    />
+                  ))}
+                  {showNow && (
+                    <div
+                      className="absolute top-0 bottom-0 pointer-events-none"
+                      style={{
+                        left: `${nowPct}%`,
+                        borderLeft: '2px solid #FF5C5C',
+                        boxShadow: '0 0 6px rgba(255,92,92,0.6)',
+                      }}
+                      data-testid="timeline-now-line"
+                    />
+                  )}
+                  {packed.map((b, bi) => {
+                    const Tag: React.ElementType = b.href ? 'a' : 'div';
+                    return (
+                    <Tag
+                      key={`${lane.agent ?? 'you'}-${bi}`}
+                      {...(b.href ? { href: b.href, target: '_blank', rel: 'noreferrer' } : {})}
+                      title={b.href ? `${b.label} — open in Google Calendar` : b.label}
+                      className="absolute flex items-center gap-1.5 rounded-md text-[10.5px] px-2 truncate"
+                      style={{
+                        top: b.row * (rowHeight + rowGap),
+                        height: rowHeight,
+                        left: `${pct(b.startH)}%`,
+                        width: `calc(${Math.max(2, pct(b.endH) - pct(b.startH))}% - 2px)`,
+                        background: `linear-gradient(135deg, ${b.hue}44, ${b.hue}22)`,
+                        border: `1px solid ${b.hue}88`,
+                        color: '#F1F4FF',
+                        boxShadow: `inset 0 0 12px ${b.hue}22`,
+                        cursor: b.href ? 'pointer' : 'default',
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <span
+                        className="w-1 h-1 rounded-full flex-shrink-0"
+                        style={{ background: b.hue, boxShadow: `0 0 6px ${b.hue}` }}
+                      />
+                      <span className="truncate">{b.label}</span>
+                    </Tag>
+                    );
+                  })}
+                </div>
+              </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+/** Pull rascal hue without re-importing — uses the public helper from AgentAvatar. */
+function agentHueFromDashboard(handle: string): string {
+  // Keep this small to avoid a full import cycle; the hue-cycle here mirrors
+  // the THEMES table in components/AgentAvatar.tsx for the 10 known rascals.
+  // Falls back to a neutral grey for unknowns.
+  const map: Record<string, string> = {
+    alfalfa: '#7C3CFF', buckwheat: '#FF8A3D', butch: '#ff5c5c',
+    darla: '#FF4D8D', froggy: '#20B26B', petey: '#a07060',
+    porky: '#ff8c5c', spanky: '#0EA5E9', stymie: '#d6b6ff',
+    wheezer: '#9d8bff',
+  };
+  return map[handle] ?? '#9AA8C2';
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Page
+// ──────────────────────────────────────────────────────────────────────
+
+function getDisplayName(): string {
+  try {
+    const raw = localStorage.getItem('boss_user');
+    if (!raw) return 'there';
+    const first = (JSON.parse(raw).displayName ?? 'there').split(/\s+/)[0];
+    return first || 'there';
+  } catch {
+    return 'there';
+  }
+}
+
+function greetingFor(d: Date): string {
+  const h = d.getHours();
+  if (h < 5) return 'Burning the candle';
+  if (h < 12) return 'Morning';
+  if (h < 17) return 'Afternoon';
+  if (h < 21) return 'Evening';
+  return 'Late';
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Customizable widget layout — Kane: "let them choose which widgets/tiles
+// show… a pop-up gallery to pick and choose." Selection persists per browser.
+// ──────────────────────────────────────────────────────────────────────
+
+type WidgetId = 'agents' | 'tasks' | 'activity' | 'inbox' | 'slack' | 'slack_sales' | 'social_stats' | 'social_feed' | 'linkedin' | 'linkedin_posts' | 'email_drafts' | 'whatsapp' | 'timeline' | 'finance' | 'crm' | 'revenue' | 'email' | 'health' | 'csat';
+
+// Brand-new widgets that must be force-added to existing saved layouts (which
+// predate them) on load — see useDashWidgets / useDashOrder migration below.
+const NEW_WIDGETS: WidgetId[] = ['social_stats', 'social_feed', 'linkedin', 'linkedin_posts', 'email_drafts'];
+
+const WIDGET_CATALOG: { id: WidgetId; label: string; blurb: string; span?: 1 | 2 | 3 }[] = [
+  { id: 'finance',  label: 'Financial Snapshot', blurb: 'Cash, revenue, AR + flags (CFO agent)', span: 3 },
+  { id: 'crm',      label: 'CRM / Sales',        blurb: 'Pipeline, contacts, conversion (Sales Review)', span: 2 },
+  { id: 'agents',   label: 'Employee Agents',  blurb: 'Your AI staff and their live status', span: 2 },
+  { id: 'tasks',    label: 'Task Board',       blurb: 'Today / overdue / tomorrow at a glance', span: 2 },
+  { id: 'inbox',    label: 'Inbox',            blurb: 'What the email agent flagged for you', span: 2 },
+  { id: 'revenue',  label: 'Revenue',          blurb: 'This month vs last (live Stripe)' },
+  { id: 'email',    label: 'Email Agent',      blurb: 'Processed / drafts / attention today' },
+  { id: 'health',   label: 'Ops Health',       blurb: 'Live score: agents + tasks + attention' },
+  { id: 'csat',     label: 'Client Satisfaction', blurb: 'Trustpilot / Google review rating' },
+  { id: 'activity', label: 'Live Activity',    blurb: 'Recent work your agents completed', span: 2 },
+  { id: 'slack',    label: 'Slack @ Mentions', blurb: '@-mentions and DMs that need a reply' },
+  { id: 'slack_sales', label: 'Event Stats',   blurb: 'Attendance funnels from #sales-event-stats', span: 2 },
+  { id: 'social_stats', label: 'Social',       blurb: 'FB + IG analytics' },
+  { id: 'social_feed', label: 'Social Feed',   blurb: 'Posts, comments, reactions + composer', span: 2 },
+  { id: 'linkedin', label: 'LinkedIn',         blurb: 'Compose + publish posts to LinkedIn', span: 2 },
+  { id: 'linkedin_posts', label: 'LinkedIn Posts', blurb: 'Recent posts — view, edit, delete', span: 2 },
+  { id: 'email_drafts', label: 'Email Drafts',  blurb: 'Rate the agent\'s reply drafts 👍/👎 — it learns', span: 2 },
+  { id: 'whatsapp', label: 'WhatsApp',         blurb: 'Unread WhatsApp conversations' },
+  { id: 'timeline', label: "Today's Timeline", blurb: 'Your calendar, stacked by hour', span: 3 },
+];
+
+const DEFAULT_WIDGETS: WidgetId[] = ['finance', 'crm', 'agents', 'tasks', 'health', 'revenue', 'slack_sales', 'social_stats', 'social_feed', 'linkedin', 'linkedin_posts', 'email_drafts', 'inbox', 'email', 'slack', 'whatsapp', 'activity', 'csat', 'timeline'];
+const WIDGETS_KEY = 'boss_dash_widgets_v2';
+
+function useDashWidgets(): { enabled: Set<WidgetId>; toggle: (id: WidgetId) => void } {
+  // Migration (see migratedEnabled): drop ids no longer in the catalog (e.g.
+  // the retired 'meta'/'facebook' tiles) and force-add the brand-new tiles so
+  // existing users actually see them.
+  const [enabled, setEnabled] = useState<Set<WidgetId>>(migratedEnabled);
+  const toggle = (id: WidgetId) =>
+    setEnabled((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      try { localStorage.setItem(WIDGETS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+  return { enabled, toggle };
+}
+
+function WidgetGallery({ enabled, toggle, onClose }: {
+  enabled: Set<WidgetId>;
+  toggle: (id: WidgetId) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-6" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="relative w-full max-w-3xl rounded-xl p-5 shadow-xl flex flex-col max-h-[85vh]"
+        style={{ background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`, border: `1px solid ${DASH.border}`, color: DASH.text }}
+      >
+        <header className="flex items-start justify-between mb-4 shrink-0">
+          <div>
+            <div className="vs-mono text-[10px] uppercase tracking-[0.22em]" style={{ color: DASH.textMuted }}>Customize</div>
+            <h2 className="text-lg font-semibold mt-1 flex items-center gap-2">
+              <LayoutGrid className="w-4 h-4" style={{ color: DASH.violet }} /> Choose your widgets
+            </h2>
+            <p className="text-[12px] mt-1" style={{ color: DASH.textMuted }}>Pick which tiles show on your dashboard. Saved on this browser.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" style={{ color: DASH.textMuted }}><X className="w-4 h-4" /></button>
+        </header>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 overflow-y-auto min-h-0 pr-1 -mr-1">
+          {WIDGET_CATALOG.map((w) => {
+            const on = enabled.has(w.id);
+            return (
+              <button
+                key={w.id}
+                type="button"
+                onClick={() => toggle(w.id)}
+                className="h-full w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left"
+                style={{ background: on ? DASH.panel3 : DASH.panel2, border: `1px solid ${on ? DASH.violet : DASH.border}` }}
+              >
+                <div
+                  className="h-5 w-5 rounded flex items-center justify-center shrink-0"
+                  style={{ background: on ? DASH.violet : 'transparent', border: `1px solid ${on ? DASH.violet : DASH.textMuted}` }}
+                >
+                  {on && <Check className="w-3.5 h-3.5" style={{ color: '#fff' }} />}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[13.5px] font-medium">{w.label}</div>
+                  <div className="text-[11.5px] truncate" style={{ color: DASH.textMuted }}>{w.blurb}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Trust/health gauge (top-right of the title bar). Demo value on Vasari;
+// Kane's wires to real data (Keap/Katalyst) via Spanky.
+// ===== Revenue (live Stripe) + Email digest — now first-class grid tiles. =====
+interface RevenueData {
+  currency: string;
+  thisMonth: number;
+  lastMonth: number;
+  ytd: number;
+  year: number;
+  pctChange: number | null;
+  series: { day: number; amount: number }[];
+  recent: { amount: number; description: string; created: number }[];
+}
+function useRevenue() {
+  const { data, error } = usePolledJson<RevenueData>('api/revenue/overview');
+  return { data, error };
+}
+function money(n: number): string { return '$' + Math.round(n).toLocaleString('en-US'); }
+function Sparkline({ points, color = '#7C3CFF' }: { points: number[]; color?: string }) {
+  if (!points.length) return null;
+  const max = Math.max(...points, 1);
+  const w = 280, h = 54;
+  const step = points.length > 1 ? w / (points.length - 1) : w;
+  const line = points.map((p, i) => `${(i * step).toFixed(1)},${(h - (p / max) * h).toFixed(1)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: h }} preserveAspectRatio="none">
+      <defs><linearGradient id="rev-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.35" /><stop offset="100%" stopColor={color} stopOpacity="0" /></linearGradient></defs>
+      <polygon points={`0,${h} ${line} ${w},${h}`} fill="url(#rev-fill)" />
+      <polyline points={line} fill="none" stroke={color} strokeWidth="2" />
+    </svg>
+  );
+}
+function RailCard({ title, meta, children }: { title: string; meta?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="rounded-[14px] p-3.5 h-full overflow-y-auto" style={{ background: DASH.panel2, border: `1px solid ${DASH.border}` }}>
+      <div className="flex items-center justify-between mb-2.5">
+        <div className="vs-mono text-[9px] tracking-[0.2em] uppercase" style={{ color: '#74849A' }}>{title}</div>
+        {meta}
+      </div>
+      {children}
+    </div>
+  );
+}
+// PriorityScore + Client Satisfaction removed — fabricated (no real data source).
+function RevenueOverview({ data, error }: { data: RevenueData | null; error: boolean }) {
+  const pct = data?.pctChange ?? null;
+  return (
+    <RailCard title="Revenue Overview" meta={<span className="text-[10px]" style={{ color: '#9AA8C2' }}>{data ? `YTD ${data.year}` : 'Year to Date'}</span>}>
+      {error ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Stripe unavailable</div>
+      ) : !data ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Loading…</div>
+      ) : (
+        <>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <div className="text-[24px] font-semibold" style={{ color: '#F1F4FF' }}>{money(data.ytd)}</div>
+            <div className="text-[11px]" style={{ color: '#9AA8C2' }}>YTD · Stripe</div>
+          </div>
+          <div className="flex items-baseline gap-2 flex-wrap mt-0.5">
+            <div className="text-[12px] font-medium" style={{ color: '#C3CCE6' }}>{money(data.thisMonth)} this month</div>
+            {pct != null && (
+              <div className="text-[11px] font-medium" style={{ color: pct >= 0 ? '#20B26B' : '#FF5C5C' }}>
+                {pct >= 0 ? '↑' : '↓'} {Math.abs(pct)}% vs last
+              </div>
+            )}
+          </div>
+          <div className="mt-2"><Sparkline points={data.series.map((s) => s.amount)} /></div>
+        </>
+      )}
+    </RailCard>
+  );
+}
+// ── Ops-Health gauge — the real "Priority Score" (agent reliability + tasks + attention) ──
+interface OpsHealth {
+  score: number;
+  label: string;
+  components: {
+    agents: { pct: number; ok: number; total: number };
+    tasks: { pct: number; open: number; overdue: number };
+    attention: { pct: number; open: number };
+  };
+}
+function useOpsHealth() {
+  const { data, error } = usePolledJson<OpsHealth>('api/ops/health');
+  return { data, error };
+}
+function HealthGauge({ value }: { value: number }) {
+  const r = 30;
+  const c = 2 * Math.PI * r;
+  const dash = (value / 100) * c;
+  const hue = value >= 90 ? '#20B26B' : value >= 75 ? '#0EA5E9' : value >= 60 ? '#E5A50A' : '#FF5C5C';
+  return (
+    <div className="relative shrink-0 grid place-items-center" style={{ width: 92, height: 92 }}>
+      <svg width="92" height="92" viewBox="0 0 92 92" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx="46" cy="46" r={r} fill="none" stroke="#232A4D" strokeWidth="7" />
+        <circle cx="46" cy="46" r={r} fill="none" stroke={hue} strokeWidth="7" strokeLinecap="round" strokeDasharray={`${dash} ${c}`} />
+      </svg>
+      <div className="absolute text-[22px] font-semibold" style={{ color: '#F1F4FF' }}>{value}</div>
+    </div>
+  );
+}
+function OpsHealthWidget() {
+  const { data, error } = useOpsHealth();
+  return (
+    <RailCard title="Ops Health Score" meta={<span className="text-[10px]" style={{ color: '#9AA8C2' }}>{data?.label ?? ''}</span>}>
+      {error ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Unavailable</div>
+      ) : !data ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Loading…</div>
+      ) : (
+        <div className="flex flex-col items-center gap-1.5">
+          <HealthGauge value={data.score} />
+          <div className="w-full space-y-1.5 mt-1">
+            {[
+              { label: 'Agent reliability (24h)', v: `${data.components.agents.pct}%`, sub: `${data.components.agents.ok}/${data.components.agents.total}` },
+              { label: 'Tasks on track', v: `${data.components.tasks.pct}%`, sub: `${data.components.tasks.overdue} late` },
+              { label: 'Attention clear', v: `${data.components.attention.pct}%`, sub: `${data.components.attention.open} open` },
+            ].map((row) => (
+              <div key={row.label} className="flex items-center justify-between text-[11px]">
+                <span style={{ color: '#C3CCE6' }}>{row.label}</span>
+                <span style={{ color: '#F1F4FF' }}>{row.v} <span className="text-[9.5px]" style={{ color: '#74849A' }}>{row.sub}</span></span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </RailCard>
+  );
+}
+
+// ── Client Satisfaction — real reviews (Trustpilot/Google) via the xAI snapshot ──
+interface ReviewsSnap {
+  overall_rating: number | string | null;
+  total_reviews: number;
+  sources: { name: string; rating: number | null; count: number }[];
+  summary: string | null;
+  created_at: string | null;
+}
+function useReviews() {
+  const { data, error } = usePolledJson<ReviewsSnap>('api/reviews/snapshot');
+  return { data, error };
+}
+function Stars({ rating }: { rating: number }) {
+  const full = Math.max(0, Math.min(5, Math.round(rating)));
+  return (
+    <span style={{ letterSpacing: '1px' }}>
+      <span style={{ color: '#E5A50A' }}>{'★'.repeat(full)}</span>
+      <span style={{ color: '#3a4366' }}>{'★'.repeat(5 - full)}</span>
+    </span>
+  );
+}
+function CsatWidget() {
+  const { data, error } = useReviews();
+  const rating = data && data.overall_rating != null ? Number(data.overall_rating) : null;
+  return (
+    <RailCard title="Client Satisfaction" meta={<span className="text-[10px]" style={{ color: '#9AA8C2' }}>Reviews</span>}>
+      {error ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Unavailable</div>
+      ) : !data ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Loading…</div>
+      ) : rating == null ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Awaiting reviews</div>
+      ) : (
+        <>
+          <div className="flex items-baseline gap-2">
+            <div className="text-[24px] font-semibold" style={{ color: '#F1F4FF' }}>{rating.toFixed(1)}<span className="text-[13px]" style={{ color: '#9AA8C2' }}>/5</span></div>
+            <div className="text-[12px]"><Stars rating={rating} /></div>
+          </div>
+          <div className="text-[10.5px] mt-0.5" style={{ color: '#74849A' }}>{data.total_reviews} review{data.total_reviews !== 1 ? 's' : ''} total</div>
+          <div className="mt-2 space-y-1">
+            {(data.sources ?? []).filter((s) => s.count > 0).map((s) => (
+              <div key={s.name} className="flex items-center justify-between text-[11px]">
+                <span style={{ color: '#C3CCE6' }}>{s.name}</span>
+                <span style={{ color: '#F1F4FF' }}>{s.rating != null ? `${Number(s.rating).toFixed(1)}★` : '—'} <span className="text-[9.5px]" style={{ color: '#74849A' }}>({s.count})</span></span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </RailCard>
+  );
+}
+
+// RecentActivityRail removed — it padded 3 real Stripe payments with fake rows.
+// The real cross-agent activity feed is the LiveActivity panel.
+// ── Agent-fed cards (real data from the CFO + Email agents) ─────────────────────
+function fmtMoney(n: number | null | undefined): string {
+  if (n == null) return '—';
+  return (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString('en-US');
+}
+
+interface FinanceSnap {
+  cash_available?: number | null; net_worth?: number | null; month_net?: number | null;
+  revenue_mtd?: number | null; stripe_available?: number | null; stripe_pending?: number | null;
+  ar_open_count?: number | null; ar_open_total?: number | null; bounced_payments?: number | null;
+  flags?: string[]; bottom_line?: string | null; created_at?: string | null;
+}
+function useFinanceSnapshot() {
+  const { data, error } = usePolledJson<FinanceSnap>('api/finance/snapshot');
+  return { snap: data, error };
+}
+// FinanceCard removed — replaced by FinancePanel (larger main-grid widget).
+
+interface EmailDigestData {
+  totalProcessed?: number; totalAllTime?: number; draftsCreated?: number; needsAttention?: number;
+  categories?: Record<string, number>;
+}
+function useEmailDigest() {
+  const { data, error } = usePolledJson<EmailDigestData>('api/email/digest');
+  return { d: data, error };
+}
+function EmailStat({ value, label }: { value: number; label: string }) {
+  return (
+    <div className="rounded-lg py-1.5 text-center" style={{ background: 'rgba(124,60,255,0.06)' }}>
+      <div className="text-[17px] font-semibold" style={{ color: '#F1F4FF' }}>{value}</div>
+      <div className="vs-mono text-[8.5px] uppercase tracking-wide" style={{ color: '#74849A' }}>{label}</div>
+    </div>
+  );
+}
+function EmailStatsCard({ d, error }: { d: EmailDigestData | null; error: boolean }) {
+  const catEntries = Object.entries(d?.categories ?? {}).slice(0, 4);
+  return (
+    <RailCard title="Email Agent" meta={<span className="text-[10px]" style={{ color: '#9AA8C2' }}>Live</span>}>
+      {error ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Unavailable</div>
+      ) : !d ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Loading…</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <EmailStat value={d.totalProcessed ?? 0} label="New today" />
+            <EmailStat value={d.totalAllTime ?? 0} label="Since start" />
+            <EmailStat value={d.needsAttention ?? 0} label="Need attn" />
+            <EmailStat value={d.draftsCreated ?? 0} label="Drafts" />
+          </div>
+          {catEntries.length > 0 && (
+            <div className="space-y-1">
+              {catEntries.map(([c, n]) => (
+                <div key={c} className="flex items-center justify-between text-[11px]">
+                  <span style={{ color: '#C3CCE6' }}>{c}</span><span style={{ color: '#F1F4FF' }}>{n}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </RailCard>
+  );
+}
+
+interface CrmSnap {
+  total_contacts?: number | null; new_contacts_month?: number | null;
+  open_opportunities?: number | null; pipeline_value?: number | null;
+  won_month?: number | null; won_value_month?: number | null;
+  conversion_rate?: number | null;
+  by_stage?: Array<{ stage?: string; count?: number; value?: number }>;
+  flags?: string[]; bottom_line?: string | null; created_at?: string | null;
+}
+function useCrmSnapshot() {
+  const { data, error } = usePolledJson<CrmSnap>('api/crm/snapshot');
+  return { snap: data, error };
+}
+// CrmCard removed — replaced by CrmPanel (larger main-grid widget).
+
+// Revenue + Email are now first-class grid widgets (self-contained, self-fetching).
+function RevenueWidget() {
+  const { data, error } = useRevenue();
+  return <RevenueOverview data={data} error={error} />;
+}
+function EmailWidget() {
+  const { d, error } = useEmailDigest();
+  return <EmailStatsCard d={d} error={error} />;
+}
+
+// ── Larger main-grid panels for the agent data (Finance + CRM) ──────────────────
+function BigStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-xl py-2.5 text-center" style={{ background: 'rgba(124,60,255,0.06)', border: '1px solid rgba(124,60,255,0.12)' }}>
+      <div className="text-[20px] font-semibold leading-tight" style={{ color: '#F1F4FF' }}>{value}</div>
+      <div className="vs-mono text-[9px] uppercase tracking-wide mt-0.5" style={{ color: '#74849A' }}>{label}</div>
+      {sub && <div className="text-[10px] mt-0.5" style={{ color: '#9AA8C2' }}>{sub}</div>}
+    </div>
+  );
+}
+
+interface FinTxnT { transaction_id: string; account: string | null; date: string | null; amount: number; description: string; category: string | null; label: string | null; note: string | null; }
+
+function FinanceTxns() {
+  const [refresh, setRefresh] = useState(0);
+  const { data, loaded } = usePolledJson<{ transactions: FinTxnT[] }>(`api/finance/transactions?limit=10&v=${refresh}`, 60_000);
+  const txns = data?.transactions ?? [];
+  const [editId, setEditId] = useState<string | null>(null);
+  const [labelText, setLabelText] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function save(t: FinTxnT) {
+    if (busy) return; setBusy(t.transaction_id);
+    try {
+      const token = localStorage.getItem('boss_token') ?? '';
+      await fetch('api/finance/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ transaction_id: t.transaction_id, account: t.account, date: t.date, amount: t.amount, description: t.description, label: labelText.trim() }),
+      });
+      setEditId(null); setLabelText(''); setRefresh((n) => n + 1);
+    } finally { setBusy(null); }
+  }
+
+  if (loaded && txns.length === 0) return null;
+  return (
+    <div className="mt-3 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+      <div className="text-[10px] vs-mono mb-1.5" style={{ color: '#74849A' }}>RECENT TRANSACTIONS · tag any to teach the CFO</div>
+      <div className="space-y-1.5 overflow-y-auto" style={{ maxHeight: 200 }}>
+        {txns.map((t) => (
+          <div key={t.transaction_id} className="text-[11px]">
+            <div className="flex items-center gap-2">
+              <span className="vs-mono" style={{ color: t.amount >= 0 ? '#20B26B' : '#9AA8C2', minWidth: 62 }}>{fmtMoney(t.amount)}</span>
+              <span className="truncate flex-1" style={{ color: '#C3CCE6' }}>{t.description || '—'}</span>
+              <span className="vs-mono text-[9px]" style={{ color: '#74849A' }}>{t.date ?? ''}</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5" style={{ paddingLeft: 70 }}>
+              {editId === t.transaction_id ? (
+                <>
+                  <input autoFocus value={labelText} onChange={(e) => setLabelText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') save(t); if (e.key === 'Escape') { setEditId(null); setLabelText(''); } }}
+                    placeholder="your label, e.g. Industry Rockstar June"
+                    className="flex-1 bg-transparent text-[11px] px-1 py-0.5 rounded" style={{ border: '1px solid rgba(255,255,255,0.12)', color: '#F1F4FF' }} />
+                  <button onClick={() => save(t)} disabled={busy === t.transaction_id} style={{ color: '#20B26B' }} className="text-[11px]">Save</button>
+                  <button onClick={() => { setEditId(null); setLabelText(''); }} style={{ color: '#74849A' }} className="text-[11px]">×</button>
+                </>
+              ) : t.label ? (
+                <button onClick={() => { setEditId(t.transaction_id); setLabelText(t.label ?? ''); }}
+                  className="vs-mono text-[9px] px-1 rounded" style={{ background: 'rgba(60,200,140,0.15)', color: '#7CE0B0' }}>🏷 {t.label}</button>
+              ) : (
+                <button onClick={() => { setEditId(t.transaction_id); setLabelText(''); }} className="text-[10px]" style={{ color: '#74849A' }}>+ tag</button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FinancePanel() {
+  const { snap, error } = useFinanceSnapshot();
+  const has = snap && (snap.cash_available != null || snap.revenue_mtd != null || snap.stripe_available != null || snap.bottom_line != null);
+  return (
+    <Panel title="Financial Snapshot" icon={<Wallet size={14} />} accent="linear-gradient(135deg, #20B26B, #0EA5E9)"
+      meta={<span className="vs-mono text-[10px]" style={{ color: '#9AA8C2' }}>CFO AGENT</span>}>
+      <div className="px-3.5 py-3 overflow-y-auto h-full">
+        {error || !snap ? (
+          <div className="text-[12px]" style={{ color: '#74849A' }}>{error ? 'Unavailable' : 'Loading…'}</div>
+        ) : !has ? (
+          <div className="text-[12px]" style={{ color: '#74849A' }}>No snapshot yet — the CFO agent runs daily.</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-2.5 mb-3">
+              <BigStat label="Cash" value={fmtMoney(snap.cash_available)} />
+              <BigStat label={snap.revenue_mtd != null ? 'Revenue MTD' : 'Stripe Avail'} value={fmtMoney(snap.revenue_mtd ?? snap.stripe_available)} />
+              <BigStat label="AR Open" value={fmtMoney(snap.ar_open_total)} sub={snap.ar_open_count != null ? `${snap.ar_open_count} open` : undefined} />
+            </div>
+            {snap.flags && snap.flags.length > 0 && (
+              <div className="space-y-1 mb-2">
+                {snap.flags.slice(0, 4).map((f, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-[12px]" style={{ color: '#FFB020' }}><span>●</span>{f}</div>
+                ))}
+              </div>
+            )}
+            {snap.bottom_line && <div className="text-[12px] leading-relaxed" style={{ color: '#9AA8C2' }}>{snap.bottom_line}</div>}
+          </>
+        )}
+        <FinanceTxns />
+      </div>
+    </Panel>
+  );
+}
+
+function CrmPanel() {
+  const { snap, error } = useCrmSnapshot();
+  const has = snap && (snap.total_contacts != null || (snap.by_stage != null && snap.by_stage.length > 0) || snap.bottom_line != null);
+  const stages = snap?.by_stage ?? [];
+  const maxCount = Math.max(1, ...stages.map((s) => s.count ?? 0));
+  return (
+    <Panel title="CRM / Sales Pipeline" icon={<Users size={14} />} accent="linear-gradient(135deg, #7C3CFF, #0EA5E9)"
+      meta={<span className="vs-mono text-[10px]" style={{ color: '#9AA8C2' }}>SALES REVIEW</span>}>
+      <div className="px-3.5 py-3 overflow-y-auto h-full">
+        {error || !snap ? (
+          <div className="text-[12px]" style={{ color: '#74849A' }}>{error ? 'Unavailable' : 'Loading…'}</div>
+        ) : !has ? (
+          <div className="text-[12px]" style={{ color: '#74849A' }}>No snapshot yet — Sales Review runs daily.</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-2.5 mb-3">
+              <BigStat label="Contacts" value={String(snap.total_contacts ?? 0)} sub={snap.new_contacts_month != null ? `+${snap.new_contacts_month} mo` : undefined} />
+              <BigStat label="Open Deals" value={String(snap.open_opportunities ?? 0)} />
+              <BigStat label="Pipeline" value={fmtMoney(snap.pipeline_value)} />
+            </div>
+            {stages.length > 0 ? (
+              <div className="space-y-2 mb-2">
+                {stages.slice(0, 7).map((s, i) => (
+                  <div key={i}>
+                    <div className="flex justify-between text-[11px] mb-0.5">
+                      <span style={{ color: '#C3CCE6' }}>{s.stage ?? '—'}</span>
+                      <span style={{ color: '#F1F4FF' }}>{s.count ?? 0}{s.value ? ` · ${fmtMoney(s.value)}` : ''}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                      <div className="h-1.5 rounded-full" style={{ width: `${Math.round(((s.count ?? 0) / maxCount) * 100)}%`, background: 'linear-gradient(90deg, #7C3CFF, #0EA5E9)' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-[12px] mb-2" style={{ color: '#74849A' }}>No open opportunities — leads aren't in the pipeline yet.</div>
+            )}
+            {snap.flags && snap.flags.length > 0 && (
+              <div className="space-y-1 mb-2">
+                {snap.flags.slice(0, 3).map((f, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-[12px]" style={{ color: '#FFB020' }}><span>●</span>{f}</div>
+                ))}
+              </div>
+            )}
+            {snap.bottom_line && <div className="text-[12px] leading-relaxed" style={{ color: '#9AA8C2' }}>{snap.bottom_line}</div>}
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+const ORDER_KEY = 'boss_dash_order_v2';
+
+/**
+ * Recompute the enabled-widget Set from storage with the same migration as
+ * useDashWidgets (drop retired ids, force-add the new ones). The order hook
+ * needs this so it can append any newly-enabled id missing from a saved order.
+ */
+function migratedEnabled(): Set<WidgetId> {
+  const VALID = new Set<WidgetId>(WIDGET_CATALOG.map((w) => w.id));
+  try {
+    const raw = localStorage.getItem(WIDGETS_KEY);
+    if (raw) {
+      const saved = (JSON.parse(raw) as WidgetId[]).filter((id) => VALID.has(id));
+      const next = new Set<WidgetId>(saved);
+      for (const id of NEW_WIDGETS) next.add(id);
+      return next;
+    }
+  } catch { /* ignore */ }
+  return new Set(DEFAULT_WIDGETS);
+}
+
+function useDashOrder(): { order: WidgetId[]; reorder: (from: WidgetId, to: WidgetId) => void } {
+  const [order, setOrder] = useState<WidgetId[]>(() => {
+    // Migration: keep only ids still in the catalog (drops retired tiles), then
+    // append any enabled id missing from the saved order so the new social
+    // tiles surface for existing users. No saved order → catalog order.
+    const VALID = new Set<WidgetId>(WIDGET_CATALOG.map((w) => w.id));
+    try {
+      const raw = localStorage.getItem(ORDER_KEY);
+      if (raw) {
+        const saved = (JSON.parse(raw) as WidgetId[]).filter((id) => VALID.has(id));
+        const present = new Set(saved);
+        for (const id of migratedEnabled()) if (!present.has(id)) saved.push(id);
+        return saved;
+      }
+    } catch { /* ignore */ }
+    return WIDGET_CATALOG.map((w) => w.id);
+  });
+  const reorder = (from: WidgetId, to: WidgetId) => setOrder((prev) => {
+    const ids = WIDGET_CATALOG.map((w) => w.id).sort((a, b) => {
+      const ia = prev.indexOf(a), ib = prev.indexOf(b);
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    });
+    const fi = ids.indexOf(from), ti = ids.indexOf(to);
+    if (fi === -1 || ti === -1 || fi === ti) return prev;
+    ids.splice(ti, 0, ids.splice(fi, 1)[0]);
+    try { localStorage.setItem(ORDER_KEY, JSON.stringify(ids)); } catch { /* ignore */ }
+    return ids;
+  });
+  return { order, reorder };
+}
+
+export default function Dashboard() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const i = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(i);
+  }, []);
+
+  const rascalsState = useRascals();
+  const tasksState = useTasks();
+  const recentActivityState = useRecentActivity();
+  const automationsState = useAutomations();
+  const inboxState = useInbox();
+  const slackAttentionState = useSlackAttention();
+  const calendarState = useCalendarToday();
+  const whatsappState = useWhatsApp();
+  const auth = useAuthHealth();
+  const { enabled: enabledWidgets, toggle: toggleWidget } = useDashWidgets();
+  const { order, reorder } = useDashOrder();
+  const [dragId, setDragId] = useState<WidgetId | null>(null);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const empAgents = useEmployeeAgents();
+  const automationsTotal =
+    (automationsState.data?.n8n.status?.total ?? 0) +
+    (automationsState.data?.make.status?.total ?? 0);
+  const automationsActive =
+    (automationsState.data?.n8n.status?.active ?? 0) +
+    (automationsState.data?.make.status?.active ?? 0);
+  const enabledRascals = rascalsState.list.filter((r) => r.enabled).length;
+
+  // KPIs derived from the live tasks list.
+  const tasksToday = useMemo(() => {
+    if (!tasksState.loaded) return null;
+    const today = new Date();
+    return tasksState.list.filter((t) => {
+      if (t.status === 'done') return false;
+      if (!t.due_at) return false;
+      const d = new Date(t.due_at);
+      return (
+        d.getFullYear() === today.getFullYear() &&
+        d.getMonth() === today.getMonth() &&
+        d.getDate() === today.getDate()
+      );
+    }).length;
+  }, [tasksState]);
+
+  const blockedCount = useMemo(
+    () => tasksState.list.filter((t) => t.status === 'blocked').length,
+    [tasksState],
+  );
+
+  // Calendar stat for the top strip (Kane: non-builders want their calendar, not automations).
+  const calendarStat = useMemo(() => {
+    if (!calendarState.loaded) return { value: '—', sub: 'loading calendar…' };
+    const total = calendarState.list.length;
+    const nowMs = Date.now();
+    const next = [...calendarState.list]
+      .filter((e) => e.start && new Date(e.start).getTime() >= nowMs)
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())[0];
+    const sub = total === 0
+      ? 'no events today'
+      : next
+        ? `next: ${(next.summary || 'event').slice(0, 22)} ${new Date(next.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+        : `${total} today · all done`;
+    return { value: String(total), sub };
+  }, [calendarState]);
+
+  // Which tile each widget id renders. Filtered by the user's gallery choices.
+  const widgetNode: Record<WidgetId, React.ReactNode> = {
+    agents:   <AgentRoster />,
+    tasks:    <KanbanPeek state={tasksState} />,
+    activity: <LiveActivity state={recentActivityState} />,
+    inbox:    <InboxPanel state={inboxState} />,
+    slack:    <SlackAttentionPanel state={slackAttentionState} />,
+    slack_sales: <SalesPanel />,
+    social_stats: <SocialStatsPanel />,
+    social_feed: <SocialFeedPanel />,
+    linkedin: <LinkedInPanel />,
+    linkedin_posts: <LinkedInPostsPanel />,
+    email_drafts: <EmailDraftsPanel />,
+    whatsapp: <WhatsAppPanel state={whatsappState} />,
+    timeline: <TimelinePanel calendar={calendarState} tasks={tasksState} rascals={rascalsState} />,
+    finance:  <FinancePanel />,
+    crm:      <CrmPanel />,
+    revenue:  <RevenueWidget />,
+    email:    <EmailWidget />,
+    health:   <OpsHealthWidget />,
+    csat:     <CsatWidget />,
+  };
+  const orderRank = (id: WidgetId) => { const i = order.indexOf(id); return i === -1 ? 999 : i; };
+  const activeWidgets = WIDGET_CATALOG.filter((w) => enabledWidgets.has(w.id)).sort((a, b) => orderRank(a.id) - orderRank(b.id));
+
+  const displayName = useMemo(getDisplayName, []);
+  const dateLabel = useMemo(
+    () =>
+      now
+        .toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+        .toUpperCase(),
+    [now],
+  );
+  const timeLabel = useMemo(() => now.toLocaleTimeString('en-US', { hour12: false }), [now]);
+  const greeting = useMemo(() => greetingFor(now), [now]);
+
+  return (
+    <div
+      data-testid="dashboard-v2"
+      className="relative h-full overflow-auto p-4"
+      style={{ background: 'var(--v-base)' }}
+    >
+      {auth.expired && (
+        <div
+          data-testid="auth-expired-banner"
+          role="alert"
+          className="mb-3 rounded-lg px-4 py-2.5 flex items-center gap-3"
+          style={{
+            background: 'linear-gradient(90deg, rgba(255,184,107,0.18), rgba(255,92,200,0.12))',
+            border: '1px solid rgba(255,184,107,0.45)',
+            color: '#ffd9b0',
+          }}
+        >
+          <span
+            aria-hidden
+            className="w-2 h-2 rounded-full flex-shrink-0"
+            style={{ background: '#FF8A3D', boxShadow: '0 0 8px #FF8A3D' }}
+          />
+          <span className="text-[12.5px] flex-1">
+            Your session has expired — every panel below is showing empty data because the API is rejecting requests as unauthenticated. Sign out and sign back in to refresh.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              try { localStorage.removeItem('boss_token'); } catch { /* ignore */ }
+              window.location.assign('/login');
+            }}
+            className="text-[11.5px] font-semibold px-3 py-1 rounded-md"
+            style={{
+              background: 'rgba(255,184,107,0.25)',
+              border: '1px solid rgba(255,184,107,0.6)',
+              color: '#ffe0c0',
+            }}
+          >
+            Sign in again
+          </button>
+        </div>
+      )}
+
+      {/* Everything below is scaled up ~18% for legibility (Kane: bigger fonts). */}
+      <div style={{ zoom: 1.18 }}>
+      {/* Title bar */}
+      <div className="flex items-end gap-4 mb-4">
+        <div className="flex-1">
+          <div
+            className="vs-mono text-[10px] tracking-[0.26em]"
+            style={{ color: '#74849A' }}
+          >
+            COMMAND CENTER / {dateLabel}
+          </div>
+          <div className="flex items-baseline gap-3.5 mt-1.5">
+            <h1
+              className="m-0 text-[28px] font-semibold"
+              style={{ letterSpacing: '-0.01em' }}
+            >
+              {greeting},{' '}
+              <span
+                style={{
+                  background: 'linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)',
+                  WebkitBackgroundClip: 'text',
+                  backgroundClip: 'text',
+                  color: 'transparent',
+                }}
+              >
+                {displayName}
+              </span>
+              .
+            </h1>
+            <div className="vs-mono text-[11px]" style={{ color: '#9AA8C2' }}>
+              {timeLabel}
+            </div>
+          </div>
+          <div className="text-[13px] mt-1" style={{ color: '#9AA8C2' }} data-testid="dashboard-substat">
+            {tasksState.loaded ? `${blockedCount} threads need you` : 'tasks…'}
+            {' · '}
+            {rascalsState.loaded ? `${enabledRascals} agents online` : 'agents…'}
+            {' · '}
+            {automationsState.loaded
+              ? `${automationsActive}/${automationsTotal} automations warm`
+              : 'automations…'}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setGalleryOpen(true)}
+          className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-md shrink-0"
+          style={{ background: DASH.panel2, border: `1px solid ${DASH.border}`, color: DASH.text }}
+          data-testid="dashboard-customize"
+        >
+          <LayoutGrid className="w-3.5 h-3.5" /> Customize
+        </button>
+      </div>
+
+      {/* Stat strip — one 4-col row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 mt-3.5">
+        <StatCard
+          label="EMPLOYEE AGENTS"
+          value={empAgents.loaded ? String(empAgents.list.filter((a) => a.status === 'active').length) : '—'}
+          sub={empAgents.loaded ? `${empAgents.list.length} configured · staff agents` : 'loading agents…'}
+          hue="purple"
+          spark="rise"
+        />
+        <StatCard
+          label="TASKS TODAY"
+          value={tasksToday == null ? '—' : String(tasksToday)}
+          sub={
+            tasksState.loaded
+              ? `${tasksState.list.filter((t) => t.status === 'active').length} active · ${blockedCount} blocked`
+              : 'loading tasks…'
+          }
+          hue="pink"
+          spark="split"
+        />
+        <StatCard
+          label="INBOX"
+          value={inboxState.loaded ? String(inboxState.list.length) : '—'}
+          sub={
+            inboxState.loaded
+              ? inboxState.email
+                ? `${inboxState.list.length} unread · ${inboxState.email}`
+                : inboxState.list.length === 0
+                  ? 'no unread mail'
+                  : `${inboxState.list.length} unread`
+              : 'loading inbox…'
+          }
+          hue="green"
+          spark="rise"
+        />
+        <StatCard
+          label="CALENDAR"
+          value={calendarStat.value}
+          sub={calendarStat.sub}
+          hue="blue"
+          spark="wave"
+        />
+      </div>
+
+      {/* ONE unified board — up to 4 columns, equal-height tiles, span-based,
+          drag any tile to rearrange (gallery handles show/hide). */}
+      <div className="grid grid-flow-row-dense gap-3.5 mt-3.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 auto-rows-[340px]">
+        {activeWidgets.map((w) => (
+          <div
+            key={w.id}
+            draggable
+            onDragStart={() => setDragId(w.id)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => { if (dragId && dragId !== w.id) reorder(dragId, w.id); setDragId(null); }}
+            onDragEnd={() => setDragId(null)}
+            className={`min-h-0 transition-opacity ${w.span === 3 ? 'sm:col-span-2 xl:col-span-3' : w.span === 2 ? 'sm:col-span-2 xl:col-span-2' : ''} ${w.id === 'social_feed' ? 'row-span-2' : ''} ${dragId === w.id ? 'opacity-40' : ''}`}
+            style={{ cursor: 'grab' }}
+            title="Drag to rearrange"
+          >{widgetNode[w.id]}</div>
+        ))}
+        {activeWidgets.length === 0 && (
+          <div
+            className="sm:col-span-2 xl:col-span-5 rounded-[14px] p-8 text-center text-[13px]"
+            style={{ border: `1px dashed ${DASH.border}`, color: DASH.textMuted }}
+          >
+            No widgets selected. Click “Customize” to choose which tiles show.
+          </div>
+        )}
+      </div>
+      </div>
+
+      {galleryOpen && (
+        <WidgetGallery enabled={enabledWidgets} toggle={toggleWidget} onClose={() => setGalleryOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+export { Dashboard };

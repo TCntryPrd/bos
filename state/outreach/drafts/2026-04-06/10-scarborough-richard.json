@@ -1,0 +1,14 @@
+{
+  "lead": {
+    "row": 223,
+    "business_name": "Scarborough Co",
+    "contact_name": "Richard Ottinger",
+    "email": "richardo@scarboroughco.com"
+  },
+  "draft": {
+    "subject": "Automating your sales pipeline at Scarborough",
+    "body": "Hi Richard,\n\nIn sales, every hour counts. Proposals take time to put together, follow-ups get missed, leads go cold. Most of that's manual work your team repeats every day.\n\nWe automate the proposal generation and follow-up sequencing. Your team focuses on relationships; the system keeps deals moving.\n\nOne sales team closed 15% more deals by just giving back 5 hours a week of admin time.\n\nWant to walk through what this could look like for Scarborough Co's sales operation?\n\nKevin Starr\nFounder, Starr & Partners",
+    "from": "d.caine@dcaine.com"
+  },
+  "personalization_notes": "Addressed sales role, focused on proposal and follow-up automation, named the company, included concrete productivity benefit"
+}

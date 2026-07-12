@@ -1,0 +1,36 @@
+import React from 'react';
+import { Menu } from 'lucide-react';
+
+interface TopBarProps {
+  pageTitle: string;
+  onMobileMenu?: () => void;
+}
+
+export function TopBar({ pageTitle, onMobileMenu }: TopBarProps) {
+  return (
+    <header
+      className="boss-nav-surface flex-shrink-0 h-10 border-b border-border flex items-center px-4 gap-3"
+      style={{ background: 'var(--v-nav-bg)' }}
+      aria-label="Top bar"
+    >
+      {onMobileMenu && (
+        <button
+          className="lg:hidden w-6 h-6 rounded text-text-muted hover:text-text-primary flex items-center justify-center"
+          onClick={onMobileMenu}
+          aria-label="Open navigation menu"
+        >
+          <Menu className="w-4 h-4" aria-hidden />
+        </button>
+      )}
+      <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">
+        BOS
+      </div>
+      <div className="text-text-muted/60 select-none" aria-hidden>
+        /
+      </div>
+      <h1 className="text-sm font-medium text-text-primary leading-none">
+        {pageTitle}
+      </h1>
+    </header>
+  );
+}

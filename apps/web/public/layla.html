@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operations Strategy Retainer — Industry Rockstar</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --black: #0a0a0a;
+      --dark: #111111;
+      --card: #1a1a1a;
+      --border: #2a2a2a;
+      --gold: #f5a623;
+      --gold-light: #ffc85c;
+      --white: #ffffff;
+      --gray: #999999;
+      --light-gray: #e0e0e0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--black);
+      color: var(--white);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* — NAV — */
+    nav {
+      padding: 20px 40px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--white);
+    }
+    .logo span { color: var(--gold); }
+
+    /* — HERO — */
+    .hero {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 80px 40px 60px;
+      text-align: center;
+    }
+    .eyebrow {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--gold);
+      background: rgba(245,166,35,0.12);
+      border: 1px solid rgba(245,166,35,0.25);
+      padding: 6px 16px;
+      border-radius: 100px;
+      margin-bottom: 28px;
+    }
+    .hero h1 {
+      font-size: clamp(36px, 5vw, 58px);
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      line-height: 1.1;
+      margin-bottom: 24px;
+    }
+    .hero h1 em {
+      font-style: normal;
+      color: var(--gold);
+    }
+    .hero p.lead {
+      font-size: 20px;
+      color: var(--gray);
+      max-width: 600px;
+      margin: 0 auto 40px;
+      line-height: 1.65;
+    }
+
+    /* — PRICE CARD — */
+    .price-section {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 40px 80px;
+      display: flex;
+      justify-content: center;
+    }
+    .price-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 48px 48px 40px;
+      width: 100%;
+      max-width: 560px;
+      position: relative;
+      overflow: hidden;
+    }
+    .price-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--gold), var(--gold-light));
+    }
+    .price-label {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--gray);
+      margin-bottom: 12px;
+    }
+    .price-amount {
+      font-size: 64px;
+      font-weight: 800;
+      letter-spacing: -2px;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .price-amount span {
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+      color: var(--gray);
+    }
+    .price-cycle {
+      font-size: 15px;
+      color: var(--gray);
+      margin-bottom: 36px;
+    }
+    .sessions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+    .session-block {
+      background: var(--dark);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+    }
+    .session-num {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 8px;
+    }
+    .session-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .session-desc {
+      font-size: 13px;
+      color: var(--gray);
+      line-height: 1.5;
+    }
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 28px 0;
+    }
+    .includes-label {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--gray);
+      margin-bottom: 14px;
+    }
+    .includes-list {
+      list-style: none;
+      margin-bottom: 32px;
+    }
+    .includes-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 15px;
+      color: var(--light-gray);
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .includes-list li:last-child { border-bottom: none; }
+    .includes-list li::before {
+      content: '✓';
+      color: var(--gold);
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* — CTA — */
+    .cta-btn {
+      display: block;
+      width: 100%;
+      padding: 18px 24px;
+      background: var(--gold);
+      color: var(--black);
+      font-size: 17px;
+      font-weight: 800;
+      text-align: center;
+      text-decoration: none;
+      border-radius: 12px;
+      letter-spacing: -0.3px;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .cta-btn:hover {
+      background: var(--gold-light);
+      transform: translateY(-1px);
+    }
+    .cta-sub {
+      text-align: center;
+      font-size: 13px;
+      color: var(--gray);
+      margin-top: 12px;
+    }
+
+    /* — WHO IS THIS FOR — */
+    .who-section {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 40px 80px;
+    }
+    .section-title {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 32px;
+      text-align: center;
+    }
+    .who-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+    }
+    .who-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+    }
+    .who-card-icon {
+      font-size: 24px;
+      margin-bottom: 12px;
+    }
+    .who-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .who-card p {
+      font-size: 14px;
+      color: var(--gray);
+      line-height: 1.55;
+    }
+
+    /* — HOW IT WORKS — */
+    .how-section {
+      background: var(--dark);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 80px 40px;
+      margin-bottom: 80px;
+    }
+    .how-inner {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 32px;
+      margin-top: 40px;
+    }
+    .step {
+      display: flex;
+      flex-direction: column;
+    }
+    .step-num {
+      font-size: 40px;
+      font-weight: 900;
+      color: rgba(245,166,35,0.2);
+      line-height: 1;
+      margin-bottom: 12px;
+    }
+    .step h3 {
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .step p {
+      font-size: 14px;
+      color: var(--gray);
+      line-height: 1.6;
+    }
+
+    /* — ABOUT — */
+    .about-section {
+      max-width: 860px;
+      margin: 0 auto 80px;
+      padding: 0 40px;
+      display: flex;
+      gap: 48px;
+      align-items: center;
+    }
+    .about-text h2 {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 16px;
+    }
+    .about-text p {
+      font-size: 16px;
+      color: var(--gray);
+      line-height: 1.7;
+      margin-bottom: 14px;
+    }
+    .kevin-tag {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--gold);
+    }
+
+    /* — BOTTOM CTA — */
+    .bottom-cta {
+      background: linear-gradient(180deg, transparent, var(--dark));
+      border-top: 1px solid var(--border);
+      padding: 80px 40px;
+      text-align: center;
+    }
+    .bottom-cta h2 {
+      font-size: 36px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-bottom: 16px;
+    }
+    .bottom-cta p {
+      font-size: 18px;
+      color: var(--gray);
+      max-width: 500px;
+      margin: 0 auto 36px;
+    }
+    .cta-btn-lg {
+      display: inline-block;
+      padding: 20px 48px;
+      background: var(--gold);
+      color: var(--black);
+      font-size: 18px;
+      font-weight: 800;
+      text-decoration: none;
+      border-radius: 14px;
+      letter-spacing: -0.3px;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .cta-btn-lg:hover {
+      background: var(--gold-light);
+      transform: translateY(-2px);
+    }
+
+    /* — FOOTER — */
+    footer {
+      padding: 28px 40px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 13px;
+      color: var(--gray);
+    }
+    footer a { color: var(--gray); text-decoration: none; }
+
+    @media (max-width: 640px) {
+      nav { padding: 16px 20px; }
+      .hero, .price-section, .who-section, .about-section { padding-left: 20px; padding-right: 20px; }
+      .how-section { padding: 60px 20px; }
+      .bottom-cta { padding: 60px 20px; }
+      .sessions { grid-template-columns: 1fr; }
+      .about-section { flex-direction: column; gap: 24px; }
+      .price-card { padding: 32px 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="logo">Industry <span>Rockstar</span></div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="eyebrow">Strategy Retainer</div>
+  <h1>Build a business that<br>works without you<br><em>working yourself into the ground.</em></h1>
+  <p class="lead">Two focused sessions a month. Real work done between them. A partner who thinks in systems, not just advice.</p>
+</section>
+
+<!-- PRICE CARD -->
+<section class="price-section">
+  <div class="price-card">
+    <div class="price-label">Monthly Investment</div>
+    <div class="price-amount">$500<span>/mo</span></div>
+    <div class="price-cycle">Recurring · Cancel anytime</div>
+
+    <div class="sessions">
+      <div class="session-block">
+        <div class="session-num">Session 1</div>
+        <div class="session-title">Deep Assessment</div>
+        <div class="session-desc">90 minutes into you and your operations — what's working, what's breaking, what's slowing you down.</div>
+      </div>
+      <div class="session-block">
+        <div class="session-num">Session 2</div>
+        <div class="session-title">Brainstorm & Plan</div>
+        <div class="session-desc">90 minutes designing next steps, execution priorities, and what to build or fix before we meet again.</div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="includes-label">Also included</div>
+    <ul class="includes-list">
+      <li>Execution tasks you'll carry into action between sessions</li>
+      <li>Both in-house operations and customer-facing solutions</li>
+      <li>Direct access to Kevin's experience scaling businesses</li>
+      <li>AI-native thinking — tools, automations, and leverage</li>
+    </ul>
+
+    <a href="https://buy.stripe.com/8x26oGalE73ngG9csb5sA0k" class="cta-btn" target="_blank" rel="noopener">
+      Start My Retainer — $500/mo →
+    </a>
+    <p class="cta-sub">Secure checkout via Stripe · Cancel anytime · No contracts</p>
+  </div>
+</section>
+
+<!-- WHO IS THIS FOR -->
+<section class="who-section">
+  <h2 class="section-title">Who this is built for</h2>
+  <div class="who-grid">
+    <div class="who-card">
+      <div class="who-card-icon">🔥</div>
+      <h3>You're doing everything yourself</h3>
+      <p>Revenue is there, but it's fragile — too dependent on your hours. You need a system, not just hustle.</p>
+    </div>
+    <div class="who-card">
+      <div class="who-card-icon">⚙️</div>
+      <h3>Your operations feel chaotic</h3>
+      <p>Things fall through the cracks. Clients notice. Your team is confused. You want clean systems.</p>
+    </div>
+    <div class="who-card">
+      <div class="who-card-icon">🚀</div>
+      <h3>You're ready to scale — but stuck</h3>
+      <p>You see the next level, but can't figure out what to build first. You need someone who's been there.</p>
+    </div>
+    <div class="who-card">
+      <div class="who-card-icon">💡</div>
+      <h3>You want a thinking partner, not a consultant</h3>
+      <p>You don't need a report. You need someone who works alongside you, challenges your assumptions, and keeps you moving.</p>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how-section">
+  <div class="how-inner">
+    <h2 class="section-title">How it works</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <h3>Sign up today</h3>
+        <p>Secure your spot with a single click. Kevin will reach out within 24 hours to schedule your first session.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <h3>Session 1 — The Assessment</h3>
+        <p>90 minutes with Kevin going deep on your business, your operations, and where the real leverage is hiding.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <h3>Execute between sessions</h3>
+        <p>You'll leave with a clear list of what to build, fix, or test before you meet again. This is where the real work happens.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">04</div>
+        <h3>Session 2 — Plan the next move</h3>
+        <p>Review what happened, adjust the strategy, and map out the next sprint. Month after month, your business gets tighter.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ABOUT KEVIN -->
+<section class="about-section">
+  <div class="about-text">
+    <h2>About Kevin Starr</h2>
+    <p>Kevin is the founder of Industry Rockstar — a company built on the premise that independent business owners deserve the same strategic firepower as the Fortune 500, without the cost or the bullshit.</p>
+    <p>He's been in the trenches building, scaling, and advising businesses for years. Not as a consultant who flies in and leaves a slide deck. As someone who actually does the work.</p>
+    <p>This retainer is how he works with a small number of clients who are ready to build something real.</p>
+    <div class="kevin-tag">— Kevin Starr, Industry Rockstar</div>
+  </div>
+</section>
+
+<!-- BOTTOM CTA -->
+<section class="bottom-cta">
+  <h2>Ready to start?</h2>
+  <p>Two sessions a month. Real traction between them. Let's build something that actually works.</p>
+  <a href="https://buy.stripe.com/8x26oGalE73ngG9csb5sA0k" class="cta-btn-lg" target="_blank" rel="noopener">
+    Get Started — $500/mo
+  </a>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <p>© 2026 Industry Rockstar · <a href="mailto:kevinstarr@industryrockstar.com">kevinstarr@industryrockstar.com</a></p>
+</footer>
+
+</body>
+</html>

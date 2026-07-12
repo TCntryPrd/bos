@@ -1,0 +1,14 @@
+{
+  "lead": {
+    "row": 165,
+    "business_name": "Scarborough Co",
+    "contact_name": "John Scarborough",
+    "email": "johns@scarboroughco.com"
+  },
+  "draft": {
+    "subject": "Quick idea for Scarborough Co",
+    "body": "Hi John,\n\nRunning a company like Scarborough means juggling multiple teams, all trying to sync. Customer inquiries get stuck waiting for approvals or pricing. Responses are slow, wins are left on the table.\n\nWe help presidents streamline this—automation handles the intake, pulls the right data, routes it to the right person. You see the high-level picture; your team moves faster.\n\nOne president cut response time by 50% in month one.\n\nWant to see how this could work for Scarborough Co?\n\nKevin Starr\nFounder, Starr & Partners",
+    "from": "d.caine@dcaine.com"
+  },
+  "personalization_notes": "Addressed President role, referenced company coordination challenges, named the company, focused on streamlined decision-making"
+}

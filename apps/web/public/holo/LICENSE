@@ -1,0 +1,31 @@
+Hologram figure mesh — public/holo/figure.glb
+=============================================
+
+Source model: "Superhero Male" (ubc-superhero-male.glb) from the Universal
+Base Characters kit (standard FREE version) by Quaternius.
+
+Source URLs:
+- https://quaternius.com  (kit download page)
+- https://www.patreon.com/quaternius  (author)
+
+License: CC0 1.0 Universal (Public Domain Dedication)
+https://creativecommons.org/publicdomain/zero/1.0/
+The model is dedicated to the public domain; no attribution is required
+(given here anyway with thanks).
+
+The license file bundled with the kit (UBC-License_Standard.txt) states:
+
+    License:
+    CC0 1.0 Universal (CC0 1.0)
+    Public Domain Dedication
+    https://creativecommons.org/publicdomain/zero/1.0/
+
+    Models by @Quaternius
+
+figure.glb is a preprocessed derivative of that model (gltf-transform): only
+the main body mesh is kept (face/eye detail meshes removed); animations,
+skinning, materials, and all vertex attributes except POSITION/NORMAL are
+stripped; node transforms are flattened and unused resources pruned. The
+derivative remains CC0.
+
+The shipped figure.glb is additionally re-posed (arms-down) and re-baked from the same CC0 asset's A-pose skeleton — no license change; bake scripts and probe reports live in the project provenance (holo-model/bake-armsdown.mjs).

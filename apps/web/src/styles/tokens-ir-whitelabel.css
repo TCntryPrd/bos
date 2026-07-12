@@ -1,0 +1,166 @@
+/* BOS — Agentic OS tokens.
+ * Palette from Kane's Start-at-the-Top slides (Jun 11): near-black navy
+ * depths, electric violet accent spectrum, gold energy highlight, neon glow.
+ */
+
+:root {
+  /* Primary accent palette — electric and kinetic */
+  --v-purple: #8B5CF6;
+  --v-pink:   #D946EF;
+  --v-green:  #22C55E;
+  --v-blue:   #4F6DF5;
+  --v-amber:  #F5C542;
+  --v-cyan:   #2DD4FF;
+  --v-gold:   #FFD166;
+  --v-ink:    #030711;
+  --v-glass:  rgba(8, 13, 28, 0.68);
+  --v-glass-strong: rgba(9, 15, 32, 0.86);
+
+  --v-purple-dim: rgba(139,  92, 246, 0.16);
+  --v-pink-dim:   rgba(217,  70, 239, 0.14);
+  --v-green-dim:  rgba( 34, 197,  94, 0.14);
+  --v-blue-dim:   rgba( 79, 109, 245, 0.14);
+  --v-amber-dim:  rgba(245, 197,  66, 0.16);
+
+  /* Dark surfaces — near-black navy with violet depth */
+  --v-base:      #030711;
+  --v-base-bg:   linear-gradient(180deg, rgba(3, 7, 17, 0.98) 0%, rgba(7, 12, 28, 0.96) 48%, rgba(3, 7, 17, 0.98) 100%);
+  --v-nav-bg:    linear-gradient(180deg, rgba(5, 10, 23, 0.95) 0%, rgba(5, 9, 20, 0.9) 100%);
+  --v-nav-text:  #F1F4FF;
+  --v-nav-muted: #AAB3D6;
+  --v-nav-dim:   #7681A8;
+  --v-null:      #07101F;
+  --v-surface-1: #08101F;
+  --v-surface-2: #0D172B;
+  --v-surface-3: #13213A;
+
+  /* Borders — violet-tinted hairlines */
+  --v-hairline:        rgba(148, 177, 214, 0.2);
+  --v-hairline-strong: rgba(45, 212, 255, 0.42);
+
+  /* Text — light on dark */
+  --v-text:       #F1F4FF;
+  --v-text-muted: #AAB3D6;
+  --v-text-dim:   #7681A8;
+
+  /* Gradients — electric violet spectrum from the slides */
+  --grad-cool: linear-gradient(135deg, #2DD4FF 0%, #4F6DF5 55%, #22C55E 100%);
+  --grad-warm: linear-gradient(135deg, #FFD166 0%, #D946EF 54%, #8B5CF6 100%);
+  --grad-lime: linear-gradient(135deg, #F5C542 0%, #22C55E 100%);
+  --grad-quad: conic-gradient(from 200deg at 50% 50%, #2DD4FF, #4F6DF5, #D946EF, #FFD166, #22C55E, #2DD4FF);
+}
+
+/* Mono helper for status lines and metadata chips. */
+.vs-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0;
+}
+
+/* Glow pills — neon glow for the dark theme */
+.vs-glow-purple { box-shadow: 0 0 0 1px rgba(139, 92,246,0.45), 0 0 22px rgba(139, 92,246,0.30); }
+.vs-glow-pink   { box-shadow: 0 0 0 1px rgba(217, 70,239,0.45), 0 0 22px rgba(217, 70,239,0.30); }
+.vs-glow-green  { box-shadow: 0 0 0 1px rgba( 34,197, 94,0.45), 0 0 22px rgba( 34,197, 94,0.30); }
+.vs-glow-blue   { box-shadow: 0 0 0 1px rgba( 79,109,245,0.45), 0 0 22px rgba( 79,109,245,0.30); }
+
+/* Chip — compact mono-font capsule used for metadata */
+.vs-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border-radius: 999px;
+  font-size: 11px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.02em;
+  background: rgba(8,13,28,0.7);
+  border: 1px solid var(--v-hairline);
+  color: var(--v-text-muted);
+}
+.vs-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: #20B26B; box-shadow: 0 0 6px #20B26B; }
+.vs-chip.purple { color: #5B21B6; border-color: rgba(124, 60,255,0.35); background: var(--v-purple-dim); }
+.vs-chip.pink   { color: #BE185D; border-color: rgba(255, 77,141,0.35); background: var(--v-pink-dim); }
+.vs-chip.green  { color: #047857; border-color: rgba( 32,178,107,0.35); background: var(--v-green-dim); }
+.vs-chip.blue   { color: #0369A1; border-color: rgba( 14,165,233,0.35); background: var(--v-blue-dim); }
+.vs-chip.amber  { color: #A16207; border-color: rgba(255,212, 59,0.45); background: var(--v-amber-dim); }
+
+/* Gradient text for titles */
+.vs-gt      { background: var(--grad-cool); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.vs-gt-warm { background: var(--grad-warm); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* Divider */
+.vs-divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(45,55,72,0.12), transparent); }
+
+/* Ambient aurora background — lighter, softer for light theme */
+.vs-aurora { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }
+.vs-aurora::before, .vs-aurora::after {
+  content: ''; position: absolute; width: 520px; height: 520px; border-radius: 50%;
+  filter: blur(100px); opacity: 0.15;
+}
+.vs-aurora::before { background: radial-gradient(circle, #0EA5E9 0%, transparent 60%); top: -180px; left: -100px; }
+.vs-aurora::after  { background: radial-gradient(circle, #FF4D8D 0%, transparent 60%); bottom: -220px; right: -120px; }
+.vs-aurora .acc3 {
+  position: absolute; width: 380px; height: 380px; border-radius: 50%;
+  background: radial-gradient(circle, #FFD43B 0%, transparent 60%);
+  filter: blur(100px); opacity: 0.12; top: 40%; left: 40%;
+}
+
+/* Nav tab — shared rail item primitive */
+.vs-tab {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 8px; cursor: pointer;
+  font-size: 13px; color: var(--v-nav-muted);
+  position: relative; transition: color .12s, background .12s;
+}
+.vs-tab:hover        { color: var(--v-nav-text); background: rgba(45,212,255,0.08); }
+.vs-tab.active       { color: var(--v-nav-text); background: linear-gradient(90deg, rgba(45,212,255,0.14), rgba(255,209,102,0.07)); }
+.vs-tab.active::before {
+  content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+  background: var(--grad-cool); border-radius: 2px;
+  box-shadow: 0 0 8px rgba(78,205,196,0.4);
+}
+.vs-tab .ico { width: 16px; height: 16px; color: currentColor; opacity: 0.85; flex-shrink: 0; }
+.vs-tab.k-kanban.active::before { background: var(--grad-warm); box-shadow: 0 0 8px rgba(255,77,141,0.4); }
+.vs-tab.k-miro.active::before   { background: var(--grad-lime); box-shadow: 0 0 8px rgba(255,212,59,0.4); }
+
+.boss-nav-surface {
+  color: var(--v-nav-text);
+  border-color: rgba(148, 177, 214, 0.18);
+  box-shadow: inset -1px 0 0 rgba(255,255,255,0.03);
+}
+.boss-nav-surface .text-text-primary,
+.boss-nav-surface .text-text-secondary,
+.boss-nav-surface .text-text-muted,
+.boss-nav-surface .text-text-muted\/70 {
+  color: var(--v-nav-muted);
+}
+.boss-nav-surface .text-text-primary,
+.boss-nav-surface h1 {
+  color: var(--v-nav-text);
+}
+.boss-nav-surface .text-text-muted\/60 {
+  color: var(--v-nav-dim);
+}
+.boss-nav-surface .vs-tab.active .ico,
+.boss-nav-surface .vs-tab:hover .ico {
+  opacity: 1;
+}
+
+/* Kanban card primitive (used by the boards surface) */
+.vs-card {
+  background: #FFFFFF; border: 1px solid rgba(45,55,72,0.10);
+  border-radius: 10px; padding: 10px; position: relative;
+  transition: transform .12s, box-shadow .12s, border-color .12s;
+  box-shadow: 0 1px 3px rgba(45,55,72,0.04);
+}
+.vs-card:hover   { border-color: rgba(45,55,72,0.20); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(45,55,72,0.08); }
+.vs-card.dragging { opacity: 0.50; }
+.vs-card.preview  { border-style: dashed; background: rgba(45,55,72,0.02); }
+.vs-card .accent  { position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; }
+
+/* Agent avatar — single-letter glyph on hue gradient */
+.vs-avatar {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  color: #FFFFFF; border: 1.5px solid rgba(255,255,255,0.9);
+}
+
+/* Keyframes used across surfaces */
+@keyframes vs-pulse      { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+@keyframes vs-slide-scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(400%); } }
+@keyframes vs-rot        { to { transform: rotate(360deg); } }

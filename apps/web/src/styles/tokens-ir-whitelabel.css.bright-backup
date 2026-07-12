@@ -1,0 +1,158 @@
+/* IR White-Label — bright, joyful command-center tokens.
+ * Color psychology: hot pink for energy, sky for clarity, green/yellow for momentum.
+ */
+
+:root {
+  /* Primary accent palette — energetic and friendly */
+  --v-purple: #7C3CFF;
+  --v-pink:   #FF4D8D;
+  --v-green:  #20B26B;
+  --v-blue:   #0EA5E9;
+  --v-amber:  #FFD43B;
+
+  --v-purple-dim: rgba(124,  60, 255, 0.12);
+  --v-pink-dim:   rgba(255,  77, 141, 0.12);
+  --v-green-dim:  rgba( 32, 178, 107, 0.12);
+  --v-blue-dim:   rgba( 14, 165, 233, 0.12);
+  --v-amber-dim:  rgba(255, 212,  59, 0.16);
+
+  /* Light surfaces — IR cyan background with readable white panels */
+  --v-base:      #5BC3DC;
+  --v-base-bg:   linear-gradient(135deg, #5BC3DC 0%, #8DDFF0 48%, #DFF8FD 100%);
+  --v-nav-bg:    linear-gradient(180deg, rgba(141, 223, 240, 0.96) 0%, rgba(190, 239, 247, 0.96) 100%);
+  --v-nav-text:  #0F2533;
+  --v-nav-muted: #1F4454;
+  --v-nav-dim:   #315D6B;
+  --v-null:      #FFFFFF;
+  --v-surface-1: #FFFFFF;
+  --v-surface-2: #EEF9FC;
+  --v-surface-3: #E2E8F0;
+
+  /* Borders — subtle but visible */
+  --v-hairline:        rgba(23, 32, 51, 0.10);
+  --v-hairline-strong: rgba(23, 32, 51, 0.18);
+
+  /* Text — dark on light */
+  --v-text:       #172033;
+  --v-text-muted: #475569;
+  --v-text-dim:   #718096;
+
+  /* Gradients — vibrant and joyful */
+  --grad-cool: linear-gradient(135deg, #0EA5E9 0%, #20B26B 100%);
+  --grad-warm: linear-gradient(135deg, #FF4D8D 0%, #FF8A3D 100%);
+  --grad-lime: linear-gradient(135deg, #FFD43B 0%, #20B26B 100%);
+  --grad-quad: conic-gradient(from 200deg at 50% 50%, #FF4D8D, #FF8A3D, #FFD43B, #0EA5E9, #7C3CFF, #FF4D8D);
+}
+
+/* Mono helper for status lines and metadata chips. */
+.vs-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0;
+}
+
+/* Glow pills — softer shadows for light theme */
+.vs-glow-purple { box-shadow: 0 0 0 1px rgba(124, 60,255,0.25), 0 0 16px rgba(124, 60,255,0.15); }
+.vs-glow-pink   { box-shadow: 0 0 0 1px rgba(255, 77,141,0.25), 0 0 16px rgba(255, 77,141,0.15); }
+.vs-glow-green  { box-shadow: 0 0 0 1px rgba( 32,178,107,0.25), 0 0 16px rgba( 32,178,107,0.15); }
+.vs-glow-blue   { box-shadow: 0 0 0 1px rgba( 14,165,233,0.25), 0 0 16px rgba( 14,165,233,0.15); }
+
+/* Chip — compact mono-font capsule used for metadata */
+.vs-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border-radius: 999px;
+  font-size: 11px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.02em;
+  background: rgba(45,55,72,0.04);
+  border: 1px solid var(--v-hairline);
+  color: #4A5568;
+}
+.vs-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: #20B26B; box-shadow: 0 0 6px #20B26B; }
+.vs-chip.purple { color: #5B21B6; border-color: rgba(124, 60,255,0.35); background: var(--v-purple-dim); }
+.vs-chip.pink   { color: #BE185D; border-color: rgba(255, 77,141,0.35); background: var(--v-pink-dim); }
+.vs-chip.green  { color: #047857; border-color: rgba( 32,178,107,0.35); background: var(--v-green-dim); }
+.vs-chip.blue   { color: #0369A1; border-color: rgba( 14,165,233,0.35); background: var(--v-blue-dim); }
+.vs-chip.amber  { color: #A16207; border-color: rgba(255,212, 59,0.45); background: var(--v-amber-dim); }
+
+/* Gradient text for titles */
+.vs-gt      { background: var(--grad-cool); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.vs-gt-warm { background: var(--grad-warm); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* Divider */
+.vs-divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(45,55,72,0.12), transparent); }
+
+/* Ambient aurora background — lighter, softer for light theme */
+.vs-aurora { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }
+.vs-aurora::before, .vs-aurora::after {
+  content: ''; position: absolute; width: 520px; height: 520px; border-radius: 50%;
+  filter: blur(100px); opacity: 0.15;
+}
+.vs-aurora::before { background: radial-gradient(circle, #0EA5E9 0%, transparent 60%); top: -180px; left: -100px; }
+.vs-aurora::after  { background: radial-gradient(circle, #FF4D8D 0%, transparent 60%); bottom: -220px; right: -120px; }
+.vs-aurora .acc3 {
+  position: absolute; width: 380px; height: 380px; border-radius: 50%;
+  background: radial-gradient(circle, #FFD43B 0%, transparent 60%);
+  filter: blur(100px); opacity: 0.12; top: 40%; left: 40%;
+}
+
+/* Nav tab — shared rail item primitive */
+.vs-tab {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 8px; cursor: pointer;
+  font-size: 13px; color: var(--v-nav-muted);
+  position: relative; transition: color .12s, background .12s;
+}
+.vs-tab:hover        { color: var(--v-nav-text); background: rgba(15,37,51,0.07); }
+.vs-tab.active       { color: var(--v-nav-text); background: rgba(15,37,51,0.10); }
+.vs-tab.active::before {
+  content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+  background: var(--grad-cool); border-radius: 2px;
+  box-shadow: 0 0 8px rgba(78,205,196,0.4);
+}
+.vs-tab .ico { width: 16px; height: 16px; color: currentColor; opacity: 0.85; flex-shrink: 0; }
+.vs-tab.k-kanban.active::before { background: var(--grad-warm); box-shadow: 0 0 8px rgba(255,77,141,0.4); }
+.vs-tab.k-miro.active::before   { background: var(--grad-lime); box-shadow: 0 0 8px rgba(255,212,59,0.4); }
+
+.boss-nav-surface {
+  color: var(--v-nav-text);
+}
+.boss-nav-surface .text-text-primary,
+.boss-nav-surface .text-text-secondary,
+.boss-nav-surface .text-text-muted,
+.boss-nav-surface .text-text-muted\/70 {
+  color: var(--v-nav-muted);
+}
+.boss-nav-surface .text-text-primary,
+.boss-nav-surface h1 {
+  color: var(--v-nav-text);
+}
+.boss-nav-surface .text-text-muted\/60 {
+  color: var(--v-nav-dim);
+}
+.boss-nav-surface .vs-tab.active .ico,
+.boss-nav-surface .vs-tab:hover .ico {
+  opacity: 1;
+}
+
+/* Kanban card primitive (used by the boards surface) */
+.vs-card {
+  background: #FFFFFF; border: 1px solid rgba(45,55,72,0.10);
+  border-radius: 10px; padding: 10px; position: relative;
+  transition: transform .12s, box-shadow .12s, border-color .12s;
+  box-shadow: 0 1px 3px rgba(45,55,72,0.04);
+}
+.vs-card:hover   { border-color: rgba(45,55,72,0.20); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(45,55,72,0.08); }
+.vs-card.dragging { opacity: 0.50; }
+.vs-card.preview  { border-style: dashed; background: rgba(45,55,72,0.02); }
+.vs-card .accent  { position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; }
+
+/* Agent avatar — single-letter glyph on hue gradient */
+.vs-avatar {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  color: #FFFFFF; border: 1.5px solid rgba(255,255,255,0.9);
+}
+
+/* Keyframes used across surfaces */
+@keyframes vs-pulse      { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+@keyframes vs-slide-scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(400%); } }
+@keyframes vs-rot        { to { transform: rotate(360deg); } }

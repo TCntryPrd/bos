@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-04-07T03:35:01Z",
+  "services": {
+    "boss_api": { "status": "up", "http_code": 200, "response_ms": 8 },
+    "openclaw": { "status": "up", "http_code": 200, "response_ms": 9 },
+    "n8n": { "status": "up", "http_code": 200, "response_ms": 8 },
+    "postgres": { "status": "up", "details": "accepting connections" },
+    "tailscale": { "status": "up", "details": "connected" },
+    "ollama": { "status": "up", "http_code": 200, "response_ms": 8 }
+  },
+  "alerts_sent": [],
+  "all_healthy": true
+}

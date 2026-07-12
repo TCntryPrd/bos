@@ -1,0 +1,169 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ─── TypeScript + Lint ────────────────────────────────────────────────────
+  typecheck:
+    name: TypeScript compilation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all packages (typecheck + compile)
+        run: npm run build --workspaces --if-present
+
+      - name: Upload compiled artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-dist
+          path: |
+            packages/*/dist/
+            apps/*/dist/
+          retention-days: 1
+
+  # ─── Tests ───────────────────────────────────────────────────────────────
+  test:
+    name: Tests (vitest)
+    runs-on: ubuntu-latest
+    needs: typecheck
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download compiled artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: compiled-dist
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run tests with coverage
+        run: npm run test:coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+  # ─── Security audit ──────────────────────────────────────────────────────
+  security:
+    name: Security audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: npm audit (production deps only)
+        # Fail on high or critical vulnerabilities.
+        # Use --audit-level=high so moderate/low don't block CI.
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Check for known vulnerable packages
+        # audit-ci gives cleaner output and supports allowlist in package.json
+        run: npx audit-ci --high
+
+  # ─── Docker build dry-run ────────────────────────────────────────────────
+  docker-build:
+    name: Docker build (dry-run)
+    runs-on: ubuntu-latest
+    needs: typecheck
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: boss-api
+            dockerfile: apps/api/Dockerfile
+          - image: boss-worker
+            dockerfile: apps/worker/Dockerfile
+          - image: boss-web
+            dockerfile: apps/web/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.image }} (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          dockerfile: ${{ matrix.dockerfile }}
+          push: false
+          tags: ${{ matrix.image }}:ci-${{ github.sha }}
+          # Use GitHub Actions cache to speed up layer reuse across runs
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          # Build both arch targets to catch any arch-specific issues early
+          platforms: linux/amd64
+
+  # ─── CI gate ─────────────────────────────────────────────────────────────
+  # Single job PRs must pass to merge. References all parallel jobs.
+  ci-gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [typecheck, test, security, docker-build]
+
+    steps:
+      - name: Evaluate results
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results"
+          # Fail if any required job did not succeed
+          for job in typecheck test security docker-build; do
+            status=$(echo "$results" | jq -r --arg j "$job" '.[$j].result')
+            if [ "$status" != "success" ]; then
+              echo "Job $job did not succeed (status: $status)"
+              exit 1
+            fi
+          done
+          echo "All CI jobs passed."

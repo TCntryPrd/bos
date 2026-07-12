@@ -1,0 +1,203 @@
+/**
+ * Login — credential-based authentication for returning users.
+ *
+ * Shows a "Set up Vasari" link below the form when onboarding has not
+ * been completed yet (boss_onboarding_complete !== 'true').
+ */
+
+import React, { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Eye, EyeOff, LogIn } from 'lucide-react';
+import { cn } from '../lib/utils';
+import { BossMark } from '../components/shell/BossLogo';
+import entranceElevatorScene from '../assets/entrance-elevator-scene.png';
+
+const INPUT_CLASS =
+  'w-full px-3 py-2.5 rounded-lg bg-white/72 border border-slate-300/70 text-slate-950 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-500';
+
+export function Login() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [needs2fa, setNeeds2fa] = useState(false);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const onboardingComplete = localStorage.getItem('boss_onboarding_complete') === 'true';
+
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    setSubmitting(true);
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          ...(totpCode ? { totpCode: totpCode.trim() } : {}),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (data.requires2fa) {
+          setNeeds2fa(true);
+          setError('Enter the 6-digit code from Google Authenticator');
+          setSubmitting(false);
+          return;
+        }
+        setError(data.message || 'Login failed');
+        setSubmitting(false);
+        return;
+      }
+
+      // Store token and user info
+      localStorage.setItem('boss_token', data.accessToken);
+      localStorage.setItem('boss_refresh_token', data.refreshToken || '');
+      localStorage.setItem('boss_user', JSON.stringify(data.user));
+
+      const authRedirect = location.state as { from?: { pathname?: string; search?: string } } | null;
+      const from = `${authRedirect?.from?.pathname || '/'}${authRedirect?.from?.search || ''}`;
+      navigate(from, { replace: true });
+    } catch {
+      setError('Unable to connect to server');
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="login-entrance-page relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-100 p-4">
+      <img
+        src={entranceElevatorScene}
+        alt=""
+        className="absolute inset-0 h-full w-full object-cover opacity-100"
+        style={{ filter: 'brightness(1.12) saturate(1.08) contrast(1.02)' }}
+        aria-hidden="true"
+      />
+      <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,0.62),rgba(255,255,255,0.16),rgba(15,23,42,0.18))]" aria-hidden="true" />
+      <div className="aios-atmosphere-grid absolute inset-0" aria-hidden="true" />
+      <div className="login-access-panel relative w-full max-w-sm p-6">
+        {/* Hero */}
+        <div className="text-center mb-8">
+          <div className="flex justify-center mb-6">
+            <BossMark scale={2.4} />
+          </div>
+          <p className="text-sm font-medium text-slate-600 mt-1">Executive access</p>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-4">
+          {error && (
+            <div className="p-3 rounded-lg bg-danger/10 border border-danger/20 text-sm text-danger">
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+              <label htmlFor="login-email" className="block text-xs font-medium text-slate-700">
+              Email
+            </label>
+            <input
+              id="login-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className={INPUT_CLASS}
+              autoComplete="email"
+              required
+            />
+          </div>
+
+          <div className="space-y-1.5">
+              <label htmlFor="login-password" className="block text-xs font-medium text-slate-700">
+              Password
+            </label>
+            <div className="relative">
+              <input
+                id="login-password"
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                className={cn(INPUT_CLASS, 'pr-10')}
+                autoComplete="current-password"
+                required
+              />
+              <button
+                type="button"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          {needs2fa && (
+            <div className="space-y-1.5">
+              <label htmlFor="login-2fa" className="block text-xs font-medium text-slate-700">
+                Authenticator Code
+              </label>
+              <input
+                id="login-2fa"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="123456"
+                className={cn(INPUT_CLASS, 'tracking-[0.3em] text-center font-mono')}
+                autoComplete="one-time-code"
+                autoFocus
+              />
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="btn-primary w-full gap-2 py-2.5 text-sm font-semibold justify-center"
+          >
+            {submitting ? (
+              'Signing in...'
+            ) : (
+              <>
+                <LogIn className="w-4 h-4" aria-hidden />
+                Sign In
+              </>
+            )}
+          </button>
+        </form>
+
+        {!onboardingComplete && (
+          <div className="mt-6">
+            <div className="flex items-center gap-3 text-slate-500 text-xs">
+              <span className="flex-1 border-t border-slate-300/70" />
+              <span>or</span>
+              <span className="flex-1 border-t border-slate-300/70" />
+            </div>
+            <div className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={() => navigate('/onboarding')}
+                className="text-sm text-accent hover:text-accent/80 transition-colors"
+              >
+                First time? Set up Vasari →
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default Login;

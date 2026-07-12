@@ -1,0 +1,335 @@
+/**
+ * Tiered trust model for BOS tool access control.
+ *
+ * Trust tiers gate which tools the brain is offered based on the caller's role.
+ * Higher tiers are strictly additive — each tier includes everything below it.
+ *
+ * Tier hierarchy (lowest to highest):
+ *   observer  → read-only, search, list
+ *   assistant → observer + create/send actions
+ *   operator  → assistant + trigger/run/modify actions
+ *   admin     → operator + delete/configure actions (reserved for future tools)
+ *
+ * Role → tier mapping:
+ *   'admin' / 'owner'  → admin
+ *   'user'             → assistant  (default authenticated user)
+ *   'readonly'         → observer   (future read-only accounts)
+ *   unrecognised / null → observer  (fail-closed)
+ */
+
+import type { BrainTool } from '@boss/brain';
+
+// ── Trust tier type ───────────────────────────────────────────────────────────
+
+export type TrustTier = 'observer' | 'assistant' | 'operator' | 'admin';
+
+// Numeric weight used for comparison — lower number = more restricted.
+const TIER_RANK: Record<TrustTier, number> = {
+  observer:  0,
+  assistant: 1,
+  operator:  2,
+  admin:     3,
+};
+
+// ── Per-tool minimum trust requirements ──────────────────────────────────────
+//
+// Any tool not listed here defaults to 'observer' — this is intentionally
+// conservative. When new tools are added, explicitly set their minimum trust
+// or they will be observer-gated by default.
+
+const TOOL_MIN_TRUST: Record<string, TrustTier> = {
+  // ── Google: Calendar ────────────────────────────────────────────────────
+  boss_calendar_today:    'observer',
+  boss_calendar_upcoming: 'observer',
+  boss_calendar_create:   'assistant',
+
+  // ── Google: Gmail ───────────────────────────────────────────────────────
+  boss_gmail_unread:    'observer',
+  boss_gmail_search:    'observer',
+  boss_gmail_read:      'observer',
+  boss_gmail_send:      'assistant',
+  boss_gmail_archive:   'assistant',
+  boss_gmail_mark_read: 'assistant',
+  boss_gmail_label:     'assistant',
+  boss_gmail_reply:     'operator',
+  boss_gmail_draft:       'assistant',
+  boss_gmail_draft_reply: 'assistant',
+  boss_gmail_quick_ack:   'operator',
+
+  // ── Google: Tasks ───────────────────────────────────────────────────────
+  boss_tasks_pending:  'observer',
+  boss_tasks_create:   'assistant',
+  boss_tasks_complete: 'assistant',
+  boss_tasks_delete:   'assistant',
+
+  // ── Google: Drive ───────────────────────────────────────────────────────
+  boss_drive_search:   'observer',
+  boss_drive_recent:   'observer',
+  boss_drive_read_doc: 'observer',
+  boss_drive_create_doc: 'assistant',
+  boss_google_registry: 'observer',
+  boss_google_usage: 'observer',
+  boss_incidents_list: 'observer',
+  boss_cost_rollup: 'observer',
+  boss_incident_update: 'assistant',
+  boss_playbook_save: 'assistant',
+  boss_agent_control: 'assistant',
+
+  // ── Google: Contacts ────────────────────────────────────────────────────
+  boss_contacts_search: 'observer',
+
+  // ── n8n ─────────────────────────────────────────────────────────────────
+  boss_n8n_list_workflows:   'observer',
+  boss_n8n_get_workflow:     'observer',
+  boss_n8n_recent_executions:'observer',
+  boss_n8n_run_workflow:       'operator',
+  boss_n8n_create_workflow:    'operator',
+  boss_n8n_update_workflow:    'operator',
+  boss_n8n_activate_workflow:  'operator',
+  boss_n8n_deactivate_workflow:'operator',
+  boss_n8n_delegate:           'operator',
+  boss_read_local_file:      'operator',
+
+  // ── Home Assistant ──────────────────────────────────────────────────────
+  boss_ha_list_devices:   'observer',
+  boss_ha_get_state:      'observer',
+  boss_ha_turn_on:        'operator',
+  boss_ha_turn_off:       'operator',
+  boss_ha_set_brightness: 'operator',
+  boss_ha_run_automation: 'operator',
+
+  // ── Slack ───────────────────────────────────────────────────────────────
+  boss_slack_list_channels: 'observer',
+  boss_slack_read_channel:  'observer',
+  boss_slack_search:        'observer',
+  boss_slack_send_message:  'assistant',
+
+  // ── Meta (Facebook / Instagram / Threads / WhatsApp Cloud / Ads) ──────────
+  meta_status:                 'observer',
+  meta_fb_list_conversations:  'observer',
+  meta_fb_get_messages:        'observer',
+  meta_fb_send_message:        'assistant',
+  meta_fb_publish_post:        'operator',
+  meta_ig_publish_post:        'operator',
+  meta_threads_publish:        'operator',
+  meta_ads_insights:           'observer',
+  meta_wa_send:                'assistant',
+
+  // ── LinkedIn ──────────────────────────────────────────────────────────────
+  boss_linkedin_post:          'operator',
+
+  // ── Telegram ────────────────────────────────────────────────────────────
+  boss_telegram_get_updates:   'observer',
+  boss_telegram_list_chats:    'observer',
+  boss_telegram_send_message:   'assistant',
+  boss_telegram_send_and_wait:  'operator',
+
+  // ── Notion ──────────────────────────────────────────────────────────────
+  boss_notion_search:        'observer',
+  boss_notion_get_page:      'observer',
+  boss_notion_list_databases:'observer',
+  boss_notion_create_page:   'assistant',
+
+  // ── Miro ────────────────────────────────────────────────────────────────
+  boss_miro_health:      'observer',
+  boss_miro_list_boards: 'observer',
+  boss_miro_get_board:   'observer',
+  boss_miro_list_items:  'observer',
+  boss_miro_create_board:'assistant',
+
+  // ── Airtable ────────────────────────────────────────────────────────────
+  boss_airtable_list_bases:    'observer',
+  boss_airtable_list_records:  'observer',
+  boss_airtable_search:        'observer',
+  boss_airtable_create_record: 'assistant',
+  boss_airtable_create_base:   'operator',
+  boss_airtable_create_table:  'operator',
+
+  // ── Make.com ────────────────────────────────────────────────────────────
+  boss_make_list_orgs:          'observer',
+  boss_make_list_teams:         'observer',
+  boss_make_list_scenarios:     'observer',
+  boss_make_get_scenario:       'observer',
+  boss_make_recent_executions:  'observer',
+  boss_make_run_scenario:       'operator',
+  boss_make_activate:           'operator',
+  boss_make_deactivate:         'operator',
+  boss_make_create_scenario:    'admin',
+  boss_make_update_scenario:    'admin',
+
+  // ── Stripe ──────────────────────────────────────────────────────────────
+  boss_stripe_list_customers: 'observer',
+  boss_stripe_list_invoices:  'observer',
+  boss_stripe_list_payments:  'observer',
+  boss_stripe_get_balance:    'observer',
+  boss_stripe_create_invoice: 'operator',
+
+  // ── QuickBooks Online (all read-only in v1) ─────────────────────────────
+  boss_qbo_company_info:      'observer',
+  boss_qbo_profit_and_loss:   'observer',
+  boss_qbo_list_transactions: 'observer',
+  boss_qbo_list_invoices:     'observer',
+  boss_qbo_list_customers:    'observer',
+  boss_qbo_list_expenses:     'observer',
+  boss_qbo_list_accounts:     'observer',
+  // Raw query reaches every readable entity — hold it to authenticated users.
+  boss_qbo_query:             'assistant',
+
+  // ── ERA Context (finance — read-only; not observer-visible) ───────────────
+  boss_era_accounts:            'assistant',
+  boss_era_financial_overview:  'assistant',
+  boss_era_transactions:        'assistant',
+  boss_era_search_transactions: 'assistant',
+  boss_era_cash_flow:           'assistant',
+  boss_era_recurring_charges:   'assistant',
+
+  // ── Health (personal health data — read-only; not observer-visible) ───────
+  boss_health_brief:   'assistant',
+  boss_health_summary: 'assistant',
+  boss_health_anomalies: 'assistant',
+  boss_health_journal: 'assistant',
+  boss_health_medical_records: 'assistant',
+
+  // ── Sub-agent spawning ───────────────────────────────────────────────────
+  // Agents can chain tool calls that write data, trigger workflows, and send
+  // messages. Require operator trust so observer/assistant callers cannot
+  // indirectly escalate permissions by delegating to a sub-agent.
+  boss_spawn_agent:    'operator',
+  boss_spawn_parallel: 'operator',
+
+  // ── Filesystem ──────────────────────────────────────────────────────────
+  boss_fs_read:   'observer',
+  boss_fs_list:   'observer',
+  boss_fs_search: 'observer',
+  boss_fs_write:  'assistant',
+  boss_fs_append: 'assistant',
+
+  // ── Email agent ─────────────────────────────────────────────────────────
+  boss_email_attention: 'observer',
+  boss_email_digest:    'observer',
+  boss_email_log_write: 'assistant',
+  boss_email_draft_record:   'assistant',
+  boss_email_draft_feedback: 'observer',
+  boss_knowledge_ingest: 'assistant',
+  boss_finance_snapshot_save: 'assistant',
+  boss_crm_snapshot_save: 'assistant',
+  boss_crm_sync:    'operator',
+  boss_crm_metrics: 'observer',
+
+  // ── Memory ─────────────────────────────────────────────────────────────
+  boss_memory_save:   'assistant',
+  boss_memory_recall: 'observer',
+  boss_memory_list:   'observer',
+
+  // ── System monitoring ──────────────────────────────────────────────────
+  boss_sys_info:     'observer',
+  boss_sys_updates:  'observer',
+  boss_sys_docker:   'observer',
+  boss_sys_services: 'observer',
+
+  // ── Backup status (vD.0.1) ─────────────────────────────────────────────
+  boss_backup_status: 'observer',
+
+  // ── Host status (vS.0.1) ──────────────────────────────────────────────
+  boss_host_status: 'observer',
+
+  // ── GitHub CI/PR introspection (vS.0.2) ───────────────────────────────
+  // workflow_runs, run_logs, pr_comments, pr_status = observer (default)
+  boss_github_open_issue: 'assistant',
+  boss_github_open_pr: 'operator',
+  boss_github_request_review: 'operator',
+  boss_github_pr_comment: 'operator',
+  boss_github_push_tag: 'admin',
+  boss_release_notes: 'operator',
+
+  // ── Self-identity (vS.0.4) ────────────────────────────────────────────
+  boss_self_identity: 'observer',
+  boss_self_reflect: 'assistant',
+  boss_self_goals: 'assistant',
+
+  // ── Host management (vS.1.0) ──────────────────────────────────────────
+  boss_host_apt: 'admin',
+  boss_host_systemctl: 'admin',
+  boss_host_cron: 'admin',
+  boss_admin_audit_log: 'observer',
+
+  // ── Telemetry & self-improvement (vS.2.0) ─────────────────────────────
+  boss_telemetry_alerts: 'observer',
+  boss_self_propose_fix: 'operator',
+  boss_telemetry_history: 'observer',
+
+  // ── Kanban brain tools (v1.7.14) ──────────────────────────────────────
+  boss_tasks_move: 'assistant',
+  boss_tasks_advance: 'assistant',
+  boss_tasks_block: 'assistant',
+
+  // ── Web search ─────────────────────────────────────────────────────────
+  boss_web_search:  'observer',
+  boss_web_fetch:   'observer',
+
+  // ── Persistent agents ──────────────────────────────────────────────────
+  boss_create_persistent_agent: 'operator',
+  boss_list_persistent_agents:  'observer',
+  boss_update_persistent_agent: 'operator',
+  boss_delete_persistent_agent: 'admin',
+  boss_employee_agents_report:  'observer',
+
+  // ── Self-modification (admin only — BOS building itself) ────────────
+  boss_bash:             'admin',
+  boss_self_patch:       'admin',
+  boss_self_grep:        'admin',
+  boss_self_build:       'admin',
+  boss_self_test:        'admin',
+  boss_self_git:         'admin',
+  boss_self_introspect:  'admin',
+};
+
+// ── Core filtering function ───────────────────────────────────────────────────
+
+/**
+ * Return only the tools the given trust tier is allowed to use.
+ *
+ * A tool passes if the caller's tier rank is >= the tool's minimum required
+ * tier rank. Tools not in TOOL_MIN_TRUST default to 'observer' (always pass).
+ */
+export function filterToolsByTrust(tools: BrainTool[], tier: TrustTier): BrainTool[] {
+  const callerRank = TIER_RANK[tier];
+  return tools.filter((tool) => {
+    const minTrust = TOOL_MIN_TRUST[tool.name] ?? 'observer';
+    return callerRank >= TIER_RANK[minTrust];
+  });
+}
+
+// ── Role → tier mapping ───────────────────────────────────────────────────────
+
+/**
+ * Derive the trust tier for a user based on their auth role string.
+ *
+ * Fail-closed: unrecognised roles get 'observer'. This means a misconfigured
+ * role field never accidentally grants elevated access.
+ */
+export function tierFromRole(role: string | undefined | null): TrustTier {
+  switch (role) {
+    case 'admin':
+    case 'owner':
+      return 'admin';
+    case 'operator':
+      return 'operator';
+    case 'user':
+      return 'assistant';
+    case 'readonly':
+      return 'observer';
+    default:
+      return 'observer';
+  }
+}
+
+/**
+ * The explicit minimum-trust entry for a tool, or undefined if unlisted.
+ * Used by the risk axis (tools/risk.ts) so the existing per-tool trust classification
+ * (which already covers the whole registry) becomes the base risk tier — far more
+ * accurate than name patterns alone.
+ */
+export function toolMinTrust(name: string): TrustTier | undefined {
+  return TOOL_MIN_TRUST[name];
+}

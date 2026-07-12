@@ -1,0 +1,56 @@
+{
+  "id": "global-mcp",
+  "name": "Global MCP",
+  "scope": "Vasari-VPS hermes-agent docker project",
+  "owner": "Vasari-BOS",
+  "hostPath": "/docker/hermes-agent-qtbk/mcp/global-connections.json",
+  "containerPath": "/home/boss/boss-dev/mcp/global-connections.json",
+  "statusApi": "/api/mcp/global",
+  "env": {
+    "serverUrl": "BOSS_GLOBAL_MCP_URL",
+    "loginUrl": "BOSS_GLOBAL_MCP_LOGIN_URL",
+    "token": "BOSS_GLOBAL_MCP_TOKEN",
+    "configPath": "BOSS_GLOBAL_MCP_CONFIG_PATH",
+    "registryPath": "BOSS_GLOBAL_MCP_REGISTRY_PATH"
+  },
+  "consumers": [
+    {
+      "id": "codex",
+      "name": "Codex CLI",
+      "mode": "internal",
+      "defaultConfigPath": "/home/boss/.codex/config.toml"
+    },
+    {
+      "id": "claude",
+      "name": "Claude Code CLI",
+      "mode": "internal",
+      "defaultConfigPath": "/home/boss/.claude/claude_desktop_config.json"
+    },
+    {
+      "id": "hermes",
+      "name": "Hermes",
+      "mode": "internal",
+      "defaultConfigPath": "/home/boss/.hermes/mcp.json"
+    }
+  ],
+  "customConnections": [
+    {
+      "id": "mygentic",
+      "name": "Mygentic Connect",
+      "transport": "http",
+      "serverUrl": "https://connect.mygentic.io/mcp",
+      "loginUrl": "https://connect.mygentic.io/mcp",
+      "tokenEnv": "BOSS_GLOBAL_MCP_TOKEN",
+      "configPath": "/home/boss/.codex/config.toml",
+      "description": "Authenticated Mygentic Connect MCP for shared VPS agent access. OAuth login is required before tool calls can run.",
+      "enabled": true,
+      "createdAt": "2026-07-06T15:57:14Z",
+      "updatedAt": "2026-07-06T15:57:14Z"
+    }
+  ],
+  "instructions": [
+    "Use /api/mcp/global for browser-safe metadata.",
+    "Read secrets from the runtime environment or the runtime-specific MCP config.",
+    "Do not write tokens into this registry file."
+  ]
+}

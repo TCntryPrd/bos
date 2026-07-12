@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-04-07T10:00:00Z",
+  "checked": 10,
+  "replied": 0,
+  "needs_followup": 0,
+  "pending": 10,
+  "bounced": 0,
+  "details": [
+    {
+      "email": "bob.mitchell@northwestbearing.com",
+      "business_name": "Northwest Bearing",
+      "sent_date": "2026-04-06",
+      "status": "PENDING",
+      "sheet_row": 58,
+      "sheet_updated": false
+    },
+    {
+      "email": "amber@pannellassociates.com",
+      "business_name": "Pannell Associates",
+      "sent_date": "2026-04-06",
+      "status": "PENDING",
+      "sheet_row": 121,
+      "sheet_updated": false
+    },
+    {
+      "email": "bob@wsemfg.com",
+      "business_name": "Walker & Sons",
+      "sent_date": "2026-04-06",
+      "status": "PENDING",
+      "sheet_row": 133,
+      "sheet_updated": false
+    },
+    {
+      "email": "jcormier@2ocs.com",
+      "business_name": "2OCS",
+      "sent_date": "2026-04-06",
+      "status": "PENDING",
+      "sheet_row": 97,
+      "sheet_updated": false
+    },
+    {
+      "email": "bsheely@ilss-llc.com",
+      "business_name": "Innovative Life Safety",
+      "sent_date": "2026-04-06",
+      "status": "PENDING",
+      "sheet_row": 147,
+      "sheet_updated": false
+    },
+    {
+      "email": "billy@meps.com",
+      "business_name": "Mobile Electric Power",
+      "sent_date": "2026-04-06",
+      "status": "PENDING",
+      "sheet_row": 188,
+      "sheet_updated": false
+    },
+    {
+      "email": "derrel@meps.com",
+      "business_name": "Mobile Electric Power",
+      "sent_date": "2026-04-06",
+      "status": "PENDING",
+      "sheet_row": 194,
+      "sheet_updated": false
+    },
+    {
+      "email": "dmessinger@progressiveproductsinc.com",
+      "business_name": "Progressive Products",
+      "sent_date": "2026-04-06",
+      "status": "PENDING",
+      "sheet_row": 123,
+      "sheet_updated": false
+    },
+    {
+      "email": "johns@scarboroughco.com",
+      "business_name": "Scarborough Co",
+      "sent_date": "2026-04-06",
+      "status": "PENDING",
+      "sheet_row": 165,
+      "sheet_updated": false
+    },
+    {
+      "email": "richardo@scarboroughco.com",
+      "business_name": "Scarborough Co",
+      "sent_date": "2026-04-06",
+      "status": "PENDING",
+      "sheet_row": 223,
+      "sheet_updated": false
+    }
+  ]
+}

@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# IR Custom AIOS v2 — CLI Entry Point
+# Usage: boss <subcommand> [args]
+#
+# Subcommands:
+#   onboard          Run the onboarding flow
+#   status           Show container health and API status
+#   logs [service]   Tail logs for a service (or all services)
+#   help             Show this help message
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+# ---------------------------------------------------------------------------
+# Subcommand: onboard
+# ---------------------------------------------------------------------------
+cmd_onboard() {
+  exec bash "$SCRIPT_DIR/onboard.sh" "$@"
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: status
+# ---------------------------------------------------------------------------
+cmd_status() {
+  printf "${CYAN}${BOLD}IR Custom AIOS v2 — Status${RESET}\n\n"
+
+  # API health
+  printf "${BOLD}API${RESET}\n"
+  local response
+  if response=$(curl -sf --max-time 5 http://localhost:8001/health 2>/dev/null); then
+    printf "  ${GREEN}[OK]${RESET}   http://localhost:8001/health\n"
+    if command -v jq &>/dev/null; then
+      echo "$response" | jq -r '.' 2>/dev/null | sed 's/^/         /' || true
+    fi
+  else
+    printf "  ${RED}[DOWN]${RESET} API not responding at http://localhost:8001\n"
+  fi
+
+  echo ""
+
+  # Container status
+  printf "${BOLD}Containers${RESET}\n"
+  if ! command -v docker &>/dev/null; then
+    printf "  ${RED}[FAIL]${RESET} Docker not found\n"
+    return 1
+  fi
+
+  local total=0 running=0
+
+  while IFS='|' read -r name state health ports; do
+    name=$(echo "$name" | xargs)
+    state=$(echo "$state" | xargs)
+    health=$(echo "$health" | xargs)
+    ports=$(echo "$ports" | xargs)
+    ((total++)) || true
+
+    local status_icon
+    if [[ "$state" == "running" ]]; then
+      ((running++)) || true
+      if [[ "$health" == "unhealthy" ]]; then
+        status_icon="${YELLOW}[WARN]${RESET}"
+      else
+        status_icon="${GREEN}[OK]${RESET}"
+      fi
+    else
+      status_icon="${RED}[DOWN]${RESET}"
+    fi
+
+    printf "  %-8s %-22s %-10s %s\n" "$status_icon" "$name" "$state" "${DIM}${ports}${RESET}"
+  done < <(docker compose -f "$COMPOSE_FILE" ps --format '{{.Name}}|{{.State}}|{{.Health}}|{{.Ports}}' 2>/dev/null || true)
+
+  if [[ $total -eq 0 ]]; then
+    printf "  ${RED}[FAIL]${RESET} No containers found. Run: cd $PROJECT_DIR && docker compose up -d\n"
+    return 1
+  fi
+
+  echo ""
+  printf "  ${BOLD}$running/$total${RESET} containers running\n"
+
+  # Uptime summary
+  echo ""
+  printf "${BOLD}Endpoints${RESET}\n"
+  printf "  API:       http://localhost:8001\n"
+  printf "  Dashboard: http://localhost:8005\n"
+  printf "  Remote:    https://last-castle.daggertooth-larch.ts.net/boss/ui/\n"
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: logs
+# ---------------------------------------------------------------------------
+cmd_logs() {
+  local service="${1:-}"
+
+  if [[ -z "$service" ]]; then
+    printf "${DIM}Tailing all services. Ctrl+C to stop.${RESET}\n\n"
+    docker compose -f "$COMPOSE_FILE" logs -f --tail=50
+  else
+    # Validate service name
+    local valid_services
+    valid_services=$(docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null | tr '\n' ' ')
+
+    if ! docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null | grep -qx "$service"; then
+      printf "${RED}Unknown service:${RESET} %s\n" "$service"
+      printf "Available services: ${CYAN}%s${RESET}\n" "$valid_services"
+      return 1
+    fi
+
+    printf "${DIM}Tailing $service logs. Ctrl+C to stop.${RESET}\n\n"
+    docker compose -f "$COMPOSE_FILE" logs -f --tail=100 "$service"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: help
+# ---------------------------------------------------------------------------
+cmd_help() {
+  cat << EOF
+${CYAN}${BOLD}IR Custom AIOS v2 CLI${RESET}
+
+${BOLD}Usage:${RESET}
+  boss <command> [args]
+
+${BOLD}Commands:${RESET}
+  onboard          Run the onboarding flow (health checks, URLs, QR code)
+  status           Show container health and API status
+  logs [service]   Tail logs for a service, or all services if none specified
+  help             Show this help message
+
+${BOLD}Services for 'logs':${RESET}
+  api, worker, web, postgres, redis, weaviate, stt
+
+${BOLD}Examples:${RESET}
+  boss onboard
+  boss status
+  boss logs api
+  boss logs          ${DIM}# all services${RESET}
+
+${DIM}Project: $PROJECT_DIR${RESET}
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Routing
+# ---------------------------------------------------------------------------
+subcommand="${1:-help}"
+shift || true
+
+case "$subcommand" in
+  onboard)  cmd_onboard "$@" ;;
+  status)   cmd_status "$@" ;;
+  logs)     cmd_logs "$@" ;;
+  help|-h|--help) cmd_help ;;
+  *)
+    printf "${RED}Unknown command:${RESET} %s\n\n" "$subcommand"
+    cmd_help
+    exit 1
+    ;;
+esac

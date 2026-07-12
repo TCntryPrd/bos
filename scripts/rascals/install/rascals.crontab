@@ -1,0 +1,17 @@
+# Little Rascals — cron schedule.
+# Installed at /etc/cron.d/little-rascals. Ships EMPTY on fresh installs —
+# add one morning-check + save pair for each rascal *after* you've imported
+# them via the API and enabled them. Example (uncomment after importing darla):
+#
+#   0  7 * * 1-5 tcntryprd /home/tcntryprd/boss-dev/scripts/rascals/wake-agent.sh darla "Run crons/morning-check.md for $(date +%F)"
+#   15 7 * * 1-5 tcntryprd /home/tcntryprd/boss-dev/scripts/rascals/agent-save.sh darla morning-check
+#
+# Stagger: leave ≥2 min between distinct agents' morning checks.
+# Weekly reset (disabled in v1.4.0 — enable after an observation window):
+#   0  3 * * 0 tcntryprd /home/tcntryprd/boss-dev/scripts/rascals/rascals-reset.sh
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+# (no active cron entries — operator adds them after importing rascals)

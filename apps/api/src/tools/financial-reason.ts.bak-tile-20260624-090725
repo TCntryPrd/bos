@@ -1,0 +1,150 @@
+/**
+ * boss_financial_reason — the CFO's REASONING engine (Kevin's orchestrator design).
+ *
+ * Nemotron thinks, Llama works. The CFO agent runs on a clean tool-caller (Llama 3.3);
+ * it calls THIS tool, which gathers the raw financial data itself (ERA banking + Stripe)
+ * and hands ALL of it to a reasoning model (NVIDIA NIM Nemotron 3) in ONE tool-free call
+ * for the judgement: classify every deposit as revenue vs non-revenue, apply the Industry
+ * Rockstar billing-window logic, sum cash across accounts, compute revenue, flag risks, and
+ * write the bottom line. Returns a structured snapshot the CFO saves with
+ * boss_finance_snapshot_save. Reasoning models are reliable in a single tool-free pass (they
+ * leak tool-call JSON when made to drive a tool loop), so the split plays to both strengths.
+ */
+import type { BrainTool } from '@boss/brain';
+import { executeEraTool } from './era.js';
+
+const NIM_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const STRIPE_API = 'https://api.stripe.com/v1';
+
+function ymd(d: Date): string { return d.toISOString().slice(0, 10); }
+
+/** Pull recent Stripe balance, payments, and open invoices directly (read-only). */
+async function gatherStripe(): Promise<string> {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) return 'Stripe: not configured (no STRIPE_SECRET_KEY).';
+  const headers = { Authorization: `Bearer ${key}` };
+  const since = Math.floor((Date.now() - 35 * 864e5) / 1000); // ~last 35 days
+  try {
+    const [balRes, payRes, invRes] = await Promise.all([
+      fetch(`${STRIPE_API}/balance`, { headers, signal: AbortSignal.timeout(20_000) }),
+      fetch(`${STRIPE_API}/charges?limit=100&created[gte]=${since}`, { headers, signal: AbortSignal.timeout(20_000) }),
+      fetch(`${STRIPE_API}/invoices?status=open&limit=100`, { headers, signal: AbortSignal.timeout(20_000) }),
+    ]);
+    const bal: any = balRes.ok ? await balRes.json() : { error: balRes.status };
+    const pay: any = payRes.ok ? await payRes.json() : { error: payRes.status };
+    const inv: any = invRes.ok ? await invRes.json() : { error: invRes.status };
+    const avail = (bal.available ?? []).reduce((s: number, b: any) => s + (b.amount ?? 0), 0) / 100;
+    const pending = (bal.pending ?? []).reduce((s: number, b: any) => s + (b.amount ?? 0), 0) / 100;
+    const charges = (pay.data ?? []).map((c: any) => ({
+      amount: (c.amount ?? 0) / 100, status: c.status, paid: c.paid, refunded: c.refunded,
+      created: new Date((c.created ?? 0) * 1000).toISOString().slice(0, 10),
+      desc: c.description ?? c.statement_descriptor ?? '', customer: c.customer ?? '',
+    }));
+    const invoices = (inv.data ?? []).map((i: any) => ({
+      number: i.number, amount_due: (i.amount_due ?? 0) / 100, status: i.status,
+      due: i.due_date ? new Date(i.due_date * 1000).toISOString().slice(0, 10) : null, customer: i.customer_email ?? i.customer ?? '',
+    }));
+    return JSON.stringify({ stripe_available: avail, stripe_pending: pending, charges, open_invoices: invoices });
+  } catch (err) {
+    return `Stripe gather error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+const ANALYST_SYSTEM = `You are an elite, careful CFO financial analyst for Kevin Starr (Starr & Partners / D. Caine Solutions). You are given this run's RAW financial data (ERA bank data + Stripe). Produce ONE accurate financial snapshot as STRICT minified JSON. Never invent numbers; use only what the data shows. Output ONLY the JSON object, no prose.
+
+RULES:
+- cash_available = SUM of available (or current) balances across ALL bank accounts in the data. Never just one account.
+- net_worth = ERA's reported net worth if present, else sum of account balances.
+- month_net = this month's income minus spending if ERA reports it.
+- REVENUE: review EVERY inbound deposit / credit. Classify each as REVENUE (a payment received for work/services: a client paying by ACH/Zelle/check/wire, the Industry Rockstar recurring $3,500, Stripe charges that succeeded) or NON-REVENUE (transfer between Kevin's own accounts, refund, loan/credit-line draw, owner contribution, interest, reimbursement). Count ONLY revenue.
+- INDUSTRY ROCKSTAR (IR): $3,500/month, paid by bank deposit (NOT Stripe). IR pays EARLY: the payment that COVERS a month lands between the 28th of the PRIOR month and the 4th of that month. So an IR deposit dated e.g. May 28 - June 4 IS the JUNE payment even though cash posted in May. If a ~$3,500 IR deposit exists in [28th of last month .. 4th of this month], THIS month is PAID: count $3,500 in this month's revenue and do NOT flag it missing/overdue. Flag IR overdue ONLY if no such deposit exists AND today is past the 4th.
+- revenue_mtd = Stripe succeeded charges this month + every bank deposit classified as revenue (including the IR payment recognized for THIS month). Count ONLY money that ACTUALLY posted; never count expected/unposted amounts.
+- ambiguous_deposits = deposits you could not confidently classify; list them for Kevin to confirm. Do NOT count them in revenue.
+- flags = short alert strings (bounced payments, overdue invoices, low cash/runway, anomalies, duplicate charges, IR overdue if truly past the 4th with no deposit).
+- bottom_line = one sentence the COO can act on.
+
+OUTPUT EXACTLY these keys (numbers as numbers, not strings):
+{"cash_available":0,"net_worth":0,"month_net":0,"revenue_mtd":0,"revenue_breakdown":"Stripe $X + Industry Rockstar $3,500 + ...","stripe_available":0,"stripe_pending":0,"ar_open_count":0,"ar_open_total":0,"bounced_payments":0,"ambiguous_deposits":[{"date":"","amount":0,"description":""}],"flags":["..."],"bottom_line":"..."}`;
+
+export const financialReasonTool: BrainTool = {
+  name: 'boss_financial_reason',
+  description:
+    'Run the full financial analysis for this period. This gathers the ERA bank data + Stripe itself and uses the reasoning model to classify every deposit (revenue vs non-revenue), apply the Industry Rockstar billing window, sum cash, and compute revenue. ' +
+    'Returns a JSON snapshot {cash_available, net_worth, month_net, revenue_mtd, revenue_breakdown, stripe_available, stripe_pending, ar_open_count, ar_open_total, bounced_payments, ambiguous_deposits, flags, bottom_line}. Call this ONCE, then save the result with boss_finance_snapshot_save and report it.',
+  parameters: { type: 'object', properties: {}, required: [] },
+};
+
+export const ALL_FINANCIAL_TOOLS: BrainTool[] = [financialReasonTool];
+
+async function handleFinancialReason(): Promise<string> {
+  const key = process.env.NVIDIA_NIM_API_KEY;
+  if (!key) return JSON.stringify({ error: 'reasoner unavailable (no NIM key)', flags: ['CFO reasoner offline'] });
+  const model = process.env.FINANCE_REASONER_MODEL || 'nvidia/nemotron-3-super-120b-a12b';
+
+  // Date window: from the 25th of last month through today (covers the IR window + this month).
+  const now = new Date();
+  const winStart = new Date(now.getFullYear(), now.getMonth() - 1, 25);
+
+  // Gather in parallel. ERA via the existing executor; Stripe direct.
+  const [overview, accounts, txns, recurring, stripe] = await Promise.all([
+    executeEraTool('boss_era_financial_overview', {}).catch((e) => `overview error: ${e}`),
+    executeEraTool('boss_era_accounts', {}).catch((e) => `accounts error: ${e}`),
+    executeEraTool('boss_era_transactions', { from_date: ymd(winStart), to_date: ymd(now) }).catch((e) => `txns error: ${e}`),
+    executeEraTool('boss_era_recurring_charges', {}).catch((e) => `recurring error: ${e}`),
+    gatherStripe(),
+  ]);
+
+  const dataBundle = `TODAY: ${ymd(now)}  (so "this month" = ${now.toLocaleString('en-US', { month: 'long' })} ${now.getFullYear()}; IR window for this month = ${ymd(winStart)}..${ymd(new Date(now.getFullYear(), now.getMonth(), 4))})
+
+=== ERA FINANCIAL OVERVIEW ===
+${overview}
+
+=== ERA ACCOUNTS (sum these for cash_available) ===
+${accounts}
+
+=== ERA TRANSACTIONS (${ymd(winStart)} to ${ymd(now)} — classify every inbound deposit) ===
+${txns}
+
+=== ERA RECURRING CHARGES ===
+${recurring}
+
+=== STRIPE ===
+${stripe}`;
+
+  let lastErr = '';
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(NIM_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: ANALYST_SYSTEM },
+            { role: 'user', content: dataBundle.slice(0, 28000) },
+          ],
+          temperature: 0.1,
+          max_tokens: 8000, // reasoning model burns ~6k tokens thinking before the JSON; give headroom
+          response_format: { type: 'json_object' },
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!res.ok) { lastErr = `http ${res.status}`; continue; }
+      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string; reasoning_content?: string } }> };
+      const m0 = data.choices?.[0]?.message ?? {};
+      const content = ((m0.content || '').trim()) || ((m0.reasoning_content || '').trim());
+      const s = content.indexOf('{'); const e = content.lastIndexOf('}');
+      if (s === -1 || e === -1) { lastErr = 'no JSON in reply'; continue; }
+      const parsed = JSON.parse(content.slice(s, e + 1)); // throws -> caught below
+      // Hand the raw gathered Stripe AR back too, so the CFO/agent can cross-check if needed.
+      return JSON.stringify(parsed);
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err);
+    }
+  }
+  return JSON.stringify({ error: `financial reasoner failed: ${lastErr}`, flags: [`CFO reasoner failed: ${lastErr}`], bottom_line: 'Financial analysis unavailable this run; reasoner error.' });
+}
+
+export const FINANCIAL_TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<string>> = {
+  boss_financial_reason: handleFinancialReason,
+};

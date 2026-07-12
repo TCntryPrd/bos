@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-04-07T03:31:45.315Z",
+  "run_id": "e6ef1189-6b33-4506-aa9e-e67607ad89fc",
+  "emails": [
+    {
+      "id": "19d65e6d60a7d3d5",
+      "account": "d.caine@dcaine.com",
+      "from": "Make <noreply@us2.make.com>",
+      "subject": "⚠️ Encountered 2 warnings in scenario GHL   April 11, 2026 - AI Change Management",
+      "snippet": "Encountered 2 warnings in scenario GHL April 11, 2026 - AI Change Management Your scenario GHL April 11, 2026 - AI Change Management has encountered 2 warnings in last 15 minutes. We recommend that you",
+      "category": "P3_EYES_ONLY",
+      "reason": "Automated Make.com scenario alert for client org (Kane Minkus). Warnings about missing 'last_name' parameter in GHL scenario. Tool notification — no reply needed, but worth awareness.",
+      "received_at": "2026-04-07T03:05:19.000Z"
+    }
+  ],
+  "summary": {
+    "total_processed": 1,
+    "p1_count": 0,
+    "p2_count": 0,
+    "p3_count": 1,
+    "automated_count": 0,
+    "promo_count": 0,
+    "promo_archived": 0
+  }
+}

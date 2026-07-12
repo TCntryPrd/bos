@@ -1,0 +1,14 @@
+boss_executor|Up 23 hours (healthy)|boss-v2-executor
+boss_api|Up 23 hours (healthy)|boss-v2-api
+boss_worker|Up 23 hours (healthy)|boss-v2-worker
+boss_weaviate|Up 23 hours (healthy)|semitechnologies/weaviate:1.28.2
+boss_web|Up 23 hours (healthy)|boss-v2-web
+boss_weaviate_console|Up 23 hours|semitechnologies/weaviate-console:latest
+boss_redis|Up 23 hours (healthy)|redis:7-alpine
+boss_stt|Up 23 hours (healthy)|boss-v2-stt
+boss_postgres|Up 23 hours (healthy)|postgres:16-alpine
+openwa-api|Up 4 days (healthy)|openwa-openwa-api
+omnivoice-studio|Up 4 days (healthy)|ghcr.io/debpalash/omnivoice-studio:latest
+n8n|Up 4 days|n8nio/n8n
+n8n-postgres-1|Up 4 days (healthy)|pgvector/pgvector:pg16
+boss_homeassistant|Up 4 days|ghcr.io/home-assistant/home-assistant:stable

@@ -1,0 +1,17 @@
+# Grafana provisioning — dashboard loader
+# Points Grafana at the /var/lib/grafana/dashboards directory (mapped from
+# services/monitoring/grafana/dashboards/ in the repo).
+# All JSON files in that directory are loaded automatically.
+
+apiVersion: 1
+
+providers:
+  - name: IR Custom AIOS Dashboards
+    orgId: 1
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

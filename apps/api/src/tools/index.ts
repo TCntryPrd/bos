@@ -1,0 +1,359 @@
+/**
+ * Tool registry — returns BrainTool definitions based on what's connected.
+ *
+ * The brain receives this list so it knows which tools it can call.
+ * Tools are only offered when the underlying integration is configured,
+ * so the brain never tries to invoke a tool for a disconnected service.
+ *
+ * Gating rules:
+ *   - Google tools: a Google OAuth token must exist in boss_oauth_tokens
+ *   - n8n tools: N8N_API_KEY env var must be set
+ *   - Home Assistant tools: HA_ACCESS_TOKEN env var must be set
+ *   - Slack tools: SLACK_BOT_TOKEN env var must be set
+ *   - Telegram tools: TELEGRAM_BOT_TOKEN env var must be set
+ *   - Notion tools: NOTION_API_KEY env var must be set
+ *   - Miro tools: MIRO_ACCESS_TOKEN env var must be set
+ *   - Airtable tools: AIRTABLE_API_KEY env var must be set
+ *   - Make.com tools: MAKE_API_KEY env var must be set
+ *   - Stripe tools: STRIPE_SECRET_KEY env var must be set
+ *   - QuickBooks tools: QB_CLIENT_ID/QB_CLIENT_SECRET set + company connected
+ *     (OAuth refresh token + realm ID in runtime_config)
+ *   - Gemini tools: GEMINI_API_KEY env var must be set
+ *   - Agent tools: always available; gated by trust tier (operator minimum)
+ */
+
+import type { BrainTool } from '@boss/brain';
+import { getPool } from '../db.js';
+import { ALL_GOOGLE_TOOLS } from './google.js';
+import { ALL_CTO_TOOLS } from './cto.js';
+import { ALL_N8N_TOOLS } from './n8n.js';
+import { ALL_HA_TOOLS } from './homeassistant.js';
+import { ALL_SLACK_TOOLS } from './slack.js';
+import { ALL_TELEGRAM_TOOLS } from './telegram.js';
+import { ALL_NOTION_TOOLS } from './notion.js';
+import { ALL_MIRO_TOOLS } from './miro.js';
+import { ALL_AIRTABLE_TOOLS } from './airtable.js';
+import { ALL_MAKE_TOOLS } from './make.js';
+import { ALL_STRIPE_TOOLS } from './stripe.js';
+import { ALL_QBO_TOOLS } from './quickbooks.js';
+import { qboConfigured, qboConnected } from './quickbooks-auth.js';
+import { ALL_ERA_TOOLS } from './era.js';
+import { ALL_FINANCE_TOOLS } from './finance.js';
+import { ALL_HEALTH_TOOLS } from './health.js';
+import { ALL_CRM_SNAPSHOT_TOOLS } from './crm-snapshot.js';
+import { ALL_CRM_SYNC_TOOLS } from './crm-sync.js';
+import { ALL_AGENT_TOOLS } from './agents.js';
+import { ALL_GEMINI_TOOLS } from './gemini.js';
+import { ALL_EMAIL_AGENT_TOOLS } from './email-agent.js';
+import { ALL_FS_TOOLS } from './filesystem.js';
+import { ALL_SYS_TOOLS } from './system.js';
+import { ALL_BACKUP_STATUS_TOOLS } from './backup-status.js';
+import { ALL_HOST_STATUS_TOOLS } from './host-status.js';
+import { ALL_SELF_IDENTITY_TOOLS } from './self-identity.js';
+import { ALL_HOST_MANAGEMENT_TOOLS } from './host-management.js';
+import { ALL_HOST_SECURITY_TOOLS } from './host-security.js';
+import { ALL_TELEMETRY_TOOLS } from './telemetry.js';
+import { ALL_KANBAN_TOOLS } from './kanban-tools.js';
+import { ALL_MEMORY_TOOLS } from './memory.js';
+import { ALL_YOUTUBE_TOOLS } from './youtube.js';
+import { ALL_GITHUB_TOOLS } from './github.js';
+import { ALL_TTS_TOOLS } from './tts.js';
+import { ALL_SELF_MOD_TOOLS } from './self-mod.js';
+import { ALL_PERSISTENT_AGENT_TOOLS } from './persistent-agents.js';
+import { ALL_WEAVIATE_TOOLS } from './weaviate.js';
+import { ALL_WEB_TOOLS } from './web-search.js';
+import { ALL_CRM_TOOLS } from './crm.js';
+import { ALL_VOICE_AGENT_TOOLS } from './voice-agents.js';
+import { ALL_PIPELINE_TOOLS } from './pipeline.js';
+import { ALL_META_TOOLS, ALL_WHATSAPP_TOOLS } from './meta.js';
+import { ALL_LINKEDIN_TOOLS } from './linkedin.js';
+import { ALL_EMAIL_DRAFT_TOOLS } from './email-drafts.js';
+import { ALL_VALIDATOR_TOOLS } from './validator.js';
+import { ALL_TRIAGE_TOOLS } from './triage-reason.js';
+import { ALL_FINANCIAL_TOOLS } from './financial-reason.js';
+import { ALL_AGENT_EVAL_TOOLS } from './agent-evals.js';
+import { ALL_CLIENT_ROUTING_TOOLS } from './client-routing.js';
+import { filterToolsByTrust, type TrustTier } from './trust.js';
+import { getUnipileConnectionStatus, isUnipileConfigured } from '../lib/unipile.js';
+
+// Passkey management is CLI-only — no brain tools. Admin uses terminal.
+
+/**
+ * Returns the set of available BrainTools for the given tenant, filtered by
+ * the caller's trust tier.
+ *
+ * Trust tier controls which tools are offered to the brain based on the user's
+ * role. Falls back to an empty array on any DB error so a missing token store
+ * doesn't break the chat endpoint — the brain will simply have no tools.
+ *
+ * @param _tenantId - Tenant identifier (reserved for multi-tenant token isolation)
+ * @param trustTier - Caller's trust tier; defaults to 'observer' (most restrictive)
+ */
+export async function getAvailableTools(
+  _tenantId: string,
+  trustTier: TrustTier = 'observer',
+): Promise<BrainTool[]> {
+  const tools: BrainTool[] = [];
+
+  // ── Google Workspace ──────────────────────────────────────────────────────
+  try {
+    const pool = getPool();
+    const result = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM boss_oauth_tokens WHERE provider = 'google'`,
+    );
+    const googleCount = parseInt(result.rows[0]?.count ?? '0', 10);
+    if (googleCount > 0) {
+      tools.push(...ALL_GOOGLE_TOOLS);
+    }
+  } catch {
+    // DB not yet available or no Google tokens — skip silently
+  }
+
+  // ── n8n ───────────────────────────────────────────────────────────────────
+  // Available whenever N8N_API_KEY is configured.
+  if (process.env.N8N_API_KEY) {
+    tools.push(...ALL_N8N_TOOLS);
+  }
+
+  // ── Home Assistant ────────────────────────────────────────────────────────
+  // Token is a static long-lived token; no DB lookup needed.
+  if (process.env.HA_ACCESS_TOKEN) {
+    tools.push(...ALL_HA_TOOLS);
+  }
+
+  // ── Slack ─────────────────────────────────────────────────────────────────
+  // Available whenever SLACK_BOT_TOKEN (xoxb-...) is configured.
+  if (process.env.SLACK_BOT_TOKEN) {
+    tools.push(...ALL_SLACK_TOOLS);
+  }
+
+  // ── Meta (Facebook / Instagram / Threads / legacy WhatsApp Cloud / Ads) ─────
+  // Available once credentials are registered (boss_meta_credentials.app_id set).
+  let metaToolsAdded = false;
+  try {
+    const metaCount = await getPool().query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM boss_meta_credentials WHERE app_id IS NOT NULL`,
+    );
+    if (parseInt(metaCount.rows[0]?.count ?? '0', 10) > 0) {
+      tools.push(...ALL_META_TOOLS);
+      metaToolsAdded = true;
+    }
+  } catch {
+    // boss_meta_credentials not present yet — skip silently
+  }
+
+  if (!metaToolsAdded && isUnipileConfigured()) {
+    try {
+      const whatsapp = await getUnipileConnectionStatus('WHATSAPP');
+      if (whatsapp.connected) tools.push(...ALL_WHATSAPP_TOOLS);
+    } catch {
+      // no Unipile WhatsApp account yet — skip silently
+    }
+  }
+
+  // ── LinkedIn ──────────────────────────────────────────────────────────────
+  // Available once Unipile LinkedIn is connected, or old OAuth exists.
+  if (isUnipileConfigured()) {
+    try {
+      const linkedin = await getUnipileConnectionStatus('LINKEDIN');
+      if (linkedin.connected) {
+        tools.push(...ALL_LINKEDIN_TOOLS);
+      }
+    } catch {
+      // no Unipile LinkedIn account yet — fall through to old OAuth check
+    }
+  }
+  try {
+    const liCount = await getPool().query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM boss_oauth_tokens WHERE provider = 'linkedin'`,
+    );
+    if (parseInt(liCount.rows[0]?.count ?? '0', 10) > 0 && !tools.some((tool) => tool.name === 'boss_linkedin_post')) {
+      tools.push(...ALL_LINKEDIN_TOOLS);
+    }
+  } catch {
+    // no linkedin token yet — skip silently
+  }
+
+  // ── Email draft rating + learning ─────────────────────────────────────────
+  // Always available: the Email Agent records drafts for rating + reads feedback.
+  tools.push(...ALL_EMAIL_DRAFT_TOOLS);
+  tools.push(...ALL_VALIDATOR_TOOLS);
+  tools.push(...ALL_TRIAGE_TOOLS);
+  tools.push(...ALL_FINANCIAL_TOOLS);
+  tools.push(...ALL_AGENT_EVAL_TOOLS);
+  tools.push(...ALL_CLIENT_ROUTING_TOOLS);
+
+  // ── Telegram ─────────────────────────────────────────────────────────────
+  // Available whenever TELEGRAM_BOT_TOKEN is configured.
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    tools.push(...ALL_TELEGRAM_TOOLS);
+  }
+
+  // ── Notion ────────────────────────────────────────────────────────────────
+  // Available whenever NOTION_API_KEY (integration secret) is configured.
+  if (process.env.NOTION_API_KEY) {
+    tools.push(...ALL_NOTION_TOOLS);
+  }
+
+  // ── Miro ──────────────────────────────────────────────────────────────────
+  // Available whenever MIRO_ACCESS_TOKEN is configured.
+  if (process.env.MIRO_ACCESS_TOKEN) {
+    tools.push(...ALL_MIRO_TOOLS);
+  }
+
+  // ── Airtable ──────────────────────────────────────────────────────────────
+  // Available whenever AIRTABLE_API_KEY is configured.
+  if (process.env.AIRTABLE_API_KEY) {
+    tools.push(...ALL_AIRTABLE_TOOLS);
+  }
+
+  // ── Make.com ──────────────────────────────────────────────────────────────
+  // Available whenever MAKE_API_KEY is configured.
+  if (process.env.MAKE_API_KEY) {
+    tools.push(...ALL_MAKE_TOOLS);
+  }
+
+  // ── Stripe ────────────────────────────────────────────────────────────────
+  // Available whenever STRIPE_SECRET_KEY is configured.
+  if (process.env.STRIPE_SECRET_KEY) {
+    tools.push(...ALL_STRIPE_TOOLS);
+  }
+
+  // ── QuickBooks Online ─────────────────────────────────────────────────────
+  // Requires app credentials (QB_CLIENT_ID/QB_CLIENT_SECRET) AND a connected
+  // company (OAuth refresh token + realm ID in runtime_config).
+  try {
+    if (qboConfigured() && (await qboConnected())) {
+      tools.push(...ALL_QBO_TOOLS);
+    }
+  } catch {
+    // DB not yet available — skip silently, same as the Google gate above
+  }
+
+  // ── ERA Context (personal finance — CFO agent) ─────────────────────────────
+  // Available whenever ERA_MCP_API_KEY is configured (loaded from runtime_config).
+  if (process.env.ERA_MCP_API_KEY) {
+    tools.push(...ALL_ERA_TOOLS);
+  }
+
+  // ── Gemini ────────────────────────────────────────────────────────────────
+  // Available whenever GEMINI_API_KEY is configured (Google AI Studio).
+  if (process.env.GEMINI_API_KEY) {
+    tools.push(...ALL_GEMINI_TOOLS);
+  }
+
+  // ── Sub-agent spawning (always available — no API key gate) ─────────────────
+  // Agent tools are meta-tools for the main brain; they are not filtered by
+  // trust tier because spawning requires the main brain to already be trusted.
+  tools.push(...ALL_AGENT_TOOLS);
+
+  // ── Email agent (always available — reads internal Postgres log) ─────────────
+  tools.push(...ALL_EMAIL_AGENT_TOOLS);
+
+  // ── Finance snapshot (always available — writes internal Postgres) ───────────
+  tools.push(...ALL_FINANCE_TOOLS);
+
+  // ── Health (always available — reads internal Postgres health_daily) ─────────
+  tools.push(...ALL_HEALTH_TOOLS);
+
+  // ── CTO / Chief Engineer — incident response + cost remediation ──────────────
+  tools.push(...ALL_CTO_TOOLS);
+
+  // ── CRM snapshot (always available — writes internal Postgres) ───────────────
+  tools.push(...ALL_CRM_SNAPSHOT_TOOLS);
+
+  // ── CRM sync + metrics (always available — the key is read from runtime_config
+  // at call time; handlers fail gracefully if it's missing) ────────────────────
+  tools.push(...ALL_CRM_SYNC_TOOLS);
+
+  // ── Filesystem (always available — reads/writes local project files) ────────
+  tools.push(...ALL_FS_TOOLS);
+
+  // ── System monitoring (always available — reads host system status) ────────
+  tools.push(...ALL_SYS_TOOLS);
+
+  // ── Backup status (vD.0.1 — reads /var/lib/boss-backups/status.json) ─────
+  tools.push(...ALL_BACKUP_STATUS_TOOLS);
+
+  // ── Host status (vS.0.1 — composite system health snapshot) ────────────────
+  tools.push(...ALL_HOST_STATUS_TOOLS);
+
+  // ── Self-identity (vS.0.4 — BOS's canonical identity + reflections) ────
+  tools.push(...ALL_SELF_IDENTITY_TOOLS);
+
+  // ── Host management (vS.1.0 — apt, systemctl, cron, audit log) ────────────
+  tools.push(...ALL_HOST_MANAGEMENT_TOOLS);
+
+  // ── Host security (vS.1.1 — firewall, ports, certs, auth, SSH, fail2ban) ──
+  tools.push(...ALL_HOST_SECURITY_TOOLS);
+
+  // ── Telemetry & self-improvement (vS.2.0) ─────────────────────────────────
+  tools.push(...ALL_TELEMETRY_TOOLS);
+
+  // ── Kanban brain tools (v1.7.14) — move/advance/block ─────────────────────
+  tools.push(...ALL_KANBAN_TOOLS);
+
+  // ── Memory (always available — save/recall learnings across conversations) ──
+  tools.push(...ALL_MEMORY_TOOLS);
+
+  // ── Weaviate (always available — semantic search across emails, docs, knowledge, projects) ──
+  tools.push(...ALL_WEAVIATE_TOOLS);
+
+  // ── YouTube — uses GOOGLE_TTS_API_KEY (which has YouTube Data API v3 enabled)
+  // Gemini key can't be combined with YouTube. TTS key has both TTS + YouTube.
+  if (process.env.YOUTUBE_API_KEY || process.env.GOOGLE_TTS_API_KEY || process.env.GEMINI_API_KEY) {
+    tools.push(...ALL_YOUTUBE_TOOLS);
+    if (!process.env.YOUTUBE_API_KEY) {
+      process.env.YOUTUBE_API_KEY = process.env.GOOGLE_TTS_API_KEY || process.env.GEMINI_API_KEY || '';
+    }
+  }
+
+  // ── GitHub ────────────────────────────────────────────────────────────────
+  if (process.env.GITHUB_TOKEN) {
+    tools.push(...ALL_GITHUB_TOOLS);
+  }
+
+  // ── TTS (uses Gemini/Google API key) ──────────────────────────────────────
+  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_TTS_API_KEY) {
+    tools.push(...ALL_TTS_TOOLS);
+  }
+
+  // ── Web search (always available — no API key needed) ──────────────────
+  tools.push(...ALL_WEB_TOOLS);
+
+  // ── CRM (GoHighLevel) — loaded when crm_api_key is in runtime_config ───
+  // Always register — the handlers check for the key at call time.
+  tools.push(...ALL_CRM_TOOLS);
+
+  // ── Voice agent routing (always available — routes voice commands to agents) ──
+  tools.push(...ALL_VOICE_AGENT_TOOLS);
+
+  // ── Pipeline Engine (Little Rascals backbone — always available) ──────
+  tools.push(...ALL_PIPELINE_TOOLS);
+
+  // ── Persistent agents (create/manage long-running agents) ──────────────
+  tools.push(...ALL_PERSISTENT_AGENT_TOOLS);
+
+  // ── Self-modification (admin only — trust filter will enforce) ──────────
+  tools.push(...ALL_SELF_MOD_TOOLS);
+
+  // Apply trust tier filter before returning
+  return filterToolsByTrust(tools, trustTier);
+}
+
+export { ALL_GOOGLE_TOOLS } from './google.js';
+export { ALL_N8N_TOOLS } from './n8n.js';
+export { ALL_HA_TOOLS } from './homeassistant.js';
+export { ALL_SLACK_TOOLS } from './slack.js';
+export { ALL_TELEGRAM_TOOLS } from './telegram.js';
+export { ALL_NOTION_TOOLS } from './notion.js';
+export { ALL_MIRO_TOOLS } from './miro.js';
+export { ALL_AIRTABLE_TOOLS } from './airtable.js';
+export { ALL_MAKE_TOOLS } from './make.js';
+export { ALL_STRIPE_TOOLS } from './stripe.js';
+export { ALL_QBO_TOOLS } from './quickbooks.js';
+export { ALL_AGENT_TOOLS } from './agents.js';
+export { ALL_GEMINI_TOOLS } from './gemini.js';
+export { ALL_EMAIL_AGENT_TOOLS } from './email-agent.js';
+export { executeTool } from './executor.js';
+export { filterToolsByTrust, tierFromRole, type TrustTier } from './trust.js';

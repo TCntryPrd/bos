@@ -1,0 +1,5 @@
+
+=== System services ===
+  actions.runner.TCntryPrd-boss-dev.last-castle-runner.service loaded active running GitHub Actions Runner (TCntryPrd-boss-dev.last-castle-runner)
+  docker.service                                                 loaded active running Docker Application Container Engine
+  tailscaled.service                                             loaded active running Tailscale node agent

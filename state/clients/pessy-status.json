@@ -1,0 +1,49 @@
+{
+  "date": "2026-04-06",
+  "timestamp": "2026-04-06T14:45:00Z",
+  "check_type": "Monday routine - Week 15",
+  "whatsapp_setup": {
+    "status": "waiting-on-client",
+    "details": "WhatsApp scanning is confirmed as the NEXT phase after email agent testing stabilizes. Email agent went live ~Apr 2 (Chris greenlit 'flip the switch'). Mar 23 call addressed WhatsApp Business setup — Otter notes mention Facebook Business troubleshooting. Chris explicitly asked Apr 2: 'Then we move to scanning my SMS (two numbers) and WhatsApp?' — Kevin confirmed yes, one layer at a time. WhatsApp Business API credentials/access from client still needed to proceed. Call scheduled Apr 7 may advance this.",
+    "blockers": [
+      "WhatsApp Business API credentials not yet provided — client needs to share access",
+      "Email agent testing must stabilize first before adding WhatsApp layer",
+      "Make.com scenario error needs resolution (call Apr 7)"
+    ]
+  },
+  "sow_status": {
+    "status": "pending",
+    "last_update": "2026-03-17",
+    "details": "Beatriz sent 'SOW - Chris Pessy - SMS Lead Qualification.pdf' on Mar 16 as attachment to 'System Architecture Alignment' email. Kevin reviewed it Mar 17 and replied 'great framework, a few pieces of clarification but nothing to change.' No formal sign-off or counter-signature confirmed. Project moved into active testing without explicit SOW sign-off.",
+    "pending_items": [
+      "Formal SOW sign-off from Chris or Beatriz",
+      "Kevin's clarifications were never formalized in a reply or updated doc"
+    ]
+  },
+  "active_issue": {
+    "type": "make_scenario_error",
+    "detected": "2026-04-05",
+    "scenario": "Pre-discovery call classification and qualification",
+    "error": "Cannot initialize the scenario because of the reason 'Please, turn on notifications in application settings first.'",
+    "status": "call scheduled to resolve",
+    "notes": "Chris forwarded Make error to Kevin on Apr 6. Kevin confirmed call for Apr 7 after 12:30pm EDT. Fix requires enabling notifications in Make app settings on Chris's account."
+  },
+  "last_contact": "2026-04-06",
+  "last_contact_detail": "Chris Pessy emailed Kevin forwarding a Make.com scenario error and asked to chat tomorrow. Kevin confirmed call for Apr 7 after 12:30pm EDT. Beatriz CC'd on both.",
+  "next_scheduled_contact": "2026-04-07",
+  "follow_up_needed": false,
+  "follow_up_reason": "Kevin and Chris are in active communication. Call scheduled Apr 7 covers the Make error and likely WhatsApp/next steps. No additional outreach needed today.",
+  "draft_email": null,
+  "outreach_log": [
+    {
+      "date": "2026-04-06",
+      "type": "draft_prepared",
+      "note": "Draft email prepared by earlier run for Kevin to review. Not auto-sent."
+    },
+    {
+      "date": "2026-04-06",
+      "type": "check_no_action",
+      "note": "Monday check (second pass) found Kevin already in active communication with Chris. Call scheduled Apr 7 after 12:30pm EDT. No additional outreach needed."
+    }
+  ]
+}

@@ -1,0 +1,174 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { X } from 'lucide-react';
+import { NavRail } from './shell/NavRail';
+import { TopBar } from './shell/TopBar';
+import { BossOrb } from './shell/BossOrb';
+import { useVoiceCommands } from '../hooks/useVoiceCommands';
+import officeScene from '../assets/office-scene.png';
+import boardroomScene from '../assets/boardroom-scene.png';
+
+const TITLE_MAP: Record<string, string> = {
+  '/':             'Dashboard',
+  '/dashboard':    'Dashboard',
+  '/office':       'Office',
+  '/board':        'Advisory Board',
+  '/calendar':     'Calendar',
+  '/paperclip':    'Paperclip',
+  '/crm':          'CRM',
+  '/social':       'LinkedIn',
+  '/linkedin':     'LinkedIn',
+  '/whatsapp':     'WhatsApp',
+  '/oc':           'COE - Gio',
+  '/rascals':      'Rascals',
+  '/outsiders':    'Outsiders',
+  '/admin':        'Settings',
+  '/hermes':       'Settings',
+  '/chief':        'Settings',
+  '/voice':        'Settings',
+  '/brain':        'Settings',
+  '/connectors':   'Settings',
+  '/learning':     'Settings',
+  '/self-healing': 'Settings',
+  '/backup':       'Settings',
+  '/settings':     'Settings',
+  '/setup/claude-auth': 'Claude Auth',
+  '/setup/hermes': 'Hermes Setup',
+};
+
+function pageTitleFor(pathname: string): string {
+  if (TITLE_MAP[pathname]) return TITLE_MAP[pathname];
+  const match = Object.keys(TITLE_MAP)
+    .filter((key) => key !== '/' && pathname.startsWith(key))
+    .sort((a, b) => b.length - a.length)[0];
+  return match ? TITLE_MAP[match] : 'BOS';
+}
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem('boss_sidebar_collapsed') === 'true';
+  } catch {
+    return false;
+  }
+}
+
+interface LayoutProps {
+  children: React.ReactNode;
+}
+
+export function Layout({ children }: LayoutProps) {
+  const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const location = useLocation();
+
+  useVoiceCommands({ setCollapsed });
+
+  const toggleCollapse = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('boss_sidebar_collapsed', String(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => { setMobileOpen(false); }, [location.pathname]);
+
+  const pageTitle = useMemo(() => pageTitleFor(location.pathname), [location.pathname]);
+  const officeImmersive = location.pathname === '/office';
+  const boardImmersive = location.pathname === '/board';
+  const immersiveScene = useMemo(() => {
+    if (officeImmersive) return officeScene;
+    if (boardImmersive) return boardroomScene;
+    return null;
+  }, [boardImmersive, officeImmersive]);
+  const immersive = !!immersiveScene;
+
+  return (
+    <div
+      className="relative flex h-screen overflow-hidden"
+      style={{ background: immersive ? '#06080b' : 'var(--v-base-bg, var(--v-base))' }}
+    >
+      {immersiveScene && (
+        <>
+          <img
+            src={immersiveScene}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ objectPosition: officeImmersive ? 'center 38%' : 'center center' }}
+            aria-hidden="true"
+          />
+          <div
+            className={`absolute inset-0 ${officeImmersive ? 'bg-gradient-to-r from-black/32 via-black/0 to-black/18' : boardImmersive ? 'bg-gradient-to-r from-black/40 via-black/0 to-black/22' : 'bg-gradient-to-r from-black/70 via-black/18 to-black/46'}`}
+            aria-hidden="true"
+          />
+          <div
+            className={`absolute inset-x-0 top-0 h-24 ${officeImmersive ? 'bg-gradient-to-b from-black/34 to-transparent' : boardImmersive ? 'bg-gradient-to-b from-black/42 to-transparent' : 'bg-gradient-to-b from-black/72 to-transparent'}`}
+            aria-hidden="true"
+          />
+          <div
+            className={`absolute inset-x-0 bottom-0 h-1/2 ${officeImmersive ? 'bg-gradient-to-t from-black/48 to-transparent' : boardImmersive ? 'bg-gradient-to-t from-black/58 to-transparent' : 'bg-gradient-to-t from-black/80 to-transparent'}`}
+            aria-hidden="true"
+          />
+        </>
+      )}
+
+      {/* Desktop NavRail */}
+      <div className="relative z-10 hidden lg:flex flex-shrink-0">
+        <NavRail collapsed={collapsed} onCollapseToggle={toggleCollapse} immersive={immersive} />
+      </div>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        >
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        </div>
+      )}
+
+      {/* Mobile NavRail drawer */}
+      <div
+        className={[
+          'fixed inset-y-0 left-0 z-50 flex lg:hidden',
+          'transform transition-transform duration-200 ease-in-out',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        ].join(' ')}
+        aria-hidden={!mobileOpen}
+      >
+        <div className="relative">
+          <NavRail
+            collapsed={false}
+            onCollapseToggle={() => setMobileOpen(false)}
+            onNavClick={() => setMobileOpen(false)}
+            immersive={immersive}
+          />
+          <button
+            className="absolute top-3 right-2 p-1 rounded text-text-muted hover:text-text-primary"
+            onClick={() => setMobileOpen(false)}
+            aria-label="Close navigation"
+          >
+            <X className="w-4 h-4" aria-hidden />
+          </button>
+        </div>
+      </div>
+
+      {/* Main column */}
+      <div className="relative z-10 flex-1 flex flex-col min-w-0 overflow-hidden">
+        <TopBar pageTitle={pageTitle} onMobileMenu={() => setMobileOpen(true)} immersive={immersive} />
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 overflow-y-auto"
+        >
+          {children}
+        </main>
+      </div>
+
+      <div className="relative z-20">
+        <BossOrb />
+      </div>
+    </div>
+  );
+}

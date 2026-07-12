@@ -1,0 +1,10 @@
+{
+  "email-p1-drafter": {
+    "url": "http://127.0.0.1:3101/api/routine-triggers/public/39c268a7c6dd412c9362fef4/fire",
+    "secret": "753725d98b70f4037f2ab252fb093c87c45f8606b6f03ba1"
+  },
+  "email-p2-drafter": {
+    "url": "http://127.0.0.1:3101/api/routine-triggers/public/1cb65d84a22ab048f371c559/fire",
+    "secret": "b4a6813f733dc4ec242535937b6777b3142d9f5ecdb6f096"
+  }
+}

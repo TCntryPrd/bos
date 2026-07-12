@@ -1,0 +1,14 @@
+{
+  "lead": {
+    "row": 133,
+    "business_name": "Walker & Sons Enterprises",
+    "contact_name": "Robert Walker",
+    "email": "bob@wsemfg.com"
+  },
+  "draft": {
+    "subject": "Cutting manual work at Walker & Sons",
+    "body": "Hi Robert,\n\nI work with manufacturing and distribution companies to eliminate the repetitive stuff—order intake, customer callbacks, scheduling. For most operations, 30% of a coordinator's day is just moving data between systems.\n\nWe automate that layer so your team focuses on the actual work. One client cut their response time by 60% in the first month.\n\nYou're in Oakhurst—always good to work with Oklahoma businesses. Want to walk through what this could look like for you?\n\nKevin Starr\nFounder, Starr & Partners",
+    "from": "d.caine@dcaine.com"
+  },
+  "personalization_notes": "Referenced manufacturing/enterprise operations, local Oklahoma location (Oakhurst), pain point around manual data handling"
+}

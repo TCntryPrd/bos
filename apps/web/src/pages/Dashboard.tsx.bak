@@ -1,0 +1,2066 @@
+/**
+ * Dashboard — BOS v2 command center (v1.5.8).
+ *
+ * Full-width port of design_handoff_boss_v2/source/vs-dashboard.jsx.
+ * The docked ChatPanel is gone — chat-with-BOS now lives in the
+ * BossOrb (bottom-right glowing diamond, mounted in Layout). The
+ * voice mic is in the NavRail footer (v1.5.7). This page is purely a
+ * visual command center: greeting, stat strip, live activity, agent
+ * roster, kanban peek, inbox, connections, timeline.
+ *
+ * Data:
+ * - Connections grid wires to /api/connectors/integrations (real).
+ * - Everything else uses static seed data mirroring vs-shared.jsx.
+ *   "Static shell first, real data second" per the v1.5.x handoff.
+ *   Live data wiring (KPI numbers, live activity feed, kanban from
+ *   pipeline engine) ships in a follow-up.
+ */
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Bolt,
+  Columns3,
+  Cpu,
+  Mail,
+  Orbit,
+  Clock,
+  ArrowRight,
+  FileText,
+  MessageSquare,
+  LayoutGrid,
+  Calendar as CalendarIcon,
+  Check,
+  X,
+} from 'lucide-react';
+import { AgentAvatar } from '../components/AgentAvatar';
+
+// ──────────────────────────────────────────────────────────────────────
+// Auth helper (v1.6.1)
+// ──────────────────────────────────────────────────────────────────────
+//
+// Every Dashboard panel reads from auth-gated API endpoints. Before
+// v1.6.1 a 401 silently fell through to "loaded with empty data",
+// which made an expired session look identical to "you legitimately
+// have no rascals/tasks/etc." Per the screenshot Kevin shared on
+// 2026-04-25, that produced an entirely zeroed Dashboard for an
+// authenticated user whose token had simply gone stale.
+//
+// authedFetch() centralises the header injection and dispatches a
+// window event the moment any request comes back 401. useAuthHealth()
+// listens for the event and returns true once it fires; the Dashboard
+// uses that flag to render a top-of-page "session expired" banner
+// rather than zeros. Hooks themselves keep returning empty arrays on
+// non-200 so they can render a sane loading→empty path independent of
+// the auth state.
+
+const AUTH_EXPIRED_EVENT = 'boss-auth-expired';
+
+async function authedFetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
+  const token = localStorage.getItem('boss_token') ?? '';
+  const headers = new Headers(init?.headers);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const res = await fetch(input, { ...init, headers });
+  if (res.status === 401) {
+    try { window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT)); } catch { /* SSR safety */ }
+  }
+  return res;
+}
+
+function useAuthHealth(): { expired: boolean } {
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    const onExpired = () => setExpired(true);
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
+  return { expired };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Seed data (mirrors design_handoff_boss_v2/source/vs-shared.jsx)
+// ──────────────────────────────────────────────────────────────────────
+
+// Removed in v1.5.16: the design-source's fictional 6-agent roster
+// (Atlas, Nova, Pulse, Vector, Cipher, Echo) is no longer referenced
+// — every panel reads real data now. The actual rascal roster comes
+// from /api/agents/rascals via useRascals(); avatars come from the
+// AgentAvatar component (apps/web/src/components/AgentAvatar.tsx).
+
+// KanbanPeek + TASKS TODAY StatCard wire to /api/tasks (v1.5.12).
+// view_column on each row maps to a Kanban column; status drives the
+// "needs you" counter (blocked tasks) and "Tasks today" KPI (pending +
+// active rows due today). Real seed data was loaded into boss_tasks
+// during the Pipeline Engine work, so this is data-backed end to end.
+
+interface TaskRow {
+  id: string;
+  title: string;
+  current_stage: string;
+  status: 'pending' | 'active' | 'blocked' | 'done' | string;
+  assigned_agent: string | null;
+  assigned_client: string | null;
+  priority: number;
+  view_column: 'inbox' | 'today' | 'doing' | 'review' | 'done' | string;
+  due_at: string | null;
+  bucket: 'today' | 'tomorrow' | 'this_week' | 'next_week' | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const WO_BUCKET_LABELS: Record<'today'|'tomorrow'|'this_week'|'next_week', string> = {
+  today:     'Today',
+  tomorrow:  'Tomorrow',
+  this_week: 'This Week',
+  next_week: 'Next Week',
+};
+
+// InboxPanel reads /api/services/mail/attention which calls the Gmail
+// API with a stored OAuth token (configured via /connectors). The
+// endpoint returns [] cleanly when no Google account is connected, so
+// the panel tells the truth in either case rather than showing mock.
+interface InboxAttentionItem {
+  id: string;
+  sender: string;
+  subject: string;
+  timestamp: string;
+  preview: string;
+}
+
+interface InboxState {
+  list: InboxAttentionItem[];
+  email: string | null;
+  loaded: boolean;
+}
+
+// Slack attention queue — Sodapop flags incoming DMs/mentions; Kevin
+// triages from this panel.
+interface SlackAttentionItem {
+  id: string;
+  flaggedBy: string;
+  channel: string;
+  ts: string;
+  userId: string | null;
+  userName: string | null;
+  preview: string;
+  reason: string | null;
+  permalink: string | null;
+  status: string;
+  createdAt: string;
+}
+
+interface SlackAttentionState {
+  list: SlackAttentionItem[];
+  loaded: boolean;
+}
+
+// WhatsApp unread threads for quick triage
+interface WhatsAppThread {
+  chat_id: string;
+  display_name: string | null;
+  phone: string | null;
+  is_group: boolean;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  last_message_from_me: boolean | null;
+  unread_count: number;
+}
+
+interface WhatsAppState {
+  list: WhatsAppThread[];
+  loaded: boolean;
+}
+
+// LiveActivity reads /api/agents/rascals/recent-activity which scans every
+// rascal's output dir and reports the freshest writes across all agents.
+// Replaces the older stage-log-based feed: stages stop emitting as soon as
+// a pipeline finishes, but every rascal action produces a new file in
+// /home/tcntryprd/rascals/<handle>/output, so this is the live signal.
+interface RecentActivityEntry {
+  agent: string;
+  filename: string;
+  path: string;
+  mtime: string;
+  sizeBytes: number;
+  action: string;
+}
+
+interface RecentActivityState {
+  list: RecentActivityEntry[];
+  loaded: boolean;
+}
+
+// TimelinePanel reads /api/calendar/events for today (8AM-6PM range)
+// for the "You" lane, and uses the already-fetched tasksState for
+// per-rascal lanes. Agent lanes only render when the rascal has at
+// least one task with a due_at falling in today's range.
+interface CalendarEvent {
+  id: string;
+  summary: string;
+  description: string | null;
+  start: string;
+  end: string;
+  allDay: boolean;
+  account: string;
+  calendarName: string;
+}
+
+interface CalendarState {
+  list: CalendarEvent[];
+  loaded: boolean;
+}
+
+function useCalendarToday(): CalendarState {
+  const [state, setState] = useState<CalendarState>({ list: [], loaded: false });
+  useEffect(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const day = `${yyyy}-${mm}-${dd}`;
+        authedFetch(`api/calendar/events?start=${day}&end=${day}`)
+      .then((r) => (r.ok ? r.json() : { events: [] }))
+      .then((data: { events?: CalendarEvent[] }) => {
+        setState({ list: Array.isArray(data?.events) ? data.events : [], loaded: true });
+      })
+      .catch(() => setState({ list: [], loaded: true }));
+  }, []);
+  return state;
+}
+
+// Slack user IDs we care about on the dashboard preview. Mentions of
+// either Kevin or Sodapop pass the filter; everything else is hidden.
+// Persisted in runtime_config (SLACK_KEVIN_USER_ID, SLACK_BOT_USER_ID).
+const SLACK_KEVIN_USER_ID = 'U0940RBRLPN';
+const SLACK_SODAPOP_USER_ID = 'U0B26SZ7CCT';
+
+function isMentionOfInterest(it: SlackAttentionItem): boolean {
+  // Sodapop's slack-socket flags app_mention with reason='mentioned the bot'.
+  if (it.reason === 'mentioned the bot') return true;
+  // DMs are implicitly to Kevin — always pass.
+  if (it.reason === 'direct message') return true;
+  const p = it.preview || '';
+  return p.includes(`<@${SLACK_KEVIN_USER_ID}>`) || p.includes(`<@${SLACK_SODAPOP_USER_ID}>`);
+}
+
+function useSlackAttention(): SlackAttentionState {
+  const [state, setState] = useState<SlackAttentionState>({ list: [], loaded: false });
+  const seenIdsRef = React.useRef<Set<string>>(new Set());
+  const firstLoadRef = React.useRef<boolean>(true);
+
+  // Ask once for browser-notification permission. Browser quietly denies
+  // if previously dismissed; we don't pester.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      void Notification.requestPermission().catch(() => { /* user dismissed */ });
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      authedFetch('api/slack/attention?status=open&limit=20')
+        .then((r) => (r.ok ? r.json() : { items: [] }))
+        .then((data: { items?: SlackAttentionItem[] }) => {
+          if (cancelled) return;
+          const raw = Array.isArray(data?.items) ? data.items : [];
+          const items = raw.filter(isMentionOfInterest);
+
+          // Browser-notify items we haven't seen before, but only after
+          // the first load completes — otherwise reloading the page
+          // would notify for every existing open item.
+          if (!firstLoadRef.current && typeof window !== 'undefined' && 'Notification' in window) {
+            if (Notification.permission === 'granted') {
+              for (const it of items) {
+                if (seenIdsRef.current.has(it.id)) continue;
+                try {
+                  const n = new Notification(`Slack — ${it.userName ?? 'unknown'}`, {
+                    body: it.preview.slice(0, 140) || it.reason || 'New message',
+                    tag: `slack-attn-${it.id}`,
+                    icon: '/boss/ui/favicon.ico',
+                  });
+                  if (it.permalink) {
+                    n.onclick = () => {
+                      window.open(it.permalink as string, '_blank');
+                      n.close();
+                    };
+                  }
+                } catch { /* notification failed; skip */ }
+              }
+            }
+          }
+
+          // Mark all current items as seen for next tick
+          seenIdsRef.current = new Set(items.map((i) => i.id));
+          firstLoadRef.current = false;
+          setState({ list: items, loaded: true });
+        })
+        .catch(() => { if (!cancelled) setState({ list: [], loaded: true }); });
+    };
+    load();
+    const id = window.setInterval(load, 15_000); // 15s poll
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  return state;
+}
+
+function useInbox(): InboxState {
+  const [state, setState] = useState<InboxState>({ list: [], email: null, loaded: false });
+  useEffect(() => {
+        authedFetch('api/services/mail/attention')
+      .then((r) => (r.ok ? r.json() : { items: [], email: null }))
+      .then((data: unknown) => {
+        // Back-compat: accept either the new {email, items} envelope or
+        // the legacy bare-array response.
+        if (Array.isArray(data)) {
+          setState({ list: data as InboxAttentionItem[], email: null, loaded: true });
+        } else if (data && typeof data === 'object' && 'items' in data) {
+          const d = data as { items: InboxAttentionItem[]; email: string | null };
+          setState({ list: Array.isArray(d.items) ? d.items : [], email: d.email ?? null, loaded: true });
+        } else {
+          setState({ list: [], email: null, loaded: true });
+        }
+      })
+      .catch(() => setState({ list: [], email: null, loaded: true }));
+  }, []);
+  return state;
+}
+
+function useWhatsApp(): WhatsAppState {
+  const [state, setState] = useState<WhatsAppState>({ list: [], loaded: false });
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      authedFetch('api/whatsapp/threads')
+        .then((r) => (r.ok ? r.json() : { threads: [] }))
+        .then((data: { threads?: WhatsAppThread[] }) => {
+          if (cancelled) return;
+          const threads = Array.isArray(data?.threads) ? data.threads : [];
+          // Only show threads with unread messages
+          const unread = threads.filter(t => t.unread_count > 0);
+          setState({ list: unread, loaded: true });
+        })
+        .catch(() => { if (!cancelled) setState({ list: [], loaded: true }); });
+    };
+    load();
+    const id = window.setInterval(load, 15_000); // Poll every 15s
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+  return state;
+}
+
+function useRecentActivity(): RecentActivityState {
+  const [state, setState] = useState<RecentActivityState>({ list: [], loaded: false });
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      authedFetch('api/agents/rascals/recent-activity?limit=10')
+        .then((r) => (r.ok ? r.json() : { entries: [] }))
+        .then((data: { entries?: RecentActivityEntry[] }) => {
+          if (cancelled) return;
+          setState({ list: Array.isArray(data?.entries) ? data.entries : [], loaded: true });
+        })
+        .catch(() => { if (!cancelled) setState({ list: [], loaded: true }); });
+    };
+    load();
+    const id = window.setInterval(load, 30_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+  return state;
+}
+
+/** Strip the "Name <email>" decoration; fall back to the raw value. */
+function senderName(raw: string): string {
+  if (!raw) return 'unknown';
+  const m = raw.match(/^"?([^"<]+?)"?\s*<.+>$/);
+  return (m?.[1] ?? raw).trim();
+}
+
+const INBOX_HUES = ['#FF4D8D', '#0EA5E9', '#7C3CFF', '#20B26B', '#FF8A3D', '#d6b6ff'];
+
+function inboxHue(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return INBOX_HUES[h % INBOX_HUES.length];
+}
+
+const DASH = {
+  panel: '#0B0E1D',
+  panel2: '#11152E',
+  panel3: '#181D3A',
+  border: '#232A4D',
+  borderSoft: 'rgba(139,92,246,0.16)',
+  text: '#F1F4FF',
+  textDim: '#AAB3D6',
+  textMuted: '#7681A8',
+  pink: '#D946EF',
+  orange: '#F5C542',
+  blue: '#4F6DF5',
+  green: '#22C55E',
+  yellow: '#F5C542',
+  violet: '#8B5CF6',
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// Utility components
+// ──────────────────────────────────────────────────────────────────────
+
+interface PanelProps {
+  title?: string;
+  icon?: React.ReactNode;
+  meta?: React.ReactNode;
+  accent?: string;
+  children: React.ReactNode;
+  className?: string;
+}
+
+function Panel({ title, icon, meta, accent, children, className = '' }: PanelProps) {
+  return (
+    <div
+      className={`relative rounded-[14px] overflow-hidden flex flex-col h-full ${className}`}
+      style={{
+        background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`,
+        border: `1px solid ${DASH.border}`,
+        boxShadow: '0 10px 30px rgba(24,34,53,0.08)',
+        color: DASH.text,
+      }}
+    >
+      {accent && (
+        <div
+          aria-hidden
+          className="absolute top-0 left-0 right-0"
+          style={{ height: 1.5, background: accent, opacity: 0.85 }}
+        />
+      )}
+      <div
+        aria-hidden
+        className="absolute top-0 pointer-events-none"
+        style={{
+          left: '10%',
+          right: '10%',
+          height: 1,
+          background:
+            'linear-gradient(90deg, transparent, rgba(14,165,233,0.24), transparent)',
+        }}
+      />
+      {title && (
+        <div
+          className="flex items-center gap-2.5 px-3.5 pt-3 pb-2.5 shrink-0"
+          style={{ borderBottom: `1px solid ${DASH.borderSoft}` }}
+        >
+          {icon && <div style={{ color: DASH.violet, opacity: 0.9 }}>{icon}</div>}
+          <div className="text-[15px] font-semibold tracking-[0.01em]">{title}</div>
+          {meta && <div className="ml-auto">{meta}</div>}
+        </div>
+      )}
+      <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
+    </div>
+  );
+}
+
+type SparkKind = 'rise' | 'wave' | 'split';
+
+function Spark({ kind = 'rise', color = '#7C3CFF' }: { kind?: SparkKind; color?: string }) {
+  const paths: Record<SparkKind, string> = {
+    rise:  'M1 18 L8 14 L14 15 L22 9 L30 11 L38 4 L46 6',
+    wave:  'M1 12 C5 4, 10 20, 14 12 S22 4, 26 12 S34 20, 38 12 S46 4, 48 12',
+    split: 'M1 12 L10 12 L14 6 L18 18 L22 8 L26 14 L30 12 L46 12',
+  };
+  const id = `sg-${kind}-${color.replace('#', '')}`;
+  return (
+    <svg width="48" height="22" viewBox="0 0 48 22" fill="none" className="block">
+      <defs>
+        <linearGradient id={id} x1="0" x2="1">
+          <stop offset="0" stopColor={color} stopOpacity="0.3" />
+          <stop offset="1" stopColor={color} />
+        </linearGradient>
+      </defs>
+      <path d={paths[kind]} stroke={`url(#${id})`} strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Stat cards
+// ──────────────────────────────────────────────────────────────────────
+
+interface StatCardProps {
+  label: string;
+  value: string;
+  sub: string;
+  hue: 'purple' | 'pink' | 'blue' | 'green';
+  spark: SparkKind;
+}
+
+const HUE_MAP: Record<StatCardProps['hue'], { color: string; grad: string }> = {
+  purple: { color: '#7C3CFF', grad: 'linear-gradient(135deg, #7C3CFF, #FF4D8D)' },
+  pink:   { color: '#FF4D8D', grad: 'linear-gradient(135deg, #FF4D8D, #7C3CFF)' },
+  blue:   { color: '#0EA5E9', grad: 'linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)' },
+  green:  { color: '#20B26B', grad: 'linear-gradient(135deg, #20B26B, #0EA5E9)' },
+};
+
+function StatCard({ label, value, sub, hue, spark }: StatCardProps) {
+  const { color, grad } = HUE_MAP[hue];
+  return (
+    <Panel className="p-3.5" accent={grad}>
+      <div className="flex items-center gap-2.5">
+        <div className="vs-mono text-[10px] tracking-[0.22em]" style={{ color: '#74849A' }}>
+          {label}
+        </div>
+        <div className="ml-auto">
+          <Spark kind={spark} color={color} />
+        </div>
+      </div>
+      <div className="flex items-baseline gap-2.5 mt-2">
+        <div
+          className="text-[36px] font-semibold leading-none"
+          style={{
+            letterSpacing: '-0.02em',
+            background: grad,
+            WebkitBackgroundClip: 'text',
+            backgroundClip: 'text',
+            color: 'transparent',
+          }}
+        >
+          {value}
+        </div>
+      </div>
+      <div className="text-[11.5px] mt-0.5" style={{ color: '#9AA8C2' }}>
+        {sub}
+      </div>
+    </Panel>
+  );
+}
+
+interface AutomationsCardProps {
+  state: AutomationsState;
+}
+
+function AutomationsCard({ state }: AutomationsCardProps) {
+  const { data, loaded } = state;
+  // Build the rows that get rendered. Each row reflects real status:
+  // configured + status → number; configured + error → "error";
+  // not configured → "—" with a hint. Per the standing rule: no mock.
+  const rows = [
+    { id: 'n8n',  label: 'n8n',  color: '#FF8A3D', plat: data?.n8n },
+    { id: 'make', label: 'Make', color: '#7C3CFF', plat: data?.make },
+  ];
+  const total =
+    (data?.n8n.status?.total ?? 0) + (data?.make.status?.total ?? 0);
+  return (
+    <div
+      className="relative rounded-[14px] px-3.5 pt-3 pb-3.5 overflow-hidden"
+      style={{
+        background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`,
+        border: `1px solid ${DASH.border}`,
+        boxShadow: '0 10px 30px rgba(24,34,53,0.08)',
+        color: DASH.text,
+      }}
+    >
+      <div
+        aria-hidden
+        className="absolute top-0 left-0 right-0"
+        style={{ height: 1.5, background: 'linear-gradient(90deg, #FF8A3D, #7C3CFF)', opacity: 0.7 }}
+      />
+      <div className="flex items-baseline gap-2">
+        <div className="vs-mono text-[9.5px] tracking-[0.22em] font-semibold" style={{ color: '#9AA8C2' }} data-testid="automations-card">
+          AUTOMATIONS
+        </div>
+        <div className="ml-auto flex items-baseline gap-1">
+          <span className="text-[20px] font-semibold " style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+            {loaded ? total : '—'}
+          </span>
+          <span className="vs-mono text-[9px] tracking-[0.1em]" style={{ color: '#74849A' }}>
+            total
+          </span>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 mt-2.5">
+        {rows.map((r) => {
+          const plat = r.plat;
+          const status = plat?.status;
+          const total = status?.total ?? 0;
+          const active = status?.active ?? 0;
+          const pct = total > 0 ? Math.min(1, active / Math.max(total, 1)) : 0;
+          // Right-side label adapts to the platform's real state.
+          let trailing: React.ReactNode;
+          if (!loaded) {
+            trailing = <span className="vs-mono text-[10px]" style={{ color: '#74849A' }}>loading</span>;
+          } else if (!plat?.configured) {
+            trailing = (
+              <span className="vs-mono text-[10px]" style={{ color: '#74849A' }} title={`Set ${r.id.toUpperCase()}_API_KEY to enable.`}>
+                not configured
+              </span>
+            );
+          } else if (plat.error || !status) {
+            trailing = (
+              <span className="vs-mono text-[10px]" style={{ color: '#FF8A3D' }} title={plat.error ?? 'unreachable'}>
+                error
+              </span>
+            );
+          } else {
+            trailing = (
+              <span className="vs-mono text-[10px]" style={{ color: '#9AA8C2', letterSpacing: '0.04em' }}>
+                <span style={{ color: r.color }}>{active}</span>{' '}
+                <span style={{ color: '#74849A' }}>/ {total}</span>
+              </span>
+            );
+          }
+          return (
+            <div key={r.id} data-platform={r.id}>
+              <div className="flex items-center gap-2 mb-1">
+                <span
+                  className="block w-1.5 h-1.5 rounded-[2px]"
+                  style={{ background: r.color, boxShadow: `0 0 6px ${r.color}` }}
+                />
+                <span className="text-[11.5px] font-medium" style={{ color: '#F1F4FF' }}>
+                  {r.label}
+                </span>
+                <span className="ml-auto">{trailing}</span>
+              </div>
+              <div className="h-[3px] rounded-[1px] overflow-hidden" style={{ background: 'rgba(216,228,240,0.95)' }}>
+                <div
+                  style={{
+                    width: `${pct * 100}%`,
+                    height: '100%',
+                    background: `linear-gradient(90deg, ${r.color}, ${r.color}aa)`,
+                    boxShadow: `0 0 6px ${r.color}`,
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Panels
+// ──────────────────────────────────────────────────────────────────────
+
+function LiveActivity({ state }: { state: RecentActivityState }) {
+  const { list, loaded } = state;
+  const navigate = useNavigate();
+  return (
+    <Panel
+      title="Live Activity"
+      icon={<Bolt size={14} />}
+      accent="conic-gradient(from 200deg at 50% 50%, #7C3CFF, #FF4D8D, #20B26B, #0EA5E9, #7C3CFF)"
+      meta={
+        <div className="vs-mono text-[10px] flex items-center gap-1.5" style={{ color: '#20B26B' }} data-testid="live-activity-meta">
+          <span
+            className="block w-1.5 h-1.5 rounded-full"
+            style={{ background: '#20B26B', boxShadow: '0 0 6px #20B26B', animation: 'vs-pulse 2s infinite' }}
+          />
+          {loaded ? `${list.length} RECENT` : 'LOADING…'}
+        </div>
+      }
+    >
+      <div data-testid="live-activity">
+        {!loaded && (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: '#74849A' }}>
+            loading recent activity…
+          </div>
+        )}
+        {loaded && list.length === 0 && (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: '#74849A' }}>
+            No agent output yet. Activity appears here as agents write files.
+          </div>
+        )}
+        {list.map((it, i) => (
+          <button
+            key={it.path}
+            type="button"
+            onClick={() => navigate(`/agents/${it.agent}`)}
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-white/5"
+            data-rascal-handle={it.agent}
+            data-recent-activity-row
+            style={{
+              borderBottom:
+                i < list.length - 1 ? '1px solid #232A4D' : 'none',
+            }}
+            title={`Open ${it.agent}'s workspace`}
+          >
+            <AgentAvatar handle={it.agent} displayName={it.agent} size={26} ring />
+            <div className="flex-1 min-w-0">
+              <div className="text-[12.5px] truncate" style={{ color: '#F1F4FF' }}>
+                <span className="font-semibold capitalize" style={{ color: '#F1F4FF' }}>
+                  {it.agent}
+                </span>
+                <span style={{ color: '#9AA8C2' }}> {it.action} </span>
+                <span className="vs-mono" style={{ color: '#7C3CFF' }}>{it.filename}</span>
+              </div>
+            </div>
+            <FileText
+              size={12}
+              style={{ color: '#74849A', flexShrink: 0 }}
+              aria-hidden
+            />
+            <span
+              className="vs-mono text-[10px] text-right"
+              style={{ color: '#74849A', minWidth: 56 }}
+            >
+              {timeAgo(it.mtime)}
+            </span>
+          </button>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+/** Format a due_at ISO string as "Today" / "Tmrw" / "Apr 28". */
+function formatDue(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const today = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(today.getDate() + 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  if (sameDay(d, today)) return 'Today';
+  if (sameDay(d, tomorrow)) return 'Tmrw';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const PEEK_COLS: { id: 'today' | 'overdue' | 'tomorrow'; title: string; hue: string }[] = [
+  { id: 'today',    title: 'TODAY',    hue: '#7C3CFF' },
+  { id: 'overdue',  title: 'OVERDUE',  hue: '#FF8A3D' },
+  { id: 'tomorrow', title: 'TOMORROW', hue: '#0EA5E9' },
+];
+
+function KanbanPeek({ state }: { state: TasksState }) {
+  const { list, loaded } = state;
+  const navigate = useNavigate();
+
+  // Bucket cards by Today / Overdue / Tomorrow.
+  //   Overdue = bucket 'today' that's been sitting since before today's
+  //             midnight (browser-local — Kevin is on Chicago time), OR a
+  //             due_at in the past with status != done.
+  //   Today   = bucket 'today' AND not overdue.
+  //   Tomorrow = bucket 'tomorrow'.
+  // Blocked/active/pending all count; done/failed/archived do not.
+  const grouped: Record<'today'|'overdue'|'tomorrow', TaskRow[]> = useMemo(() => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const startMs = startOfToday.getTime();
+    const acc = { today: [] as TaskRow[], overdue: [] as TaskRow[], tomorrow: [] as TaskRow[] };
+    for (const t of list) {
+      if (t.status === 'done' || t.status === 'failed') continue;
+      const dueOverdue = t.due_at !== null && Date.parse(t.due_at) < Date.now();
+      const wasTodayBefore = t.bucket === 'today'
+        && t.created_at !== null
+        && Date.parse(t.created_at) < startMs;
+      if (wasTodayBefore || dueOverdue) {
+        acc.overdue.push(t);
+      } else if (t.bucket === 'today') {
+        acc.today.push(t);
+      } else if (t.bucket === 'tomorrow') {
+        acc.tomorrow.push(t);
+      }
+    }
+    for (const k of Object.keys(acc) as Array<keyof typeof acc>) {
+      acc[k].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    }
+    return acc;
+  }, [list]);
+
+  return (
+    <Panel
+      title="Task Board · Today"
+      icon={<Columns3 size={14} />}
+      accent="linear-gradient(135deg, #FF4D8D, #FF8A3D)"
+      meta={
+        <button
+          type="button"
+          onClick={() => navigate('/kanban')}
+          className="flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-md border border-sky-200 hover:bg-sky-50 transition-colors"
+          style={{ color: '#F1F4FF' }}
+        >
+          Open board
+          <ArrowRight className="w-2.5 h-2.5" aria-hidden />
+        </button>
+      }
+    >
+      <div className="grid grid-cols-3 gap-2.5 p-3" data-testid="kanban-peek">
+        {PEEK_COLS.map((c) => {
+          const colTasks = grouped[c.id];
+          const cards = colTasks.slice(0, 5);
+          return (
+            <div key={c.id} data-kanban-column={c.id}>
+              <div className="flex items-center gap-1.5 mb-2">
+                <span
+                  className="block w-1.5 h-1.5 rounded-[2px]"
+                  style={{ background: c.hue, boxShadow: `0 0 8px ${c.hue}` }}
+                />
+                <span className="vs-mono text-[10px] tracking-[0.18em]" style={{ color: '#9AA8C2' }}>
+                  {c.title}
+                </span>
+                <span className="vs-mono text-[10px] ml-auto" style={{ color: '#74849A' }}>
+                  {colTasks.length}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {!loaded && (
+                  <div className="text-[11px] italic" style={{ color: '#74849A' }}>loading…</div>
+                )}
+                {loaded && cards.length === 0 && (
+                  <div className="text-[11px] italic" style={{ color: '#74849A' }}>none</div>
+                )}
+                {cards.map((k) => {
+                  const due = formatDue(k.due_at);
+                  return (
+                    <div
+                      key={k.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => navigate('/kanban')}
+                      className="relative p-2 rounded-md overflow-hidden cursor-pointer hover:bg-white/5 transition-colors"
+                      style={{
+                        background: '#181D3A',
+                        border: '1px solid #232A4D',
+                      }}
+                    >
+                      <div
+                        aria-hidden
+                        className="absolute top-0 bottom-0 left-0 w-[2px]"
+                        style={{ background: c.hue, opacity: 0.7 }}
+                      />
+                      <div className="text-[11.5px] leading-snug ml-1.5 truncate" title={k.title} style={{ color: '#F1F4FF' }}>
+                        {k.title}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1.5 ml-1.5">
+                        {k.assigned_agent ? (
+                          <>
+                            <AgentAvatar handle={k.assigned_agent} displayName={k.assigned_agent} size={16} />
+                            <span
+                              className="text-[10.5px] truncate"
+                              style={{ color: '#9aa3b5' }}
+                              title={k.assigned_agent}
+                            >
+                              {k.assigned_agent}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span
+                              className="w-4 h-4 rounded-full inline-block"
+                              style={{ background: 'rgba(14,165,233,0.14)' }}
+                              aria-hidden
+                            />
+                            <span className="text-[10.5px] italic" style={{ color: '#74849A' }}>
+                              unassigned
+                            </span>
+                          </>
+                        )}
+                        {k.status === 'blocked' && (
+                          <span className="vs-mono text-[9px]" style={{ color: '#FF8A3D' }}>BLOCKED</span>
+                        )}
+                        {due && (
+                          <span className="vs-mono text-[9px] ml-auto" style={{ color: '#74849A' }}>
+                            {due}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+interface RascalSummary {
+  handle: string;
+  displayName: string;
+  client: string;
+  enabled: boolean;
+}
+
+interface RascalsState {
+  list: RascalSummary[];
+  loaded: boolean;
+}
+
+interface TasksState {
+  list: TaskRow[];
+  loaded: boolean;
+}
+
+/** Format an ISO timestamp as "12s ago" / "4m ago" / "2h ago" / "3d ago". */
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+interface PlatformStatus {
+  configured: boolean;
+  status: { total: number; active: number } | null;
+  error: string | null;
+}
+
+interface AutomationsStatus {
+  n8n: PlatformStatus;
+  make: PlatformStatus;
+}
+
+interface AutomationsState {
+  data: AutomationsStatus | null;
+  loaded: boolean;
+}
+
+function useAutomations(): AutomationsState {
+  const [state, setState] = useState<AutomationsState>({ data: null, loaded: false });
+  useEffect(() => {
+        authedFetch('api/connectors/automations/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: AutomationsStatus | null) => {
+        setState({ data, loaded: true });
+      })
+      .catch(() => setState({ data: null, loaded: true }));
+  }, []);
+  return state;
+}
+
+/**
+ * Fetch the workspace's tasks once and share across the sub-stat strip
+ * (blocked-count → "threads need you"), the TASKS TODAY StatCard, and
+ * KanbanPeek. The /api/tasks endpoint already filters by tenant via
+ * the JWT — no additional gating needed here.
+ */
+function useTasks(): TasksState {
+  const [state, setState] = useState<TasksState>({ list: [], loaded: false });
+  useEffect(() => {
+        authedFetch('api/tasks')
+      .then((r) => (r.ok ? r.json() : { tasks: [] }))
+      .then((data: { tasks?: TaskRow[] }) => {
+        if (Array.isArray(data?.tasks)) setState({ list: data.tasks, loaded: true });
+        else setState({ list: [], loaded: true });
+      })
+      .catch(() => setState({ list: [], loaded: true }));
+  }, []);
+  return state;
+}
+
+/**
+ * Fetch the workspace's rascals once and share the result across panels.
+ * Keeps StatCard and AgentRoster in sync without two parallel fetches.
+ */
+function useRascals(): RascalsState {
+  const [state, setState] = useState<RascalsState>({ list: [], loaded: false });
+  useEffect(() => {
+        authedFetch('api/agents/rascals')
+      .then((r) => (r.ok ? r.json() : { rascals: [] }))
+      .then((data: { rascals?: RascalSummary[] }) => {
+        if (Array.isArray(data?.rascals)) setState({ list: data.rascals, loaded: true });
+        else setState({ list: [], loaded: true });
+      })
+      .catch(() => setState({ list: [], loaded: true }));
+  }, []);
+  return state;
+}
+
+function AgentRoster({ state }: { state: RascalsState }) {
+  const { list: rascals, loaded } = state;
+  const navigate = useNavigate();
+  const enabled = rascals.filter((r) => r.enabled).length;
+  // Sort enabled-first so the active rascals always lead the grid;
+  // alphabetical inside each group keeps the layout deterministic.
+  const ordered = useMemo(
+    () =>
+      [...rascals].sort((a, b) => {
+        if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+        return a.handle.localeCompare(b.handle);
+      }),
+    [rascals],
+  );
+
+  return (
+    <Panel
+      title="Employee Agents"
+      icon={<Cpu size={14} />}
+      accent="linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)"
+      meta={
+        <span className="vs-mono text-[10px]" style={{ color: '#9AA8C2' }} data-testid="agent-roster-meta">
+          {loaded ? `${enabled} / ${rascals.length} ONLINE` : 'LOADING…'}
+        </span>
+      }
+    >
+      <div className="grid grid-cols-2 gap-2 p-2.5" data-testid="agent-roster-grid">
+        {loaded && rascals.length === 0 && (
+          <div
+            className="col-span-2 px-2 py-4 text-[11.5px] text-center"
+            style={{ color: '#74849A' }}
+          >
+            No employee agents enabled yet. Add or activate one from the Employee Agents page.
+          </div>
+        )}
+        {ordered.map((r) => (
+          <button
+            key={r.handle}
+            type="button"
+            onClick={() => navigate(`/agents/${r.handle}`)}
+            data-rascal-handle={r.handle}
+            className="relative flex items-center gap-2.5 p-2 rounded-[10px] overflow-hidden text-left transition-colors hover:bg-white/5"
+            style={{
+              background: '#181D3A',
+              border: '1px solid #232A4D',
+              opacity: r.enabled ? 1 : 0.55,
+            }}
+            title={`Open ${r.displayName}'s workspace`}
+          >
+            <AgentAvatar handle={r.handle} displayName={r.displayName} size={28} ring />
+            <div className="flex-1 min-w-0">
+              <div className="text-[12px] font-semibold truncate" style={{ color: '#F1F4FF' }}>
+                {r.displayName}
+              </div>
+              <div className="text-[10.5px] truncate" style={{ color: '#9AA8C2' }}>
+                {r.client || r.handle}
+              </div>
+            </div>
+            <div
+              aria-hidden
+              title={r.enabled ? 'Enabled' : 'Disabled'}
+              className="w-[7px] h-[7px] rounded-full"
+              style={{
+                background: r.enabled ? '#20B26B' : '#CBD7E5',
+                boxShadow: r.enabled ? '0 0 6px #20B26B' : 'none',
+              }}
+            />
+          </button>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function timeAgoIso(iso: string): string {
+  try {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 60_000) return 'just now';
+    if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+    if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h`;
+    return `${Math.floor(ms / 86_400_000)}d`;
+  } catch { return ''; }
+}
+
+function SlackAttentionPanel({ state }: { state: SlackAttentionState }) {
+  const { list, loaded } = state;
+  // Optimistic removal — drop from the visible list the moment the click
+  // lands so Kevin doesn't think the button is broken while the 15s poll
+  // catches up.
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const ack = (id: string, mode: 'ack' | 'dismiss') => {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    authedFetch(`api/slack/attention/${id}/${mode}`, { method: 'POST' })
+      .then((r) => {
+        // If the server rejected, un-hide so the user can retry
+        if (!r.ok) {
+          setHidden((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }
+      })
+      .catch(() => {
+        setHidden((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      });
+  };
+  const visible = list.filter((m) => !hidden.has(m.id));
+  return (
+    <Panel
+      title="Slack"
+      icon={<MessageSquare size={14} />}
+      accent="linear-gradient(135deg, #0EA5E9, #7C3CFF)"
+      meta={
+        <div className="flex items-center gap-2 vs-mono text-[10px]" data-testid="slack-attn-meta">
+          <span style={{ color: loaded && visible.length > 0 ? '#0EA5E9' : '#74849A' }}>
+            {!loaded ? 'CONNECTING…' : visible.length === 0 ? 'CLEAR' : `${visible.length} OPEN`}
+          </span>
+        </div>
+      }
+    >
+      <div data-testid="slack-attention-panel">
+        {!loaded && (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: '#74849A' }}>
+            checking Slack…
+          </div>
+        )}
+        {loaded && visible.length === 0 && (
+          <div className="px-3.5 py-3 text-[12px]" style={{ color: '#74849A' }}>
+            No DMs or @-mentions to handle. Quiet inbox.
+          </div>
+        )}
+        {visible.slice(0, 6).map((m, i) => (
+          <div
+            key={m.id}
+            className="flex items-start gap-2.5 px-3.5 py-2"
+            data-slack-attn-item
+            style={{
+              borderBottom:
+                i < Math.min(visible.length, 6) - 1
+                  ? '1px solid rgba(216,228,240,0.85)'
+                  : 'none',
+            }}
+          >
+            <span
+              className="block rounded-[2px] flex-shrink-0 mt-1"
+              style={{ width: 3, height: 22, background: '#0EA5E9', boxShadow: '0 0 6px #0EA5E9' }}
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] font-medium truncate" style={{ color: '#F1F4FF' }}>
+                  {m.userName ?? m.userId ?? 'unknown'}
+                </span>
+                <span className="vs-mono text-[10px]" style={{ color: '#74849A' }}>
+                  {m.reason ?? ''}
+                </span>
+              </div>
+              <div className="text-[11.5px] truncate" style={{ color: '#9AA8C2' }} title={m.preview}>
+                {m.preview || '(empty)'}
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                {m.permalink && (
+                  <a
+                    href={m.permalink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="vs-mono text-[10px]"
+                    style={{ color: '#0EA5E9' }}
+                  >
+                    open ↗
+                  </a>
+                )}
+                <button
+                  onClick={() => ack(m.id, 'ack')}
+                  className="vs-mono text-[10px]"
+                  style={{ color: '#20B26B' }}
+                >
+                  ack
+                </button>
+                <button
+                  onClick={() => ack(m.id, 'dismiss')}
+                  className="vs-mono text-[10px]"
+                  style={{ color: '#FF4D8D' }}
+                >
+                  dismiss
+                </button>
+              </div>
+            </div>
+            <span className="vs-mono text-[10px]" style={{ color: '#74849A' }}>
+              {timeAgoIso(m.createdAt)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function InboxPanel({ state }: { state: InboxState }) {
+  const { list, loaded, email } = state;
+  return (
+    <Panel
+      title="Inbox"
+      icon={<Mail size={14} />}
+      accent="linear-gradient(135deg, #20B26B, #0EA5E9)"
+      meta={
+        <div className="flex items-center gap-2 vs-mono text-[10px]" data-testid="inbox-meta">
+          {email && (
+            <span
+              className="truncate max-w-[160px]"
+              style={{ color: '#9AA8C2' }}
+              title={email}
+            >
+              {email}
+            </span>
+          )}
+          <span
+            style={{ color: loaded && list.length > 0 ? '#20B26B' : '#74849A' }}
+          >
+            {!loaded ? 'LOADING…' : list.length === 0 ? 'CLEAR' : `${list.length} UNREAD`}
+          </span>
+        </div>
+      }
+    >
+      <div data-testid="inbox-panel">
+        {!loaded && (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: '#74849A' }}>
+            checking inbox…
+          </div>
+        )}
+        {loaded && list.length === 0 && (
+          <div className="px-3.5 py-3 text-[12px]" style={{ color: '#74849A' }}>
+            No unread mail. Connect Gmail in Connectors if this is unexpected.
+          </div>
+        )}
+        {list.slice(0, 5).map((m, i) => {
+          const hue = inboxHue(m.id);
+          return (
+            <div
+              key={m.id}
+              className="flex items-center gap-2.5 px-3.5 py-2"
+              data-inbox-item
+              style={{
+                borderBottom:
+                  i < Math.min(list.length, 5) - 1
+                    ? '1px solid rgba(216,228,240,0.85)'
+                    : 'none',
+              }}
+            >
+              <span
+                className="block rounded-[2px] flex-shrink-0"
+                style={{
+                  width: 3,
+                  height: 22,
+                  background: hue,
+                  boxShadow: `0 0 6px ${hue}`,
+                }}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] font-medium truncate" style={{ color: '#F1F4FF' }}>
+                  {senderName(m.sender)}
+                </div>
+                <div className="text-[11.5px] truncate" style={{ color: '#9AA8C2' }} title={m.subject}>
+                  {m.subject || '(no subject)'}
+                </div>
+              </div>
+              <span className="vs-mono text-[10px]" style={{ color: '#74849A' }}>
+                {timeAgo(m.timestamp)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function WhatsAppPanel({ state }: { state: WhatsAppState }) {
+  const { list, loaded } = state;
+  const navigate = useNavigate();
+  const totalUnread = list.reduce((sum, t) => sum + t.unread_count, 0);
+
+  return (
+    <Panel
+      title="WhatsApp"
+      icon={<MessageSquare size={14} />}
+      accent="linear-gradient(135deg, #25d366, #128C7E)"
+      meta={
+        <div className="flex items-center gap-2 vs-mono text-[10px]">
+          <span style={{ color: loaded && totalUnread > 0 ? '#25d366' : '#74849A' }}>
+            {!loaded ? 'LOADING…' : totalUnread === 0 ? 'CLEAR' : `${totalUnread} UNREAD`}
+          </span>
+        </div>
+      }
+    >
+      <div>
+        {!loaded && (
+          <div className="px-3.5 py-3 text-[12px] italic" style={{ color: '#74849A' }}>
+            checking messages…
+          </div>
+        )}
+        {loaded && list.length === 0 && (
+          <div className="px-3.5 py-3 text-[12px]" style={{ color: '#74849A' }}>
+            No unread messages.
+          </div>
+        )}
+        {list.slice(0, 5).map((thread, i) => (
+          <div
+            key={thread.chat_id}
+            onClick={() => navigate('/whatsapp')}
+            className="flex items-center gap-2.5 px-3.5 py-2 cursor-pointer hover:bg-sky-50 transition-colors"
+            style={{
+              borderBottom:
+                i < Math.min(list.length, 5) - 1
+                  ? '1px solid rgba(216,228,240,0.85)'
+                  : 'none',
+            }}
+          >
+            <span
+              className="block rounded-[2px] flex-shrink-0"
+              style={{
+                width: 3,
+                height: 22,
+                background: '#25d366',
+                boxShadow: '0 0 6px #25d366',
+              }}
+            />
+            <div className="flex-1 min-w-0">
+              <div className="text-[12px] font-medium truncate" style={{ color: '#F1F4FF' }}>
+                {thread.display_name || thread.phone || 'Unknown'}
+                {thread.is_group && ' (Group)'}
+              </div>
+              <div className="text-[11.5px] truncate" style={{ color: '#9AA8C2' }} title={thread.last_message_preview || ''}>
+                {thread.last_message_preview || '(no preview)'}
+              </div>
+            </div>
+            <div className="flex flex-col items-end gap-1">
+              {thread.unread_count > 0 && (
+                <span
+                  className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+                  style={{ background: '#25d366', color: '#FFFFFF' }}
+                >
+                  {thread.unread_count}
+                </span>
+              )}
+              <span className="vs-mono text-[10px]" style={{ color: '#74849A' }}>
+                {timeAgo(thread.last_message_at || '')}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+interface IntegrationStatus {
+  id: string;
+  name?: string;
+  configured: boolean;
+}
+
+const CONNECTOR_HUES: Record<string, string> = {
+  google:           '#ea4335',
+  google_workspace: '#ea4335',
+  workspace:        '#ea4335',
+  n8n:              '#FF8A3D',
+  airtable:         '#FF8A3D',
+  notion:           '#182235',
+  slack:            '#FF4D8D',
+  telegram:         '#0EA5E9',
+  make:             '#7C3CFF',
+  stripe:           '#9d8bff',
+  homeassistant:    '#20B26B',
+  home_assistant:   '#20B26B',
+  ha:               '#20B26B',
+  gemini:           '#0EA5E9',
+  github:           '#182235',
+  youtube:          '#ff5c5c',
+  spotify:          '#20B26B',
+};
+
+function hueFor(id: string): string {
+  return CONNECTOR_HUES[id] ?? '#9AA8C2';
+}
+
+function ConnectionsGrid() {
+  const [list, setList] = useState<IntegrationStatus[]>([]);
+  useEffect(() => {
+        authedFetch('api/connectors/integrations')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: unknown) => {
+        if (Array.isArray(data)) setList(data as IntegrationStatus[]);
+      })
+      .catch(() => { /* silent */ });
+  }, []);
+
+  const configured = list.filter((c) => c.configured).length;
+  const slice = list.slice(0, 9);
+
+  return (
+    <Panel
+      title="Connections"
+      icon={<Orbit size={14} />}
+      accent="linear-gradient(135deg, #FF4D8D, #FF8A3D)"
+      meta={
+        <span className="vs-mono text-[10px]" style={{ color: '#20B26B' }}>
+          {configured}/{list.length || '—'} HEALTHY
+        </span>
+      }
+    >
+      <div className="grid grid-cols-3 gap-1.5 p-2.5">
+        {slice.length === 0 && (
+          <div className="col-span-3 px-2 py-3 text-[11px] text-center" style={{ color: '#74849A' }}>
+            No connectors configured.
+          </div>
+        )}
+        {slice.map((c) => (
+          <div
+            key={c.id}
+            className="flex items-center gap-2 px-2.5 py-2 rounded-md"
+            style={{
+              background: 'rgba(255,255,255,0.86)',
+              border: '1px solid rgba(216,228,240,0.95)',
+            }}
+          >
+            <span
+              className="block w-2 h-2 rounded-[2px]"
+              style={{ background: hueFor(c.id), boxShadow: `0 0 6px ${hueFor(c.id)}99` }}
+            />
+            <span className="text-[11px] flex-1 truncate" style={{ color: '#F1F4FF' }}>
+              {c.name ?? c.id}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+/** Convert an ISO-or-date string to a fractional hour-of-day, or null. */
+function isoToHour(iso: string): number | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.getHours() + d.getMinutes() / 60;
+}
+
+interface TimelineBlock {
+  laneKey: string;
+  label: string;
+  hue: string;
+  startH: number;
+  endH: number;
+  source: 'event' | 'task';
+}
+
+/**
+ * Greedy pack overlapping blocks into vertical rows so nothing renders on
+ * top of anything else. Returns each block annotated with its row index
+ * and the total row count needed for the lane.
+ *
+ * Used by the timeline lanes (especially "You", which can have stacked
+ * meetings) so a busy day grows downward instead of overlapping.
+ */
+function packBlocksIntoRows(blocks: TimelineBlock[]): {
+  packed: Array<TimelineBlock & { row: number }>;
+  rowCount: number;
+} {
+  const sorted = [...blocks].sort((a, b) => a.startH - b.startH || a.endH - b.endH);
+  const rowEnds: number[] = []; // row index → end hour of last block placed
+  const packed = sorted.map((b) => {
+    let row = rowEnds.findIndex((end) => end <= b.startH);
+    if (row === -1) {
+      row = rowEnds.length;
+      rowEnds.push(b.endH);
+    } else {
+      rowEnds[row] = b.endH;
+    }
+    return { ...b, row };
+  });
+  return { packed, rowCount: Math.max(1, rowEnds.length) };
+}
+
+interface TimelinePanelProps {
+  calendar: CalendarState;
+  tasks: TasksState;
+  rascals: RascalsState;
+}
+
+function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
+  // Visible window. Could be config later; design uses 8 AM - 5:30 PM.
+  const startH = 8;
+  const endH = 17.5;
+  const hours = Array.from({ length: 10 }, (_, i) => startH + i);
+  const pct = (h: number) => ((h - startH) / (endH - startH)) * 100;
+
+  const today = new Date();
+  const isToday = (iso: string | null): boolean => {
+    if (!iso) return false;
+    const d = new Date(iso);
+    return (
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate()
+    );
+  };
+
+  // Build calendar blocks for the You lane. Skip all-day events from the
+  // hour-axis; they show up in the lane label as a count instead.
+  const youBlocks: TimelineBlock[] = [];
+  let allDayCount = 0;
+  for (const ev of calendar.list) {
+    if (ev.allDay) {
+      allDayCount += 1;
+      continue;
+    }
+    const sh = isoToHour(ev.start);
+    const eh = isoToHour(ev.end);
+    if (sh == null || eh == null) continue;
+    if (eh <= startH || sh >= endH) continue;
+    youBlocks.push({
+      laneKey: 'you',
+      label: ev.summary || '(untitled event)',
+      hue: '#0EA5E9',
+      startH: Math.max(startH, sh),
+      endH: Math.min(endH, eh),
+      source: 'event',
+    });
+  }
+
+  // Per-rascal task blocks. Tasks have due_at but not start/end — render
+  // each as a 30-min marker at its due hour. Today only.
+  const taskByAgent: Record<string, TimelineBlock[]> = {};
+  for (const t of tasks.list) {
+    if (!t.assigned_agent) continue;
+    if (t.status === 'done') continue;
+    if (!isToday(t.due_at)) continue;
+    const sh = isoToHour(t.due_at!);
+    if (sh == null) continue;
+    if (sh < startH - 0.25 || sh > endH + 0.25) continue;
+    const lane = taskByAgent[t.assigned_agent] ?? [];
+    lane.push({
+      laneKey: t.assigned_agent,
+      label: t.title,
+      hue: agentHueFromDashboard(t.assigned_agent),
+      startH: Math.max(startH, sh - 0.25),
+      endH: Math.min(endH, sh + 0.25),
+      source: 'task',
+    });
+    taskByAgent[t.assigned_agent] = lane;
+  }
+
+  // Compose lane list: You (always), then each rascal that has tasks today.
+  // Sort agents with tasks alphabetically for stable order.
+  const agentLaneKeys = Object.keys(taskByAgent).sort();
+  type Lane = { title: string; agent?: string; blocks: TimelineBlock[]; allDay?: number };
+  const lanes: Lane[] = [
+    { title: 'You', blocks: youBlocks, allDay: allDayCount },
+    ...agentLaneKeys.map((handle) => {
+      const r = rascals.list.find((x) => x.handle === handle);
+      return {
+        title: r?.displayName ?? handle,
+        agent: handle,
+        blocks: taskByAgent[handle],
+      };
+    }),
+  ];
+
+  const loading = !calendar.loaded || !tasks.loaded;
+  const empty =
+    calendar.loaded && tasks.loaded && lanes.length === 1 && lanes[0].blocks.length === 0 && !allDayCount;
+
+  return (
+    <Panel
+      title="Today · Timeline (from Calendar)"
+      icon={<Clock size={14} />}
+      accent="linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)"
+      className="flex-1"
+      meta={
+        <span className="vs-mono text-[10px]" style={{ color: '#9AA8C2' }} data-testid="timeline-meta">
+          {loading
+            ? 'LOADING…'
+            : `${youBlocks.length} EVENTS · ${Object.values(taskByAgent).reduce((s, b) => s + b.length, 0)} TASKS`}
+        </span>
+      }
+    >
+      <div className="px-3.5 pt-2.5 pb-4 relative" data-testid="timeline-panel">
+        {empty && (
+          <div className="text-[12px] italic py-3" style={{ color: '#74849A' }}>
+            No events or tasks scheduled in the {startH}–{endH}:00 window today.
+          </div>
+        )}
+        {!empty && (
+          <>
+            <div className="flex relative h-4 ml-[110px]" style={{ color: '#74849A' }}>
+              {hours.map((h) => (
+                <div key={h} className="vs-mono flex-1 text-[10px]">
+                  {h}:00
+                </div>
+              ))}
+            </div>
+            {lanes.map((lane) => {
+              const { packed, rowCount } = packBlocksIntoRows(lane.blocks);
+              const rowHeight = 22; // px per row of blocks
+              const rowGap = 3;
+              const trackHeight = rowCount * rowHeight + Math.max(0, rowCount - 1) * rowGap;
+              return (
+              <div
+                key={lane.agent ?? 'you'}
+                className="flex items-center gap-2.5 relative py-1.5"
+                data-timeline-lane={lane.agent ?? 'you'}
+                data-row-count={rowCount}
+              >
+                <div className="w-[100px] flex items-center gap-2 min-w-0 self-start pt-1">
+                  {lane.agent ? (
+                    <AgentAvatar handle={lane.agent} displayName={lane.title} size={18} />
+                  ) : (
+                    <div
+                      className="w-[18px] h-[18px] rounded-full"
+                      style={{ background: 'linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)' }}
+                    />
+                  )}
+                  <span className="text-[11px] truncate" style={{ color: '#F1F4FF' }}>
+                    {lane.title}
+                    {lane.allDay ? (
+                      <span className="vs-mono ml-1 text-[9px]" style={{ color: '#74849A' }}>
+                        +{lane.allDay}d
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+                <div
+                  className="flex-1 relative"
+                  style={{
+                    borderLeft: '1px solid rgba(216,228,240,0.95)',
+                    height: trackHeight,
+                  }}
+                >
+                  {hours.map((_, i) => (
+                    <div
+                      key={i}
+                      className="absolute top-0 bottom-0"
+                      style={{
+                        left: `${(i / hours.length) * 100}%`,
+                        borderLeft: '1px dashed rgba(14,165,233,0.12)',
+                      }}
+                    />
+                  ))}
+                  {packed.map((b, bi) => (
+                    <div
+                      key={`${lane.agent ?? 'you'}-${bi}`}
+                      title={b.label}
+                      className="absolute flex items-center gap-1.5 rounded-md text-[10.5px] px-2 truncate"
+                      style={{
+                        top: b.row * (rowHeight + rowGap),
+                        height: rowHeight,
+                        left: `${pct(b.startH)}%`,
+                        width: `calc(${Math.max(2, pct(b.endH) - pct(b.startH))}% - 2px)`,
+                        background: `linear-gradient(135deg, ${b.hue}44, ${b.hue}22)`,
+                        border: `1px solid ${b.hue}88`,
+                        color: '#F1F4FF',
+                        boxShadow: `inset 0 0 12px ${b.hue}22`,
+                      }}
+                    >
+                      <span
+                        className="w-1 h-1 rounded-full flex-shrink-0"
+                        style={{ background: b.hue, boxShadow: `0 0 6px ${b.hue}` }}
+                      />
+                      <span className="truncate">{b.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+/** Pull rascal hue without re-importing — uses the public helper from AgentAvatar. */
+function agentHueFromDashboard(handle: string): string {
+  // Keep this small to avoid a full import cycle; the hue-cycle here mirrors
+  // the THEMES table in components/AgentAvatar.tsx for the 10 known rascals.
+  // Falls back to a neutral grey for unknowns.
+  const map: Record<string, string> = {
+    alfalfa: '#7C3CFF', buckwheat: '#FF8A3D', butch: '#ff5c5c',
+    darla: '#FF4D8D', froggy: '#20B26B', petey: '#a07060',
+    porky: '#ff8c5c', spanky: '#0EA5E9', stymie: '#d6b6ff',
+    wheezer: '#9d8bff',
+  };
+  return map[handle] ?? '#9AA8C2';
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Page
+// ──────────────────────────────────────────────────────────────────────
+
+function getDisplayName(): string {
+  try {
+    const raw = localStorage.getItem('boss_user');
+    if (!raw) return 'there';
+    const first = (JSON.parse(raw).displayName ?? 'there').split(/\s+/)[0];
+    return first || 'there';
+  } catch {
+    return 'there';
+  }
+}
+
+function greetingFor(d: Date): string {
+  const h = d.getHours();
+  if (h < 5) return 'Burning the candle';
+  if (h < 12) return 'Morning';
+  if (h < 17) return 'Afternoon';
+  if (h < 21) return 'Evening';
+  return 'Late';
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Customizable widget layout — Kane: "let them choose which widgets/tiles
+// show… a pop-up gallery to pick and choose." Selection persists per browser.
+// ──────────────────────────────────────────────────────────────────────
+
+type WidgetId = 'agents' | 'tasks' | 'activity' | 'inbox' | 'slack' | 'whatsapp' | 'timeline';
+
+const WIDGET_CATALOG: { id: WidgetId; label: string; blurb: string; wide?: boolean }[] = [
+  { id: 'agents',   label: 'Employee Agents',  blurb: 'Your AI staff and who is online' },
+  { id: 'tasks',    label: 'Task Board',       blurb: 'Today / overdue / tomorrow at a glance' },
+  { id: 'activity', label: 'Live Activity',    blurb: 'Recent work your agents completed' },
+  { id: 'inbox',    label: 'Inbox',            blurb: 'Unread email that needs you' },
+  { id: 'slack',    label: 'Slack',            blurb: 'Threads that need a reply' },
+  { id: 'whatsapp', label: 'WhatsApp',         blurb: 'Unread WhatsApp conversations' },
+  { id: 'timeline', label: "Today's Timeline", blurb: 'Your calendar, stacked by hour', wide: true },
+];
+
+const DEFAULT_WIDGETS: WidgetId[] = ['agents', 'tasks', 'activity', 'inbox', 'timeline'];
+const WIDGETS_KEY = 'boss_dash_widgets';
+
+function useDashWidgets(): { enabled: Set<WidgetId>; toggle: (id: WidgetId) => void } {
+  const [enabled, setEnabled] = useState<Set<WidgetId>>(() => {
+    try {
+      const raw = localStorage.getItem(WIDGETS_KEY);
+      if (raw) return new Set(JSON.parse(raw) as WidgetId[]);
+    } catch { /* ignore */ }
+    return new Set(DEFAULT_WIDGETS);
+  });
+  const toggle = (id: WidgetId) =>
+    setEnabled((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      try { localStorage.setItem(WIDGETS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+  return { enabled, toggle };
+}
+
+function WidgetGallery({ enabled, toggle, onClose }: {
+  enabled: Set<WidgetId>;
+  toggle: (id: WidgetId) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-6" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="relative w-full max-w-lg rounded-xl p-5 shadow-xl"
+        style={{ background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`, border: `1px solid ${DASH.border}`, color: DASH.text }}
+      >
+        <header className="flex items-start justify-between mb-4">
+          <div>
+            <div className="vs-mono text-[10px] uppercase tracking-[0.22em]" style={{ color: DASH.textMuted }}>Customize</div>
+            <h2 className="text-lg font-semibold mt-1 flex items-center gap-2">
+              <LayoutGrid className="w-4 h-4" style={{ color: DASH.violet }} /> Choose your widgets
+            </h2>
+            <p className="text-[12px] mt-1" style={{ color: DASH.textMuted }}>Pick which tiles show on your dashboard. Saved on this browser.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" style={{ color: DASH.textMuted }}><X className="w-4 h-4" /></button>
+        </header>
+        <div className="space-y-2">
+          {WIDGET_CATALOG.map((w) => {
+            const on = enabled.has(w.id);
+            return (
+              <button
+                key={w.id}
+                type="button"
+                onClick={() => toggle(w.id)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left"
+                style={{ background: on ? DASH.panel3 : DASH.panel2, border: `1px solid ${on ? DASH.violet : DASH.border}` }}
+              >
+                <div
+                  className="h-5 w-5 rounded flex items-center justify-center shrink-0"
+                  style={{ background: on ? DASH.violet : 'transparent', border: `1px solid ${on ? DASH.violet : DASH.textMuted}` }}
+                >
+                  {on && <Check className="w-3.5 h-3.5" style={{ color: '#fff' }} />}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[13.5px] font-medium">{w.label}</div>
+                  <div className="text-[11.5px] truncate" style={{ color: DASH.textMuted }}>{w.blurb}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Dashboard() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const i = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(i);
+  }, []);
+
+  const rascalsState = useRascals();
+  const tasksState = useTasks();
+  const recentActivityState = useRecentActivity();
+  const automationsState = useAutomations();
+  const inboxState = useInbox();
+  const slackAttentionState = useSlackAttention();
+  const calendarState = useCalendarToday();
+  const whatsappState = useWhatsApp();
+  const auth = useAuthHealth();
+  const { enabled: enabledWidgets, toggle: toggleWidget } = useDashWidgets();
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const automationsTotal =
+    (automationsState.data?.n8n.status?.total ?? 0) +
+    (automationsState.data?.make.status?.total ?? 0);
+  const automationsActive =
+    (automationsState.data?.n8n.status?.active ?? 0) +
+    (automationsState.data?.make.status?.active ?? 0);
+  const enabledRascals = rascalsState.list.filter((r) => r.enabled).length;
+
+  // KPIs derived from the live tasks list.
+  const tasksToday = useMemo(() => {
+    if (!tasksState.loaded) return null;
+    const today = new Date();
+    return tasksState.list.filter((t) => {
+      if (t.status === 'done') return false;
+      if (!t.due_at) return false;
+      const d = new Date(t.due_at);
+      return (
+        d.getFullYear() === today.getFullYear() &&
+        d.getMonth() === today.getMonth() &&
+        d.getDate() === today.getDate()
+      );
+    }).length;
+  }, [tasksState]);
+
+  const blockedCount = useMemo(
+    () => tasksState.list.filter((t) => t.status === 'blocked').length,
+    [tasksState],
+  );
+
+  // Calendar stat for the top strip (Kane: non-builders want their calendar, not automations).
+  const calendarStat = useMemo(() => {
+    if (!calendarState.loaded) return { value: '—', sub: 'loading calendar…' };
+    const total = calendarState.list.length;
+    const nowMs = Date.now();
+    const next = [...calendarState.list]
+      .filter((e) => e.start && new Date(e.start).getTime() >= nowMs)
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())[0];
+    const sub = total === 0
+      ? 'no events today'
+      : next
+        ? `next: ${(next.summary || 'event').slice(0, 22)} ${new Date(next.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+        : `${total} today · all done`;
+    return { value: String(total), sub };
+  }, [calendarState]);
+
+  // Which tile each widget id renders. Filtered by the user's gallery choices.
+  const widgetNode: Record<WidgetId, React.ReactNode> = {
+    agents:   <AgentRoster state={rascalsState} />,
+    tasks:    <KanbanPeek state={tasksState} />,
+    activity: <LiveActivity state={recentActivityState} />,
+    inbox:    <InboxPanel state={inboxState} />,
+    slack:    <SlackAttentionPanel state={slackAttentionState} />,
+    whatsapp: <WhatsAppPanel state={whatsappState} />,
+    timeline: <TimelinePanel calendar={calendarState} tasks={tasksState} rascals={rascalsState} />,
+  };
+  const activeWidgets = WIDGET_CATALOG.filter((w) => enabledWidgets.has(w.id));
+  const gridWidgets = activeWidgets.filter((w) => !w.wide);
+  const wideWidgets = activeWidgets.filter((w) => w.wide);
+
+  const displayName = useMemo(getDisplayName, []);
+  const dateLabel = useMemo(
+    () =>
+      now
+        .toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+        .toUpperCase(),
+    [now],
+  );
+  const timeLabel = useMemo(() => now.toLocaleTimeString('en-US', { hour12: false }), [now]);
+  const greeting = useMemo(() => greetingFor(now), [now]);
+
+  return (
+    <div
+      data-testid="dashboard-v2"
+      className="relative h-full overflow-auto p-4"
+      style={{ background: 'var(--v-base)' }}
+    >
+      {auth.expired && (
+        <div
+          data-testid="auth-expired-banner"
+          role="alert"
+          className="mb-3 rounded-lg px-4 py-2.5 flex items-center gap-3"
+          style={{
+            background: 'linear-gradient(90deg, rgba(255,184,107,0.18), rgba(255,92,200,0.12))',
+            border: '1px solid rgba(255,184,107,0.45)',
+            color: '#ffd9b0',
+          }}
+        >
+          <span
+            aria-hidden
+            className="w-2 h-2 rounded-full flex-shrink-0"
+            style={{ background: '#FF8A3D', boxShadow: '0 0 8px #FF8A3D' }}
+          />
+          <span className="text-[12.5px] flex-1">
+            Your session has expired — every panel below is showing empty data because the API is rejecting requests as unauthenticated. Sign out and sign back in to refresh.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              try { localStorage.removeItem('boss_token'); } catch { /* ignore */ }
+              window.location.assign('/login');
+            }}
+            className="text-[11.5px] font-semibold px-3 py-1 rounded-md"
+            style={{
+              background: 'rgba(255,184,107,0.25)',
+              border: '1px solid rgba(255,184,107,0.6)',
+              color: '#ffe0c0',
+            }}
+          >
+            Sign in again
+          </button>
+        </div>
+      )}
+
+      {/* Everything below is scaled up ~18% for legibility (Kane: bigger fonts). */}
+      <div style={{ zoom: 1.18 }}>
+      {/* Title bar */}
+      <div className="flex items-end gap-4 mb-4">
+        <div className="flex-1">
+          <div
+            className="vs-mono text-[10px] tracking-[0.26em]"
+            style={{ color: '#74849A' }}
+          >
+            COMMAND CENTER / {dateLabel}
+          </div>
+          <div className="flex items-baseline gap-3.5 mt-1.5">
+            <h1
+              className="m-0 text-[28px] font-semibold"
+              style={{ letterSpacing: '-0.01em' }}
+            >
+              {greeting},{' '}
+              <span
+                style={{
+                  background: 'linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)',
+                  WebkitBackgroundClip: 'text',
+                  backgroundClip: 'text',
+                  color: 'transparent',
+                }}
+              >
+                {displayName}
+              </span>
+              .
+            </h1>
+            <div className="vs-mono text-[11px]" style={{ color: '#9AA8C2' }}>
+              {timeLabel}
+            </div>
+          </div>
+          <div className="text-[13px] mt-1" style={{ color: '#9AA8C2' }} data-testid="dashboard-substat">
+            {tasksState.loaded ? `${blockedCount} threads need you` : 'tasks…'}
+            {' · '}
+            {rascalsState.loaded ? `${enabledRascals} agents online` : 'agents…'}
+            {' · '}
+            {automationsState.loaded
+              ? `${automationsActive}/${automationsTotal} automations warm`
+              : 'automations…'}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setGalleryOpen(true)}
+          className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-md shrink-0"
+          style={{ background: DASH.panel2, border: `1px solid ${DASH.border}`, color: DASH.text }}
+          data-testid="dashboard-customize"
+        >
+          <LayoutGrid className="w-3.5 h-3.5" /> Customize
+        </button>
+      </div>
+
+      {/* Stat strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <StatCard
+          label="EMPLOYEE AGENTS"
+          value={rascalsState.loaded ? String(enabledRascals) : '—'}
+          sub={
+            rascalsState.loaded
+              ? `${rascalsState.list.length} registered · ${enabledRascals} online`
+              : 'loading agents…'
+          }
+          hue="purple"
+          spark="rise"
+        />
+        <StatCard
+          label="TASKS TODAY"
+          value={tasksToday == null ? '—' : String(tasksToday)}
+          sub={
+            tasksState.loaded
+              ? `${tasksState.list.filter((t) => t.status === 'active').length} active · ${blockedCount} blocked`
+              : 'loading tasks…'
+          }
+          hue="pink"
+          spark="split"
+        />
+        <StatCard
+          label="INBOX"
+          value={inboxState.loaded ? String(inboxState.list.length) : '—'}
+          sub={
+            inboxState.loaded
+              ? inboxState.email
+                ? `${inboxState.list.length} unread · ${inboxState.email}`
+                : inboxState.list.length === 0
+                  ? 'no unread mail'
+                  : `${inboxState.list.length} unread`
+              : 'loading inbox…'
+          }
+          hue="green"
+          spark="rise"
+        />
+        <StatCard
+          label="CALENDAR"
+          value={calendarStat.value}
+          sub={calendarStat.sub}
+          hue="blue"
+          spark="wave"
+        />
+      </div>
+
+      {/* Widget grid — symmetric, equal-height, scroll-inside tiles. Kane:
+          same-size boxes, no big empty black gaps, scroll feature. Wide
+          widgets (timeline) span the full row. */}
+      <div className="grid gap-3.5 mt-3.5 grid-cols-1 lg:grid-cols-2">
+        {gridWidgets.map((w) => (
+          <div key={w.id} className="h-[340px] min-h-0">{widgetNode[w.id]}</div>
+        ))}
+        {wideWidgets.map((w) => (
+          <div key={w.id} className="h-[300px] min-h-0 lg:col-span-2">{widgetNode[w.id]}</div>
+        ))}
+        {activeWidgets.length === 0 && (
+          <div
+            className="lg:col-span-2 rounded-[14px] p-8 text-center text-[13px]"
+            style={{ border: `1px dashed ${DASH.border}`, color: DASH.textMuted }}
+          >
+            No widgets selected. Click “Customize” to choose which tiles show.
+          </div>
+        )}
+      </div>
+      </div>
+
+      {galleryOpen && (
+        <WidgetGallery enabled={enabledWidgets} toggle={toggleWidget} onClose={() => setGalleryOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+export { Dashboard };

@@ -1,0 +1,4 @@
+ask-sdk==1.18.0
+ask-sdk-core==1.18.0
+requests==2.31.0
+flask==2.3.3

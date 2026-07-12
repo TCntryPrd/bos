@@ -1,0 +1,115 @@
+{
+  "emails": [
+    {
+      "date": "2026-04-06",
+      "timestamp": "2026-04-06T16:23:32.112Z",
+      "to": "achardukian@modularmillwork.com",
+      "subject": "Quick opportunity for Modular Millwork",
+      "business_name": "Modular Millwork",
+      "sheet_row": 54,
+      "success": false,
+      "message_id": null,
+      "error": "API returned 503: {\"error\":\"Service Unavailable\",\"message\":\"Authentication not configured\"}"
+    },
+    {
+      "date": "2026-04-06",
+      "timestamp": "2026-04-06T16:23:32.214Z",
+      "to": "bob.mitchell@northwestbearing.com",
+      "subject": "Quick opportunity for Northwest Baring Indus Sup",
+      "business_name": "Northwest Baring Indus Sup",
+      "sheet_row": 58,
+      "success": false,
+      "message_id": null,
+      "error": "API returned 503: {\"error\":\"Service Unavailable\",\"message\":\"Authentication not configured\"}"
+    },
+    {
+      "date": "2026-04-06",
+      "timestamp": "2026-04-06T16:23:32.316Z",
+      "to": "berman@synergymicrosolutions.com",
+      "subject": "Quick opportunity for Synergy Micro Solutions,",
+      "business_name": "Synergy Micro Solutions,",
+      "sheet_row": 84,
+      "success": false,
+      "message_id": null,
+      "error": "API returned 503: {\"error\":\"Service Unavailable\",\"message\":\"Authentication not configured\"}"
+    },
+    {
+      "date": "2026-04-06",
+      "timestamp": "2026-04-06T16:23:32.418Z",
+      "to": "jcormier@2ocs.com",
+      "subject": "Quick opportunity for there",
+      "business_name": "there",
+      "sheet_row": 97,
+      "success": false,
+      "message_id": null,
+      "error": "API returned 503: {\"error\":\"Service Unavailable\",\"message\":\"Authentication not configured\"}"
+    },
+    {
+      "date": "2026-04-06",
+      "timestamp": "2026-04-06T16:23:32.520Z",
+      "to": "ben.deming@advanced-ceramic-coatings.com",
+      "subject": "Quick opportunity for Advanced Ceramic Coatings",
+      "business_name": "Advanced Ceramic Coatings",
+      "sheet_row": 98,
+      "success": false,
+      "message_id": null,
+      "error": "API returned 503: {\"error\":\"Service Unavailable\",\"message\":\"Authentication not configured\"}"
+    },
+    {
+      "date": "2026-04-06",
+      "timestamp": "2026-04-06T16:23:32.622Z",
+      "to": "david@awnique.com",
+      "subject": "Quick opportunity for Awnique",
+      "business_name": "Awnique",
+      "sheet_row": 99,
+      "success": false,
+      "message_id": null,
+      "error": "API returned 503: {\"error\":\"Service Unavailable\",\"message\":\"Authentication not configured\"}"
+    },
+    {
+      "date": "2026-04-06",
+      "timestamp": "2026-04-06T16:23:32.724Z",
+      "to": "shannon@coastalsteelstructures.com",
+      "subject": "Quick opportunity for Coastal Steel Structures",
+      "business_name": "Coastal Steel Structures",
+      "sheet_row": 105,
+      "success": false,
+      "message_id": null,
+      "error": "API returned 503: {\"error\":\"Service Unavailable\",\"message\":\"Authentication not configured\"}"
+    },
+    {
+      "date": "2026-04-06",
+      "timestamp": "2026-04-06T16:23:32.826Z",
+      "to": "amber@pannellassociates.com",
+      "subject": "Quick opportunity for Pannell Associates Sales Co",
+      "business_name": "Pannell Associates Sales Co",
+      "sheet_row": 121,
+      "success": false,
+      "message_id": null,
+      "error": "API returned 503: {\"error\":\"Service Unavailable\",\"message\":\"Authentication not configured\"}"
+    },
+    {
+      "date": "2026-04-06",
+      "timestamp": "2026-04-06T16:23:32.928Z",
+      "to": "scott.carter@pinnaero.com",
+      "subject": "Quick opportunity for there",
+      "business_name": "there",
+      "sheet_row": 122,
+      "success": false,
+      "message_id": null,
+      "error": "API returned 503: {\"error\":\"Service Unavailable\",\"message\":\"Authentication not configured\"}"
+    },
+    {
+      "date": "2026-04-06",
+      "timestamp": "2026-04-06T16:23:33.030Z",
+      "to": "dmessinger@progressiveproductsinc.com",
+      "subject": "Quick opportunity for Progressive Products",
+      "business_name": "Progressive Products",
+      "sheet_row": 123,
+      "success": false,
+      "message_id": null,
+      "error": "API returned 503: {\"error\":\"Service Unavailable\",\"message\":\"Authentication not configured\"}"
+    }
+  ],
+  "lastUpdated": "2026-04-06T16:23:33.030Z"
+}

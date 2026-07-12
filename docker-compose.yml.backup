@@ -1,0 +1,141 @@
+# IR Custom AIOS IR White-Label - Complete Deployment
+# Domain: ircustomdashboards.tech
+# Bulletproof: Builds from clean source, reproducible, updatable
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: boss_ir_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: boss
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: boss_ir
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/postgres/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U boss -d boss_ir"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: boss_ir_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6382:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  weaviate:
+    image: semitechnologies/weaviate:1.28.2
+    container_name: boss_ir_weaviate
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/v1/.well-known/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  stt:
+    build:
+      context: ./services/stt
+    container_name: boss_ir_stt
+    restart: unless-stopped
+    ports:
+      - "8012:8000"
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+    volumes:
+      - stt_models:/root/.cache/huggingface
+
+  tts:
+    build:
+      context: ./services/tts
+    container_name: boss_ir_tts
+    restart: unless-stopped
+    ports:
+      - "8016:8003"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: boss_ir_api
+    restart: unless-stopped
+    ports:
+      - "8011:8001"
+    environment:
+      NODE_ENV: production
+      PORT: "8001"
+      POSTGRES_URL: postgresql://boss:${POSTGRES_PASSWORD}@postgres:5432/boss_ir
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      WEAVIATE_URL: http://weaviate:8080
+      TENANT_MODE: multi
+      DEFAULT_TENANT_ID: none
+      INSTALL_ENABLED: "true"
+      API_BASE_URL: https://ircustomdashboards.tech
+      BOSS_TOKEN_ENCRYPTION_KEY: ${BOSS_TOKEN_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      BOSS_BACKGROUND_AGENTS: "off"
+    depends_on:
+      - postgres
+      - redis
+      - weaviate
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: https://ircustomdashboards.tech
+    container_name: boss_ir_web
+    restart: unless-stopped
+    ports:
+      - "8015:80"
+    depends_on:
+      - api
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.boss-ir.rule=Host(`ircustomdashboards.tech`)
+      - traefik.http.routers.boss-ir.entrypoints=websecure
+      - traefik.http.routers.boss-ir.tls.certresolver=letsencrypt
+      - traefik.http.services.boss-ir.loadbalancer.server.port=80
+      - traefik.docker.network=web
+    networks:
+      - default
+      - web
+
+volumes:
+  postgres_data:
+  redis_data:
+  weaviate_data:
+  stt_models:
+
+networks:
+  default:
+    name: boss-ir_default
+  web:
+    external: true
+    name: web

@@ -1,0 +1,215 @@
+{
+  "uid": "boss-voice-pipeline",
+  "title": "IR Custom AIOS — Voice Pipeline Latency",
+  "description": "End-to-end voice pipeline timing: wake detection, audio stream, STT, brain, TTS, response. Target: sub-3s total. Tracks per-device and per-room breakdowns.",
+  "tags": ["boss", "voice", "latency"],
+  "timezone": "browser",
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "device",
+        "label": "Device / Room",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(voice_pipeline_duration_seconds_count{job=\"boss-api\"}, device_id)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Avg End-to-End (ms)",
+      "description": "Target: < 3000ms",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 2500, "color": "yellow" },
+              { "value": 3000, "color": "red" }
+            ]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "histogram_quantile(0.50, sum(rate(voice_pipeline_duration_seconds_bucket{job=\"boss-api\", stage=\"total\"}[5m])) by (le)) * 1000",
+        "legendFormat": "p50 total"
+      }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "p95 End-to-End (ms)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 3000, "color": "yellow" },
+              { "value": 4000, "color": "red" }
+            ]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "histogram_quantile(0.95, sum(rate(voice_pipeline_duration_seconds_bucket{job=\"boss-api\", stage=\"total\"}[5m])) by (le)) * 1000",
+        "legendFormat": "p95 total"
+      }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Active Voice Connections",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": 0, "color": "blue" }]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "active_ws_connections{job=\"boss-api\", type=\"voice\"}",
+        "legendFormat": "Devices online"
+      }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Voice Requests / min",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum(rate(voice_pipeline_duration_seconds_count{job=\"boss-api\", stage=\"total\"}[1m])) * 60",
+        "legendFormat": "req/min"
+      }]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Pipeline Stage Breakdown (p95, ms)",
+      "description": "Breakdown by stage: stt (speech-to-text), brain (LLM call), tts (text-to-speech), stream (WebSocket audio transfer). Target: total < 3000ms.",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "stt" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "brain" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "tts" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "stream" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "total" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }, { "id": "custom.lineWidth", "value": 2 }] }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"] }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(voice_pipeline_duration_seconds_bucket{job=\"boss-api\", stage=\"stt\"}[5m])) by (le)) * 1000",
+          "legendFormat": "stt"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(voice_pipeline_duration_seconds_bucket{job=\"boss-api\", stage=\"brain\"}[5m])) by (le)) * 1000",
+          "legendFormat": "brain"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(voice_pipeline_duration_seconds_bucket{job=\"boss-api\", stage=\"tts\"}[5m])) by (le)) * 1000",
+          "legendFormat": "tts"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(voice_pipeline_duration_seconds_bucket{job=\"boss-api\", stage=\"stream\"}[5m])) by (le)) * 1000",
+          "legendFormat": "stream"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(voice_pipeline_duration_seconds_bucket{job=\"boss-api\", stage=\"total\"}[5m])) by (le)) * 1000",
+          "legendFormat": "total"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "STT Transcription Duration (ms) — faster-whisper",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.50, sum(rate(stt_transcription_duration_seconds_bucket{job=\"boss-stt\"}[5m])) by (le, model)) * 1000",
+          "legendFormat": "p50 {{model}}"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(stt_transcription_duration_seconds_bucket{job=\"boss-stt\"}[5m])) by (le, model)) * 1000",
+          "legendFormat": "p95 {{model}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Voice Requests per Minute by Room",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum by (room) (rate(voice_pipeline_duration_seconds_count{job=\"boss-api\", stage=\"total\"}[1m])) * 60",
+        "legendFormat": "{{room}}"
+      }]
+    }
+  ]
+}

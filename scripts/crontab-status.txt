@@ -1,0 +1,107 @@
+
+0 11 * * 5 /home/tcntryprd/updates/reset-usage.sh opus
+0 18 * * 0 /home/tcntryprd/updates/reset-usage.sh sonnet
+0 2,7,12,17,22 * * * /home/tcntryprd/updates/reset-usage.sh window5h
+0 * * * * /home/tcntryprd/boss-dev/scripts/auto-commit.sh
+*/5 * * * * /home/tcntryprd/boss-dev/scripts/update-status-files.sh
+# Content generation — 11pm CT (4am UTC)
+# Content generation — 11pm CT (4am UTC) nightly
+CRON_TZ=America/Chicago
+# Follow-up — 2pm CT (7pm UTC) Mon-Fri
+# Friday Newsletter
+# ── Heartbeat — every 30 min, 5am-11pm CT ───────────────────────────────────
+# Monthly Report
+# ── Morning Briefing Pipeline ─────────────────────────────────────────────────
+# ── Outreach Campaign Team ────────────────────────────────────────────────────
+# Publish — 5:30am CT (10:30am UTC)
+# Publish to RSS/GitHub — 5am CT (10am UTC) — ready well before you wake up
+# Reply Monitor — every 30 min, 7am-10pm CT (12pm-3am UTC)
+# Researcher — nightly 10pm CT (3am UTC), preps next day's queue
+# Sender — 9am CT (2pm UTC) Mon-Fri
+# Show build — 12am CT (5am UTC) — runs right after content is ready
+# Show build — 5am CT (10am UTC)
+# ── Social Media — Sonnet 4.6 writes AND posts directly via webhook ──────────
+# Usage reset timers
+# Weekly Social Analysis — Saturday 2pm CT
+* * * * * /home/tcntryprd/boss-dev/scripts/keep-window-cron.sh
+# ── Eric Bloom Agent ──────────────────────────────────────────────────────────
+# Daily morning check — calendars, emails, transcripts, prep
+
+# ── Wave 1 backup additions (2026-04-21) ─────────────────────────────────────
+# Hourly sweep of sp-hub + 13 client workspaces (offset 15 min from boss-dev auto-commit)
+15 * * * * /home/tcntryprd/boss-dev/scripts/auto-commit-all.sh
+# Daily encrypted Postgres + Weaviate backup — 04:00 UTC (~23:00 CT)
+0 4 * * * /usr/bin/flock -n /tmp/boss-backup.lock /home/tcntryprd/boss-dev/scripts/backup.sh --type full --dest git >> /home/tcntryprd/boss-dev/scripts/logs/backup.log 2>&1
+# Ms. Roberts — daily check at 09:00 PT (~16:00 UTC during PDT)
+30 4 * * * /home/tcntryprd/boss-dev/scripts/n8n-workflow-export.sh >> /home/tcntryprd/scripts/logs/n8n-export.log 2>&1
+35 4 * * * /home/tcntryprd/boss-dev/scripts/cc-memory-backup.sh >> /home/tcntryprd/scripts/logs/cc-memory.log 2>&1
+* * * * * /home/tcntryprd/boss-dev/scripts/host-cmd-dispatch.sh
+# vD.1.0 — Weekly volume snapshots (Sunday 03:00 UTC)
+0 3 * * 0 /usr/bin/flock -n /tmp/boss-volume-snapshot.lock /home/tcntryprd/boss-dev/scripts/volume-snapshot.sh >> /home/tcntryprd/boss-dev/scripts/logs/volume-snapshot.log 2>&1
+# vD.1.0 — Monthly disaster rehearsal (1st of month 05:00 UTC)
+0 5 1 * * /usr/bin/flock -n /tmp/boss-disaster-rehearsal.lock /home/tcntryprd/boss-dev/scripts/disaster-rehearsal.sh >> /home/tcntryprd/boss-dev/scripts/logs/disaster-rehearsal.log 2>&1
+# vD.1.1 — Nightly backup notification (after all backups complete)
+40 4 * * * /home/tcntryprd/boss-dev/scripts/backup-notify.sh >> /home/tcntryprd/boss-dev/scripts/logs/backup-notify.log 2>&1
+
+# Darry — Kanban board captain. Deterministic bucket promotion hourly.
+5 * * * * /home/tcntryprd/outsiders/darry/bin/sweep.sh >> /home/tcntryprd/outsiders/darry/state/logs/cron.log 2>&1
+# Darry — LLM-driven morning sweep (judgmental decisions)
+30 7 * * * CRON_TZ=America/Chicago /home/tcntryprd/outsiders/darry/crons/wake-agent.sh >> /home/tcntryprd/outsiders/darry/state/logs/wake-cron.log 2>&1
+
+# ── KANBAN HEARTBEATS — installed 2026-05-15 (Kevin's directive) ───────────
+# DST: schedules below are in UTC and map to CDT (UTC-5). When DST ends 2026-11-01,
+# shift each hour field +1 (13-22→14-23, 9→10, 10→11, 12→13). Then revert on 2027-03-08.
+# Rascals: Mon-Fri 8am-5:59pm CT, every 13 min, 7-min staggered (offset i*7 mod 13)
+# Outsiders: daily 07:45-07:55 CT before rascal day
+# Source: /home/tcntryprd/sp-hub/docs/agents/agent-{kanban-protocol,heartbeat-template}.md
+
+# Rascal heartbeats (each rascal hits its own 4-5 minutes per hour)
+0,13,26,39,52  13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh ajbloom    /home/tcntryprd/rascals/ajbloom/crons/heartbeat.md    >> /home/tcntryprd/rascals/ajbloom/state/logs/heartbeat.log    2>&1
+7,20,33,46,59  13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh alfalfa    /home/tcntryprd/rascals/alfalfa/crons/heartbeat.md    >> /home/tcntryprd/rascals/alfalfa/state/logs/heartbeat.log    2>&1
+1,14,27,40,53  13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh buckwheat  /home/tcntryprd/rascals/buckwheat/crons/heartbeat.md  >> /home/tcntryprd/rascals/buckwheat/state/logs/heartbeat.log  2>&1
+8,21,34,47     13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh butch      /home/tcntryprd/rascals/butch/crons/heartbeat.md      >> /home/tcntryprd/rascals/butch/state/logs/heartbeat.log      2>&1
+2,15,28,41,54  13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh darla      /home/tcntryprd/rascals/darla/crons/heartbeat.md      >> /home/tcntryprd/rascals/darla/state/logs/heartbeat.log      2>&1
+9,22,35,48     13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh froggy     /home/tcntryprd/rascals/froggy/crons/heartbeat.md     >> /home/tcntryprd/rascals/froggy/state/logs/heartbeat.log     2>&1
+3,16,29,42,55  13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh msroberts  /home/tcntryprd/rascals/msroberts/crons/heartbeat.md  >> /home/tcntryprd/rascals/msroberts/state/logs/heartbeat.log  2>&1
+10,23,36,49    13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh petey      /home/tcntryprd/rascals/petey/crons/heartbeat.md      >> /home/tcntryprd/rascals/petey/state/logs/heartbeat.log      2>&1
+4,17,30,43,56  13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh porky      /home/tcntryprd/rascals/porky/crons/heartbeat.md      >> /home/tcntryprd/rascals/porky/state/logs/heartbeat.log      2>&1
+11,24,37,50    13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh spanky     /home/tcntryprd/rascals/spanky/crons/heartbeat.md     >> /home/tcntryprd/rascals/spanky/state/logs/heartbeat.log     2>&1
+5,18,31,44,57  13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh stymie     /home/tcntryprd/rascals/stymie/crons/heartbeat.md     >> /home/tcntryprd/rascals/stymie/state/logs/heartbeat.log     2>&1
+12,25,38,51    13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh wheezer    /home/tcntryprd/rascals/wheezer/crons/heartbeat.md    >> /home/tcntryprd/rascals/wheezer/state/logs/heartbeat.log    2>&1
+
+# Outsider heartbeats (daily, before rascals)
+45 12 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh darry   /home/tcntryprd/outsiders/darry/crons/heartbeat.md   >> /home/tcntryprd/outsiders/darry/state/logs/heartbeat.log   2>&1
+50 12 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh ponyboy /home/tcntryprd/outsiders/ponyboy/crons/heartbeat.md >> /home/tcntryprd/outsiders/ponyboy/state/logs/heartbeat.log 2>&1
+55 12 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh slack   /home/tcntryprd/outsiders/slack/crons/heartbeat.md   >> /home/tcntryprd/outsiders/slack/state/logs/heartbeat.log   2>&1
+
+# Darry — auto-close sweep (hourly): tasks in to_close >48hr → done
+15 * * * * /home/tcntryprd/outsiders/darry/bin/auto-close-sweep.sh >> /home/tcntryprd/outsiders/darry/state/logs/auto-close-cron.log 2>&1
+
+# Darry — daily auto-close summary card (06:00 CT)
+0 6 * * * CRON_TZ=America/Chicago /home/tcntryprd/outsiders/darry/bin/daily-autoclose-summary.sh >> /home/tcntryprd/outsiders/darry/state/logs/daily-summary-cron.log 2>&1
+
+# ── Cognitive memory consolidation — daily, pilot agents only (2026-05-15) ─
+30 10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh darry     /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/outsiders/darry/state/logs/memory-consolidate.log     2>&1
+35 10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh ponyboy   /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/outsiders/ponyboy/state/logs/memory-consolidate.log   2>&1
+40 10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh slack     /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/outsiders/slack/state/logs/memory-consolidate.log     2>&1
+45 10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh darla     /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/darla/state/logs/memory-consolidate.log         2>&1
+50 10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh wheezer   /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/wheezer/state/logs/memory-consolidate.log       2>&1
+55 10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh msroberts /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/msroberts/state/logs/memory-consolidate.log   2>&1
+# Cognitive memory consolidation — remaining 9 rascals (one for all)
+45 9 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh ajbloom   /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/ajbloom/state/logs/memory-consolidate.log    2>&1
+50 9 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh alfalfa   /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/alfalfa/state/logs/memory-consolidate.log    2>&1
+55 9 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh buckwheat /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/buckwheat/state/logs/memory-consolidate.log  2>&1
+0  10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh butch     /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/butch/state/logs/memory-consolidate.log      2>&1
+5  10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh froggy    /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/froggy/state/logs/memory-consolidate.log     2>&1
+10 10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh petey     /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/petey/state/logs/memory-consolidate.log      2>&1
+15 10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh porky     /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/porky/state/logs/memory-consolidate.log      2>&1
+20 10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh spanky    /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/spanky/state/logs/memory-consolidate.log     2>&1
+25 10 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh stymie    /home/tcntryprd/sp-hub/docs/agents/memory-consolidation-prompt.md >> /home/tcntryprd/rascals/stymie/state/logs/memory-consolidate.log     2>&1
+
+# ── NIGHT-OWL — 105-min heartbeat outside Mon-Fri 8-17 CT (installed 2026-05-18) ───────
+*/5 * * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/nightowl-heartbeat.sh
+# Dally (WhatsApp outsider) — working hours triage every 13 min (CDT 8-17 = UTC 13-22)
+4,17,30,43,56 13-22 * * 1-5 CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh dally /home/tcntryprd/outsiders/dally/crons/heartbeat.md >> /home/tcntryprd/outsiders/dally/state/logs/heartbeat.log 2>&1
+# Dally — off-hours: once at 7 AM CDT (12 UTC) and once at 10 PM CDT (3 UTC next day) for inbox sweeps
+0 12 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh dally /home/tcntryprd/outsiders/dally/crons/heartbeat.md >> /home/tcntryprd/outsiders/dally/state/logs/heartbeat.log 2>&1
+0 3 * * * CRON_TZ=America/Chicago /home/tcntryprd/bin/wake-rascal.sh dally /home/tcntryprd/outsiders/dally/crons/heartbeat.md >> /home/tcntryprd/outsiders/dally/state/logs/heartbeat.log 2>&1

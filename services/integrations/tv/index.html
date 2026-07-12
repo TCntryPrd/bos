@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IR Custom AIOS Smart TV Interface</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #000;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+            font-size: 24px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #444;
+            padding-bottom: 20px;
+        }
+        
+        h1 {
+            font-size: 48px;
+            margin: 0;
+            color: #00ffcc;
+        }
+        
+        .section {
+            background-color: #111;
+            border: 2px solid #333;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .section-title {
+            font-size: 32px;
+            color: #00ccff;
+            margin-top: 0;
+            border-bottom: 1px solid #444;
+            padding-bottom: 10px;
+        }
+        
+        .email-item, .project-item {
+            padding: 10px 0;
+            border-bottom: 1px solid #333;
+        }
+        
+        .email-item:last-child, .project-item:last-child {
+            border-bottom: none;
+        }
+        
+        .command-input {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        #voiceCommand {
+            flex: 1;
+            padding: 15px;
+            font-size: 24px;
+            background-color: #222;
+            color: white;
+            border: 2px solid #444;
+            border-radius: 5px;
+        }
+        
+        button {
+            padding: 15px 25px;
+            font-size: 24px;
+            background-color: #007acc;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background-color: #005a99;
+        }
+        
+        .focused {
+            outline: 3px solid #00ffcc;
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+        }
+        
+        .loading {
+            color: #aaa;
+            font-style: italic;
+        }
+        
+        .error {
+            color: #ff6666;
+        }
+        
+        .success {
+            color: #66ff66;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>BOSS AIOS</h1>
+            <p>Smart TV Control Interface</p>
+        </header>
+        
+        <div class="section" id="daily-briefing-section">
+            <h2 class="section-title">Daily Briefing</h2>
+            <div id="daily-briefing-content">Loading...</div>
+        </div>
+        
+        <div class="section" id="email-summary-section">
+            <h2 class="section-title">Email Summary</h2>
+            <div id="email-content">Loading...</div>
+        </div>
+        
+        <div class="section" id="project-status-section">
+            <h2 class="section-title">Project Status</h2>
+            <div id="project-content">Loading...</div>
+        </div>
+        
+        <div class="section">
+            <h2 class="section-title">Voice Command</h2>
+            <div class="command-input">
+                <input type="text" id="voiceCommand" placeholder="Enter your command...">
+                <button id="submitCommand">Submit</button>
+            </div>
+            <div id="command-response"></div>
+        </div>
+    </div>
+
+    <script>
+        // IR Custom AIOS API configuration.
+        // API_TOKEN placeholder is substituted server-side by the IR Custom AIOS API's
+        // GET /tv endpoint (services/api/app/main.py → tv_ui()). The token
+        // value lives only in BOSS_API_TOKEN env at runtime, never in the file.
+        const API_BASE = 'http://127.0.0.1:8001';
+        const API_TOKEN = '__BOSS_API_TOKEN__';
+        
+        // Elements
+        const dailyBriefingEl = document.getElementById('daily-briefing-content');
+        const emailContentEl = document.getElementById('email-content');
+        const projectContentEl = document.getElementById('project-content');
+        const voiceCommandInput = document.getElementById('voiceCommand');
+        const submitButton = document.getElementById('submitCommand');
+        const commandResponseEl = document.getElementById('command-response');
+        
+        // Focus management for TV navigation
+        let focusableElements = [];
+        let currentIndex = 0;
+        
+        function updateFocusableElements() {
+            focusableElements = Array.from(document.querySelectorAll('input, button, [tabindex]'));
+            // Add section titles as focusable elements
+            document.querySelectorAll('.section-title').forEach(el => {
+                el.setAttribute('tabindex', '0');
+                focusableElements.push(el);
+            });
+        }
+        
+        function setFocus(index) {
+            if (focusableElements.length === 0) return;
+            
+            // Remove focused class from all elements
+            focusableElements.forEach(el => el.classList.remove('focused'));
+            
+            // Adjust index to wrap around
+            currentIndex = (index + focusableElements.length) % focusableElements.length;
+            
+            // Add focused class to current element
+            focusableElements[currentIndex].classList.add('focused');
+            focusableElements[currentIndex].focus();
+        }
+        
+        function initFocus() {
+            updateFocusableElements();
+            setFocus(0);
+        }
+        
+        // Navigation with arrow keys
+        document.addEventListener('keydown', function(e) {
+            switch(e.key) {
+                case 'ArrowDown':
+                    e.preventDefault();
+                    setFocus(currentIndex + 1);
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    setFocus(currentIndex - 1);
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    if (focusableElements[currentIndex]) {
+                        focusableElements[currentIndex].click();
+                    }
+                    break;
+                case 'Backspace':
+                case 'Escape':
+                    e.preventDefault();
+                    // Go back to first element
+                    setFocus(0);
+                    break;
+            }
+        });
+        
+        // API helper function
+        async function apiCall(endpoint, method = 'GET', data = null) {
+            const config = {
+                method: method,
+                headers: {
+                    'Authorization': `Bearer ${API_TOKEN}`,
+                    'Content-Type': 'application/json'
+                }
+            };
+            
+            if (data) {
+                config.body = JSON.stringify(data);
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, config);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                return await response.json();
+            } catch (error) {
+                console.error('API call failed:', error);
+                throw error;
+            }
+        }
+        
+        // Load data functions
+        async function loadDailyBriefing() {
+            try {
+                dailyBriefingEl.innerHTML = '<div class="loading">Loading briefing...</div>';
+                
+                // Get calendar events for today
+                const calendarData = await apiCall('/google/calendar/today');
+                
+                // Get unread emails
+                const emailData = await apiCall('/google/gmail/unread');
+                
+                // Get pending tasks
+                const taskData = await apiCall('/google/tasks/pending');
+                
+                let briefingHtml = '';
+                
+                if (calendarData.events && calendarData.events.length > 0) {
+                    briefingHtml += '<h3>Today\'s Calendar (' + calendarData.count + ' events)</h3><ul>';
+                    calendarData.events.slice(0, 5).forEach(event => {
+                        const startTime = event.start ? new Date(event.start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'All day';
+                        briefingHtml += `<li>${startTime}: ${event.summary}</li>`;
+                    });
+                    briefingHtml += '</ul>';
+                } else {
+                    briefingHtml += '<p>No calendar events scheduled for today.</p>';
+                }
+                
+                briefingHtml += '<h3>Email (' + (emailData.messages ? emailData.messages.length : 0) + ' unread)</h3>';
+                if (emailData.messages && emailData.messages.length > 0) {
+                    emailData.messages.slice(0, 5).forEach(msg => {
+                        briefingHtml += `<div class="email-item"><strong>From:</strong> ${msg.from} | <strong>Subject:</strong> ${msg.subject}</div>`;
+                    });
+                } else {
+                    briefingHtml += '<p>Inbox is clean!</p>';
+                }
+                
+                briefingHtml += '<h3>Pending Tasks (' + (taskData.tasks ? taskData.tasks.length : 0) + ')</h3>';
+                if (taskData.tasks && taskData.tasks.length > 0) {
+                    taskData.tasks.slice(0, 5).forEach(task => {
+                        briefingHtml += `<div class="project-item">${task.title}</div>`;
+                    });
+                } else {
+                    briefingHtml += '<p>No pending tasks.</p>';
+                }
+                
+                dailyBriefingEl.innerHTML = briefingHtml;
+            } catch (error) {
+                dailyBriefingEl.innerHTML = `<div class="error">Error loading briefing: ${error.message}</div>`;
+            }
+        }
+        
+        async function loadEmailSummary() {
+            try {
+                emailContentEl.innerHTML = '<div class="loading">Loading emails...</div>';
+                
+                const emailData = await apiCall('/google/gmail/unread');
+                
+                if (emailData.messages && emailData.messages.length > 0) {
+                    let emailHtml = `<p>You have ${emailData.messages.length} unread emails:</p><ul>`;
+                    
+                    emailData.messages.forEach(msg => {
+                        emailHtml += `
+                            <li class="email-item">
+                                <strong>From:</strong> ${msg.from}<br>
+                                <strong>Subject:</strong> ${msg.subject}<br>
+                                <strong>Received:</strong> ${msg.date}
+                            </li>
+                        `;
+                    });
+                    
+                    emailHtml += '</ul>';
+                    emailContentEl.innerHTML = emailHtml;
+                } else {
+                    emailContentEl.innerHTML = '<p>No unread emails in your inbox.</p>';
+                }
+            } catch (error) {
+                emailContentEl.innerHTML = `<div class="error">Error loading emails: ${error.message}</div>`;
+            }
+        }
+        
+        async function loadProjectStatus() {
+            try {
+                projectContentEl.innerHTML = '<div class="loading">Loading project status...</div>';
+                
+                // For now, we'll simulate project status by getting recent events
+                // In a real implementation, this would connect to project management systems
+                const eventsData = await apiCall('/events');
+                
+                if (eventsData.events && eventsData.events.length > 0) {
+                    let projectHtml = `<p>Recent activities (${eventsData.events.length}):</p><ul>`;
+                    
+                    // Show the 5 most recent events
+                    eventsData.events.slice(0, 5).forEach(event => {
+                        const eventId = event[0];
+                        const eventText = event[1];
+                        const eventIntent = event[2];
+                        
+                        projectHtml += `
+                            <li class="project-item">
+                                <strong>ID:</strong> ${eventId}<br>
+                                <strong>Event:</strong> ${eventText}<br>
+                                <strong>Intent:</strong> ${eventIntent}
+                            </li>
+                        `;
+                    });
+                    
+                    projectHtml += '</ul>';
+                    projectContentEl.innerHTML = projectHtml;
+                } else {
+                    projectContentEl.innerHTML = '<p>No recent project activities found.</p>';
+                }
+            } catch (error) {
+                projectContentEl.innerHTML = `<div class="error">Error loading project status: ${error.message}</div>`;
+            }
+        }
+        
+        // Submit voice command
+        async function submitVoiceCommand() {
+            const command = voiceCommandInput.value.trim();
+            if (!command) {
+                commandResponseEl.innerHTML = '<div class="error">Please enter a command first.</div>';
+                return;
+            }
+            
+            try {
+                commandResponseEl.innerHTML = '<div class="loading">Processing command...</div>';
+                
+                const response = await apiCall('/spoken-command', 'POST', { text: command });
+                
+                commandResponseEl.innerHTML = `
+                    <div class="success">
+                        <strong>Command:</strong> ${command}<br>
+                        <strong>Response:</strong> ${response.response || response.text || 'Processed successfully'}
+                    </div>
+                `;
+                
+                // Clear input after successful submission
+                voiceCommandInput.value = '';
+                
+                // Refresh sections after command
+                setTimeout(() => {
+                    loadDailyBriefing();
+                    loadEmailSummary();
+                    loadProjectStatus();
+                }, 2000);
+            } catch (error) {
+                commandResponseEl.innerHTML = `<div class="error">Error processing command: ${error.message}</div>`;
+            }
+        }
+        
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load all data
+            loadDailyBriefing();
+            loadEmailSummary();
+            loadProjectStatus();
+            
+            // Set up event listeners
+            submitButton.addEventListener('click', submitVoiceCommand);
+            
+            voiceCommandInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    submitVoiceCommand();
+                }
+            });
+            
+            // Initialize focus management
+            initFocus();
+            
+            // Refresh data every 5 minutes
+            setInterval(() => {
+                loadDailyBriefing();
+                loadEmailSummary();
+                loadProjectStatus();
+            }, 5 * 60 * 1000);
+        });
+    </script>
+</body>
+</html>

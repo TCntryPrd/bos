@@ -1,0 +1,14 @@
+{
+  "lead": {
+    "row": 194,
+    "business_name": "Mobile Electric Power Solutions",
+    "contact_name": "Derrel Chambers",
+    "email": "derrel@meps.com"
+  },
+  "draft": {
+    "subject": "Scaling operations without adding headcount",
+    "body": "Hi Derrel,\n\nAs VP of Operations, you're probably feeling the tension—more jobs, same crew. Most of the bottleneck isn't in the field; it's in the back office. Scheduling, quotes, follow-up.\n\nWe've worked with operations teams to automate the administrative layer so your crew stays in the field and your office handles more volume without hiring.\n\nOne VP saw 40% throughput increase in month one. Want to explore what's possible for Mobile Electric Power Solutions?\n\nKevin Starr\nFounder, Starr & Partners",
+    "from": "d.caine@dcaine.com"
+  },
+  "personalization_notes": "Addressed VP of Operations role directly, emphasized operations scaling challenges and admin bottlenecks, named the company"
+}

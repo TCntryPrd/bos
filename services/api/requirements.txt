@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+psycopg[binary]
+redis
+python-dotenv
+httpx
+python-multipart
+python-jose[cryptography]
+bcrypt
+openai

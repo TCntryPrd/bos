@@ -1,0 +1,55 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .codex/hooks/codex_memory.py session-start",
+            "commandWindows": "py -3 \"C:\\Users\\kstar\\OneDrive - Personal\\OneDrive\\Documents\\Vasari-BOS\\.codex\\hooks\\codex_memory.py\" session-start",
+            "timeout": 10,
+            "statusMessage": "Loading Vasari-BOS memory"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .codex/hooks/codex_memory.py prompt-submit",
+            "commandWindows": "py -3 \"C:\\Users\\kstar\\OneDrive - Personal\\OneDrive\\Documents\\Vasari-BOS\\.codex\\hooks\\codex_memory.py\" prompt-submit",
+            "timeout": 10,
+            "statusMessage": "Searching Vasari-BOS memory"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .codex/hooks/codex_memory.py stop",
+            "commandWindows": "py -3 \"C:\\Users\\kstar\\OneDrive - Personal\\OneDrive\\Documents\\Vasari-BOS\\.codex\\hooks\\codex_memory.py\" stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .codex/hooks/codex_memory.py post-compact",
+            "commandWindows": "py -3 \"C:\\Users\\kstar\\OneDrive - Personal\\OneDrive\\Documents\\Vasari-BOS\\.codex\\hooks\\codex_memory.py\" post-compact",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEMgojGi3mKlQkbiTDpXN8jIZondKCzEU587bNfifubc kstar@laptop
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHhVtRR9xJimvxd/FKJ4nj5utl20ZVu2Z6BSfsX8QDfj claude-desktop
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDn0wKtSkX+GgYYW4Cn5huGT2d8/5kQNCTHzKk4mNjGm boss-ci-deploy-20260421
+command="/home/tcntryprd/bin/boss-host-bridge.sh",no-pty,no-X11-forwarding,no-agent-forwarding,no-port-forwarding ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDP0Aov8Qz+EJRGxXKVrsaoJ8+OIOiWOZuWf7MwDFMcN boss-host-bridge

@@ -1,0 +1,14 @@
+{
+  "lead": {
+    "row": 123,
+    "business_name": "Progressive Products",
+    "contact_name": "David Messinger",
+    "email": "dmessinger@progressiveproductsinc.com"
+  },
+  "draft": {
+    "subject": "Automating your lead follow-up",
+    "body": "Hi David,\n\nSales teams get leads but lose deals because of slow follow-up. A prospect inquiry comes in, it sits in email, and 48 hours later your team gets to it. By then, they've gone elsewhere.\n\nWe automate the first response: prospect fills out your form, an AI sends them a personalized spec sheet and next steps within minutes. Your team takes over when they're engaged.\n\nOne sales team increased qualified leads by 35% just by responding faster.\n\nWorth a call to map this out for Progressive Products?\n\nKevin Starr\nFounder, Starr & Partners",
+    "from": "d.caine@dcaine.com"
+  },
+  "personalization_notes": "Referenced sales team pain point around lead response time, named the company, focused on response speed as a competitive advantage"
+}

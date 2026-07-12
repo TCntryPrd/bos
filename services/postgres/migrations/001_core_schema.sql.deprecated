@@ -1,0 +1,18 @@
+-- =============================================================================
+-- IR Custom AIOS v2 — DEPRECATED: 001_core_schema.sql
+-- =============================================================================
+-- This file was an early draft and has been superseded by:
+--   001_foundation.sql          — tenants, users, sessions
+--   002_connectors.sql          — oauth_tokens, connected_accounts
+--   002_multi_tenant_functions.sql — schema-per-tenant helpers
+--   003_brain.sql               — brain_config
+--   004_learning.sql            — learning_profiles, preferences, behavioral_patterns, onboarding_progress
+--   005_self_healing.sql        — playbooks, incidents, health_checks
+--   006_voice.sql               — voice_devices
+--   007_events.sql              — events, event_rules
+--   008_backup_files.sql        — backup_log, file_rules, cleanup_proposals
+--   009_seed.sql                — development seed data
+--
+-- DO NOT RUN THIS FILE. It is kept only for historical reference.
+-- If this comment is present, the migration runner must skip this file.
+-- =============================================================================

@@ -1,0 +1,10 @@
+[telegram-bot] Poll error: Error: Telegram API error: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+[telegram-bot] Poll error: Error: Telegram API error: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+[telegram-bot] Poll error: Error: Telegram API error: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+[telegram-bot] Poll error: Error: Telegram API error: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+[telegram-bot] Poll error: Error: Telegram API error: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+[telegram-bot] Poll error: Error: Telegram API error: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+[telegram-bot] Poll error: Error: Telegram API error: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+[telegram-bot] Poll error: Error: Telegram API error: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+[telegram-bot] Poll error: Error: Telegram API error: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+[telegram-bot] Poll error: Error: Telegram API error: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running

@@ -1,0 +1,17 @@
+[Unit]
+Description=Little Rascals — tmux-parked agent bootstrap
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tcntryprd
+Group=tcntryprd
+Environment=HOME=/home/tcntryprd
+ExecStart=/home/tcntryprd/boss-dev/scripts/rascals/little-rascals-boot.sh
+RemainAfterExit=yes
+StandardOutput=append:/home/tcntryprd/rascals/logs/boot.systemd.log
+StandardError=append:/home/tcntryprd/rascals/logs/boot.systemd.log
+
+[Install]
+WantedBy=multi-user.target

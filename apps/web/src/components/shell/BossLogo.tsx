@@ -1,0 +1,112 @@
+import React from 'react';
+
+/**
+ * Animated diamond + wordmark, matching design_handoff_boss_v2/source/vs-shared.jsx
+ * — rotating quad-conic aurora behind a small purple-gradient diamond.
+ */
+export function BossMark({ scale = 1, collapsed = false }: { scale?: number; collapsed?: boolean }) {
+  const size = 26 * scale;
+  return (
+    <div className="flex items-center" style={{ gap: 10 * scale }}>
+      <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
+        <div
+          className="absolute inset-0"
+          style={{
+            borderRadius: '30%',
+            background: 'var(--grad-quad)',
+            filter: 'blur(6px)',
+            opacity: 0.7,
+            animation: 'vs-rot 12s linear infinite',
+          }}
+          aria-hidden
+        />
+        <div
+          className="absolute grid place-items-center"
+          style={{
+            inset: 2,
+            borderRadius: '28%',
+            background: 'radial-gradient(circle at 30% 30%, #ffffff, #eaf4ff)',
+            border: '1px solid rgba(14,165,233,0.18)',
+          }}
+        >
+          <div
+            style={{
+              width: size * 0.42,
+              height: size * 0.42,
+              borderRadius: 2,
+              background: 'var(--grad-warm)',
+              transform: 'rotate(45deg)',
+              boxShadow: '0 0 10px rgba(139,92,246,0.55)',
+            }}
+          />
+        </div>
+      </div>
+      {!collapsed && (
+        <div
+          className="leading-tight min-w-0"
+          aria-label="Vasari BOS - Agentic Personal/Professional Environment"
+          title="Vasari BOS - Agentic Personal/Professional Environment"
+        >
+          <div className="font-bold text-text-primary" style={{ fontSize: 13 * scale, letterSpacing: 0 }}>
+            VASARI BOS
+          </div>
+          <div
+            className="vs-mono mt-0.5 text-text-muted"
+            style={{ fontSize: 7.5 * scale, letterSpacing: 0 }}
+          >
+            Agentic Personal /
+          </div>
+          <div
+            className="vs-mono text-text-muted"
+            style={{ fontSize: 7.5 * scale, letterSpacing: 0 }}
+          >
+            Professional Environment
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface BossLogoProps {
+  collapsed?: boolean;
+  onCollapseToggle?: () => void;
+}
+
+export function BossLogo({ collapsed = false, onCollapseToggle }: BossLogoProps) {
+  return (
+    <div
+      className={[
+        'flex items-center gap-2 w-full',
+        collapsed ? 'justify-center px-2 py-3.5' : 'px-3 py-3.5',
+      ].join(' ')}
+    >
+      <div className="flex-1 min-w-0">
+        <BossMark collapsed={collapsed} />
+      </div>
+      {onCollapseToggle && (
+        <button
+          type="button"
+          onClick={onCollapseToggle}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={[
+            'flex-shrink-0 grid place-items-center text-text-muted hover:text-text-primary',
+            'border border-border bg-surface-2/40 hover:bg-surface-2 transition-colors',
+            collapsed ? 'w-6 h-6 rounded-md' : 'w-[22px] h-[22px] rounded',
+          ].join(' ')}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
+            <path
+              d={collapsed ? 'M3.5 2L6.5 5L3.5 8' : 'M6.5 2L3.5 5L6.5 8'}
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}

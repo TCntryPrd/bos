@@ -1,0 +1,14 @@
+{
+  "lead": {
+    "row": 188,
+    "business_name": "Mobile Electric Power Solutions",
+    "contact_name": "Billy Chamber",
+    "email": "billy@meps.com"
+  },
+  "draft": {
+    "subject": "Automating dispatch and scheduling at MEPS",
+    "body": "Hi Billy,\n\nPower and electrical services live on scheduling—technician availability, customer site access, equipment routing. Most dispatch operations still run on phone calls and spreadsheets.\n\nWe automate the intake and matching: customer calls in, system checks tech availability, sends them the right person, and routes the truck. Your dispatcher confirms and goes.\n\nOne electrical services company cut scheduling time by 70% and improved first-visit completion rates.\n\nInterested in seeing how we could streamline Mobile Electric Power Solutions' dispatch?\n\nKevin Starr\nFounder, Starr & Partners",
+    "from": "d.caine@dcaine.com"
+  },
+  "personalization_notes": "Referenced mobile electrical services, dispatch and scheduling pain points, named the company"
+}

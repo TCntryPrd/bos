@@ -1,0 +1,105 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        // IR white-label — bright command-center theme.
+        // Existing utility names (surface, border, text, accent) are preserved but
+        // rewired to the new palette so pre-v2 components pick up the new look
+        // without touching their classnames. Null theme lives at `base: v-null`.
+        surface: {
+          DEFAULT: '#eefbff',
+          1: '#ffffff',
+          2: '#f0f4f8',
+          3: '#e2e8f0',
+          4: '#cbd5e1',
+        },
+        base:   '#5bc3dc',
+        null:   '#ffffff',
+
+        border: {
+          DEFAULT: '#d9e2ec',
+          strong:  '#b8c4d2',
+        },
+        text: {
+          primary:   '#172033',
+          secondary: '#475569',
+          muted:     '#718096',
+        },
+
+        // Aurora accent palette — one hue per agent / semantic role.
+        v: {
+          purple: '#7c3cff',
+          pink:   '#ff4d8d',
+          green:  '#20b26b',
+          blue:   '#0ea5e9',
+          amber:  '#f9b000',
+        },
+
+        // Primary accent — Boss purple. `bg-accent`, `text-accent`, etc.
+        accent: {
+          DEFAULT: '#ff4d8d',
+          hover:   '#e73777',
+          muted:   '#ff4d8d1f',
+        },
+
+        success: {
+          DEFAULT: '#20b26b',
+          muted:   '#20b26b1a',
+        },
+        warning: {
+          DEFAULT: '#f59e0b',
+          muted:   '#f59e0b1a',
+        },
+        danger: {
+          DEFAULT: '#e11d48',
+          muted:   '#e11d481a',
+        },
+        info: {
+          DEFAULT: '#0ea5e9',
+          muted:   '#0ea5e91a',
+        },
+      },
+      fontFamily: {
+        sans: [
+          'Space Grotesk',
+          'system-ui',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'Segoe UI',
+          'sans-serif',
+        ],
+        mono: [
+          'JetBrains Mono',
+          'ui-monospace',
+          'Fira Code',
+          'Consolas',
+          'monospace',
+        ],
+      },
+      backgroundImage: {
+        'ir-base': 'linear-gradient(135deg, #5bc3dc 0%, #8ddff0 48%, #dff8fd 100%)',
+        'grad-cool': 'linear-gradient(135deg, #0ea5e9 0%, #20b26b 100%)',
+        'grad-warm': 'linear-gradient(135deg, #ff4d8d 0%, #ff8a3d 100%)',
+        'grad-lime': 'linear-gradient(135deg, #ffd43b 0%, #20b26b 100%)',
+      },
+      animation: {
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'fade-in': 'fadeIn 0.2s ease-out',
+        'slide-in': 'slideIn 0.2s ease-out',
+      },
+      keyframes: {
+        fadeIn: {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        slideIn: {
+          from: { opacity: '0', transform: 'translateY(4px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+    },
+  },
+  plugins: [],
+};

@@ -1,0 +1,50 @@
+2026-05-30T00:50:03.310987+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T00:50:03.348995+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T00:55:02.887741+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T00:55:02.888174+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T00:55:02.925249+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:00:02.542408+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:00:02.542863+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:00:02.589840+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:05:04.128956+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:05:04.129405+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:05:04.218514+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:10:03.818432+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:10:03.819211+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:10:03.916622+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:15:03.184330+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:15:03.185040+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:15:03.265597+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:20:02.906515+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:20:02.906843+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:20:02.945147+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:25:02.516979+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:25:02.517349+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:25:02.559444+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:30:03.067632+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:30:03.068047+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:30:03.106699+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:35:02.581044+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:35:02.581434+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:35:02.620479+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:40:03.103421+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:40:03.103998+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:40:03.142947+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:45:02.627502+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:45:02.627891+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:45:02.665707+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:50:03.230918+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:50:03.231334+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:50:03.270200+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T01:55:02.741411+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T01:55:02.741995+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T01:55:02.778444+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T02:00:03.285811+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T02:00:03.286320+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T02:00:03.322996+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T02:05:02.854908+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T02:05:02.855428+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T02:05:02.892609+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root
+2026-05-30T02:10:02.477978+00:00 last-castle sudo: tcntryprd : PWD=/home/tcntryprd ; USER=root ; COMMAND=/usr/bin/fail2ban-client status
+2026-05-30T02:10:02.478377+00:00 last-castle sudo: pam_unix(sudo:session): session opened for user root(uid=0) by tcntryprd(uid=1000)
+2026-05-30T02:10:02.519313+00:00 last-castle sudo: pam_unix(sudo:session): session closed for user root

@@ -1,0 +1,182 @@
+name: Deploy
+
+on:
+  push:
+    tags:
+      # Matches: v2.0.0, v2.1.0-beta.1, etc.
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+env:
+  NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+  # Docker/OCI reference spec requires lowercase repository names. Hardcoded
+  # here because github.repository_owner (TCntryPrd) is mixed-case. The
+  # build-push side auto-lowercases via docker/metadata-action, but deploy.sh
+  # takes IMAGE_PREFIX verbatim and a mixed-case value makes `docker pull`
+  # fail with "invalid reference format: must be lowercase".
+  IMAGE_PREFIX: tcntryprd/boss
+
+jobs:
+  # ─── Build and push all Docker images ────────────────────────────────────
+  build-push:
+    name: Build and push images
+    runs-on: [self-hosted, last-castle]
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+      git-sha: ${{ github.sha }}
+
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - service: api
+            dockerfile: apps/api/Dockerfile
+          - service: worker
+            dockerfile: apps/worker/Dockerfile
+          - service: web
+            dockerfile: apps/web/Dockerfile
+          - service: executor
+            dockerfile: apps/executor/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          build-args: |
+            BUILD_VERSION=${{ steps.meta.outputs.version }}
+            BUILD_SHA=${{ github.sha }}
+
+  # ─── Deploy to target server ──────────────────────────────────────────────
+  deploy:
+    name: Deploy to production
+    runs-on: [self-hosted, last-castle]
+    needs: build-push
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set derived variables
+        id: vars
+        run: |
+          TAG=${{ needs.build-push.outputs.image-tag }}
+          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "deploy_ts=$(date -u +%Y%m%dT%H%M%SZ)" >> "$GITHUB_OUTPUT"
+
+      # Deploy runs in a separate job from build-push, so the docker login
+      # from that job is not in scope here. Log in again for `docker pull`.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The self-hosted runner runs on the target host as user `tcntryprd` with
+      # docker-group access. No transport required — deploy.sh executes directly
+      # against the canonical project dir at /home/tcntryprd/boss-dev, where
+      # .env, compose volumes, and the migration chain already live.
+      #
+      # An earlier version of this workflow SCP'd the script via appleboy/scp-
+      # action, which runs inside a Docker container — DEPLOY_HOST=127.0.0.1
+      # resolved to the action-container's loopback, not the host, and failed
+      # with "connection refused". Native steps avoid that entire class of bug.
+
+      - name: Sync canonical project dir to master
+        run: |
+          set -euo pipefail
+          cd /home/tcntryprd/boss-dev
+          git fetch --tags --prune origin
+          # Fast-forward only; refuse to clobber local work.
+          git checkout master
+          git pull --ff-only origin master
+
+      - name: Run deploy
+        env:
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_PREFIX: ${{ env.IMAGE_PREFIX }}
+          DEPLOY_TS: ${{ steps.vars.outputs.deploy_ts }}
+        run: |
+          set -euo pipefail
+          cd /home/tcntryprd/boss-dev
+          chmod +x scripts/deploy.sh
+          ./scripts/deploy.sh
+
+      - name: Post-deploy health verification
+        run: |
+          set -euo pipefail
+          echo "=== Post-deploy health check ==="
+          max_attempts=12
+          attempt=0
+          # 127.0.0.1 (not localhost) — avoids busybox IPv6-first quirk that
+          # bit us on boss_web's healthcheck earlier this cycle.
+          until curl -sf http://127.0.0.1:8001/health > /dev/null; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "Health check failed after $max_attempts attempts — deployment failed"
+              exit 1
+            fi
+            echo "Attempt $attempt/$max_attempts — waiting 5s..."
+            sleep 5
+          done
+          echo "Health check passed after $attempt attempts."
+
+          response=$(curl -sf http://127.0.0.1:8001/health)
+          echo "Health response: $response"
+          echo "$response" | grep -q '"status"' || (echo "Unexpected health response shape" && exit 1)
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "Deployment of ${{ steps.vars.outputs.image_tag }} succeeded at ${{ steps.vars.outputs.deploy_ts }}"
+          # Extend here: post to Slack, update status page, etc.
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "Deployment of ${{ steps.vars.outputs.image_tag }} FAILED — server-side rollback should have triggered."
+          # Extend here: alert on-call, post to Slack, etc.
