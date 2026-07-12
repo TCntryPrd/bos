@@ -18,10 +18,11 @@
     <script>
       (function () {
         try {
-          var def = '%VITE_DEFAULT_MODE%'; if (def !== 'plain' && def !== 'executive') def = 'executive';
+          var brand = '%VITE_BRAND%'; if (brand !== 'plain') brand = 'ir';
+          document.documentElement.setAttribute('data-brand', brand);
           var m = localStorage.getItem('boss_mode');
           if (m !== 'executive' && m !== 'plain') {
-            m = localStorage.getItem('boss_theme') === 'light' ? 'plain' : def;
+            m = localStorage.getItem('boss_theme') === 'light' ? 'plain' : 'executive';
           }
           document.documentElement.setAttribute('data-theme', m === 'plain' ? 'plain' : 'dark');
         } catch (e) {

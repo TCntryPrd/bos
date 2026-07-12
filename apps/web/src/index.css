@@ -3699,3 +3699,16 @@
 /* generic glow/gradient utility kill */
 [data-theme='plain'] [class*='vs-glow'],
 [data-theme='plain'] [style*='--grad'] { box-shadow: none !important; }
+
+
+/* ── PLAIN BRAND (Original / template front): strip IR-whitelabel scene chrome
+   so it reads as clean standard BOS regardless of light/dark theme. ── */
+[data-brand='plain'] [class*='aios-room-'] { background-image: none !important; }
+[data-brand='plain'] [class*='aios-room-wash'] { display: none !important; }
+[data-brand='plain'] .aios-atmosphere-grid,
+[data-brand='plain'] .dashboard-room-native::before,
+[data-brand='plain'] .dashboard-executive-lobby::before,
+[data-brand='plain'] .aios-whiteboard::before,
+[data-brand='plain'] .aios-whiteboard .dashboard-whiteboard-grid::before { display: none !important; }
+[data-brand='plain'] .login-entrance-page > img,
+[data-brand='plain'] .login-entrance-page > .aios-atmosphere-grid { display: none !important; }

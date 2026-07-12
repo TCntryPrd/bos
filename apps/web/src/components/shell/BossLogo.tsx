@@ -1,6 +1,7 @@
 import React from 'react';
 import irBadge from '../../assets/ir-badge.png';
 import { getAiosName } from '../../lib/theme';
+import { isPlainBrand } from '../../lib/brand';
 
 /**
  * BOS lockup — Industry Rockstar badge + wordmark:
@@ -38,12 +39,14 @@ export function BossMark({ scale = 1, collapsed = false }: { scale?: number; col
           >
             BUSINESS OPERATING SYSTEM
           </div>
-          <div
-            className="vs-mono mt-[3px] text-text-muted/70"
-            style={{ fontSize: 7 * scale, letterSpacing: '0.06em', whiteSpace: 'nowrap' }}
-          >
-            From Industry Rockstar
-          </div>
+          {!isPlainBrand && (
+            <div
+              className="vs-mono mt-[3px] text-text-muted/70"
+              style={{ fontSize: 7 * scale, letterSpacing: '0.06em', whiteSpace: 'nowrap' }}
+            >
+              From Industry Rockstar
+            </div>
+          )}
         </div>
       )}
     </div>
