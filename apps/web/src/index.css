@@ -3612,3 +3612,90 @@
     }
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PLAIN MODE FLATTENING — converge-20260712
+   The decorative "Executive" layer above hardcodes gradients/glow/scene washes.
+   In Plain (templated white-label) mode we flatten every decorative surface to
+   the plain token set: flat paper surfaces, hairline borders, no gradients, no
+   glow, no room scenes. Token values come from tokens-ir-whitelabel.css
+   [data-theme='plain'].
+   ═══════════════════════════════════════════════════════════════════════════ */
+[data-theme='plain'] .aios-page,
+[data-theme='plain'] .aios-main,
+[data-theme='plain'] .aios-workbench {
+  background: rgb(var(--c-base)) !important;
+  background-image: none !important;
+}
+[data-theme='plain'] .aios-panel,
+[data-theme='plain'] .aios-stat,
+[data-theme='plain'] .aios-segment,
+[data-theme='plain'] .aios-lobby-board,
+[data-theme='plain'] .aios-iframe-shell,
+[data-theme='plain'] .aios-control-bar {
+  background: rgb(var(--c-surface-1)) !important;
+  background-image: none !important;
+  border: 1px solid rgb(var(--c-border)) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+[data-theme='plain'] .aios-command-hero,
+[data-theme='plain'] .aios-command-horizon,
+[data-theme='plain'] .aios-whiteboard {
+  background: rgb(var(--c-surface-2)) !important;
+  background-image: none !important;
+  border: 1px solid rgb(var(--c-border)) !important;
+  box-shadow: none !important;
+}
+[data-theme='plain'] .aios-command-hero h1,
+[data-theme='plain'] .aios-command-hero h2 {
+  color: rgb(var(--c-text)) !important;
+  text-shadow: none !important;
+  background: none !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+/* kill decorative pseudo layers: grids, scanlines, scene washes, glow pins */
+[data-theme='plain'] .aios-whiteboard::before,
+[data-theme='plain'] .aios-whiteboard .dashboard-whiteboard-grid::before,
+[data-theme='plain'] .aios-atmosphere-grid,
+[data-theme='plain'] .dashboard-room-native::before,
+[data-theme='plain'] .dashboard-executive-lobby::before,
+[data-theme='plain'] .planning-whiteboard::before,
+[data-theme='plain'] .health-suite-stage::before,
+[data-theme='plain'] .health-suite-stage::after {
+  display: none !important;
+}
+/* room scene backgrounds -> flat */
+[data-theme='plain'] [class*='aios-room-'] {
+  background: rgb(var(--c-surface-2)) !important;
+  background-image: none !important;
+}
+[data-theme='plain'] [class*='aios-room-wash'] { display: none !important; }
+/* nav chrome */
+[data-theme='plain'] .boss-nav-surface {
+  background: rgb(var(--c-surface-1)) !important;
+  background-image: none !important;
+  border-color: rgb(var(--c-border)) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+/* buttons/badges keep shape, lose gradient paint */
+[data-theme='plain'] .btn-primary {
+  background: rgb(var(--c-accent)) !important;
+  background-image: none !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+[data-theme='plain'] .btn-secondary,
+[data-theme='plain'] .btn-ghost {
+  background: rgb(var(--c-surface-2)) !important;
+  background-image: none !important;
+  border-color: rgb(var(--c-border-strong)) !important;
+  box-shadow: none !important;
+}
+/* scrollbars follow paper */
+[data-theme='plain'] ::-webkit-scrollbar-track { background: rgb(var(--c-surface-3)); }
+[data-theme='plain'] ::-webkit-scrollbar-thumb { background: rgb(var(--c-border-strong)); }
+/* generic glow/gradient utility kill */
+[data-theme='plain'] [class*='vs-glow'],
+[data-theme='plain'] [style*='--grad'] { box-shadow: none !important; }
