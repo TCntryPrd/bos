@@ -31,7 +31,6 @@ import {
   Wrench,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { getStoredMode, setBossMode, type BossMode } from '../lib/theme';
 import { Connectors } from './Connectors';
 import { BrainConfig } from './BrainConfig';
 import { VoiceDevices } from './VoiceDevices';
@@ -402,57 +401,6 @@ function ActionButton({ icon: Icon, label, onClick, disabled = false }: { icon: 
   );
 }
 
-function DisplayModePanel() {
-  const current = getStoredMode();
-
-  const switchMode = (next: BossMode) => {
-    if (next === current) return;
-    setBossMode(next);
-    // Brand switch requires a fresh session so every surface (incl. login)
-    // renders in the selected mode.
-    handleSignOut();
-  };
-
-  return (
-    <Panel
-      title="Display Mode"
-      subtitle="Switch the interface brand. Changing the mode signs you out; log back in to see the new look."
-      icon={SettingsIcon}
-      action={<StatusBadge label={current} status="ready" />}
-    >
-      <div className="grid gap-3 sm:grid-cols-2">
-        {([
-          { id: 'executive' as BossMode, name: 'Executive', desc: 'The full themed identity — warm navy, violet accents, gradients + glow.' },
-          { id: 'plain' as BossMode, name: 'Plain', desc: 'Flat, neutral white-label look — warm paper, slate ink, hairline borders.' },
-        ]).map((m) => {
-          const active = current === m.id;
-          return (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => switchMode(m.id)}
-              aria-pressed={active}
-              className={`rounded-md border p-3 text-left transition-colors ${
-                active
-                  ? 'border-accent/60 bg-accent/10'
-                  : 'border-border bg-surface-1/50 hover:border-border-strong'
-              }`}
-            >
-              <div className="text-sm font-medium text-text-primary">{m.name}{active ? ' · current' : ''}</div>
-              <div className="mt-1 text-xs text-text-muted">{m.desc}</div>
-              {!active && (
-                <div className="vs-mono mt-2 text-[10px] uppercase tracking-[0.18em] text-accent">
-                  Switch &amp; re-login →
-                </div>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </Panel>
-  );
-}
-
 function pickPatch(settings: SettingsState): Partial<SettingsState> {
   const body: Partial<SettingsState> = {};
   for (const key of SETTINGS_PATCH_KEYS) {
@@ -804,7 +752,6 @@ export function Settings() {
               );
             })}
           </div>
-          <DisplayModePanel />
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)]">
             <SystemSettingsPanel settings={settings} voice={voice} updateSetting={updateSetting} />
             <BuilderAccessPanel onNavigate={navigate} openHermesGateway={openHermesGateway} />

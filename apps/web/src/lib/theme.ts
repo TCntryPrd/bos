@@ -24,7 +24,9 @@ export function getStoredMode(): BossMode {
   } catch {
     /* ignore */
   }
-  return 'executive';
+  // Per-build brand default (VITE_DEFAULT_MODE=plain on the template front).
+  const d = (import.meta as { env?: Record<string, string> }).env?.VITE_DEFAULT_MODE;
+  return d === 'plain' ? 'plain' : 'executive';
 }
 
 export function applyMode(mode: BossMode): void {

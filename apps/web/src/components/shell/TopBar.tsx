@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Menu } from 'lucide-react';
-import { ThemeToggle } from './ThemeToggle';
 import { getAiosName } from '../../lib/theme';
 
 function getUser(): { name: string; role: string } {
@@ -51,11 +50,7 @@ export function TopBar({ pageTitle, onMobileMenu, immersive = false }: TopBarPro
       <h1 className="text-sm font-medium text-text-primary leading-none">
         {pageTitle}
       </h1>
-
       {/* User pill — far right of the header (moved here from the nav rail). */}
-      <div className="ml-auto flex items-center gap-2">
-        <ThemeToggle />
-      </div>
       <button
         type="button"
         onClick={() => { if (isAdmin) navigate('/settings'); }}

@@ -18,9 +18,10 @@
     <script>
       (function () {
         try {
+          var def = '%VITE_DEFAULT_MODE%'; if (def !== 'plain' && def !== 'executive') def = 'executive';
           var m = localStorage.getItem('boss_mode');
           if (m !== 'executive' && m !== 'plain') {
-            m = localStorage.getItem('boss_theme') === 'light' ? 'plain' : 'executive';
+            m = localStorage.getItem('boss_theme') === 'light' ? 'plain' : def;
           }
           document.documentElement.setAttribute('data-theme', m === 'plain' ? 'plain' : 'dark');
         } catch (e) {
