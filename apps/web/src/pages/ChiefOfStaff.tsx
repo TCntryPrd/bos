@@ -26,7 +26,7 @@ const T = {
   borderSoft: 'rgba(139,92,246,0.16)',
   text: '#F1F4FF',
   textDim: '#AAB3D6',
-  textMuted: '#7681A8',
+  textMuted: '#8B95BC',
   green: '#22C55E',
   amber: '#F5C542',
   red: '#E84A6A',

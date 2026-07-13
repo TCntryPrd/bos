@@ -274,7 +274,6 @@ export default function Board() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const selected = useMemo(() => advisors.find((advisor) => advisor.id === selectedId) ?? null, [advisors, selectedId]);
-  const spoken = `${speechText}${interim ? ` ${interim}` : ''}`.trim();
   const visibleAdvisors = orderedAdvisors(advisors).slice(0, SEAT_POSITIONS.length);
   const emptySeatCount = Math.max(0, Math.min(SEAT_POSITIONS.length - visibleAdvisors.length, 1));
 
@@ -627,9 +626,18 @@ export default function Board() {
                 </div>
               )}
             </div>
-            <div className="mb-3 min-h-[46px] rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-sm leading-relaxed text-white/82">
-              {spoken || (voiceMode === 'advisor' ? 'Speak to an advisor.' : voiceMode === 'meeting' ? 'Say what the board should weigh in on.' : 'Say the advisor role you want at the table.')}
-            </div>
+            <textarea
+              value={speechText}
+              onChange={(e) => setSpeechText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void runVoiceAction(); } }}
+              rows={2}
+              disabled={thinking || meetingRunning || generating}
+              placeholder={voiceMode === 'advisor' ? 'Type or speak to an advisor…' : voiceMode === 'meeting' ? 'Type or say what the board should weigh in on…' : 'Type or say the advisor role you want at the table…'}
+              className="mb-3 w-full resize-none rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-sm leading-relaxed text-white placeholder-white/45 focus:outline-none focus:ring-2 focus:ring-emerald-400/50 disabled:opacity-50"
+            />
+            {listening && interim ? (
+              <div className="-mt-2 mb-3 px-1 text-xs text-emerald-200/70">{interim}…</div>
+            ) : null}
             <div className="flex items-center gap-2">
               <button
                 type="button"

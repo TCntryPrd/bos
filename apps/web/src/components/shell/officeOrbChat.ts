@@ -12,8 +12,18 @@ interface SseEvent {
   data: Record<string, unknown>;
 }
 
+// One attachment sent alongside a message. Images -> dataUrl (base64), text
+// files -> text. Shape mirrors the /api/openclaw/chat backend contract.
+export interface OfficeAttachment {
+  name?: string;
+  mimeType?: string;
+  dataUrl?: string;
+  text?: string;
+}
+
 export interface StreamOfficeEaChatOptions {
   message: string;
+  attachments?: OfficeAttachment[];
   onAssistantText: (aggregate: string) => void;
   onDone?: () => void;
   onError?: (msg: string) => void;
@@ -121,7 +131,7 @@ export async function streamOfficeEaChat(opts: StreamOfficeEaChatOptions): Promi
       message: buildOfficeInstruction(visibleUserText),
       conversationId: thread.conversationId,
       newConversation: !thread.conversationId,
-      attachments: [],
+      attachments: opts.attachments ?? [],
     }),
     signal: opts.signal,
   });

@@ -1,0 +1,11 @@
+{
+  "name": "board-agent",
+  "private": true,
+  "type": "module",
+  "description": "Publishes AI advisors as live LiveKit participants (portrait video + TTS voice).",
+  "dependencies": {
+    "@livekit/rtc-node": "latest",
+    "livekit-server-sdk": "latest",
+    "pngjs": "^7.0.0"
+  }
+}

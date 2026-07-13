@@ -1,6 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
-import { MessageSquare, X, Send, Sparkles, Trash2 } from 'lucide-react';
-import { streamOfficeEaChat } from './officeOrbChat.js';
+import { MessageSquare, X, Send, Sparkles, Trash2, Paperclip } from 'lucide-react';
+import { streamOfficeEaChat, type OfficeAttachment } from './officeOrbChat.js';
+import { DictationButton } from '../DictationButton.js';
+
+// The Orb accepts up to 4 attachments per message (matches the chat backend).
+const MAX_ATTACHMENTS = 4;
+
+function readAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
 
 interface Message {
   role: 'user' | 'assistant';
@@ -20,17 +33,11 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-// Composer auto-grows with wrapped text up to this many lines, then scrolls.
-const MAX_INPUT_LINES = 3;
+// Composer is FIXED height (h-[78px], ~3 lines, set via className).
+// Long text SCROLLS inside the box instead of growing it.
 function autosizeTextarea(el: HTMLTextAreaElement): void {
-  el.style.height = 'auto'; // reset so scrollHeight reflects content, not the prior height
-  const cs = window.getComputedStyle(el);
-  const lineHeight = parseFloat(cs.lineHeight) || 20;
-  const padTop = parseFloat(cs.paddingTop) || 0;
-  const padBottom = parseFloat(cs.paddingBottom) || 0;
-  const maxHeight = lineHeight * MAX_INPUT_LINES + padTop + padBottom;
-  el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
-  el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  el.style.height = ''; // scrub any stale inline height so the h-[78px] class governs
+  el.style.overflowY = 'auto';
 }
 
 function defaultOrbPosition(): OrbPosition {
@@ -89,6 +96,7 @@ export function BossOrb() {
     return [];
   });
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<OfficeAttachment[]>([]);
   const [loading, setLoading] = useState(false);
   const [orbPosition, setOrbPosition] = useState<OrbPosition>(readOrbPosition);
   const [panelSize, setPanelSize] = useState<PanelSize>(readPanelSize);
@@ -113,15 +121,15 @@ export function BossOrb() {
   } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Persist the user's chosen panel size.
   useEffect(() => {
     try { localStorage.setItem(PANEL_SIZE_KEY, JSON.stringify(panelSize)); } catch { /* ignore */ }
   }, [panelSize]);
 
-  // Auto-grow the composer as text wraps, up to MAX_INPUT_LINES, then scroll.
-  // Runs on every input change — including the reset to '' after send, which
-  // shrinks it back to a single line.
+  // Fixed-height composer: scrub any stale inline height so the h-[78px] class
+  // governs; long text scrolls inside the textarea rather than growing it.
   useEffect(() => {
     if (textareaRef.current) autosizeTextarea(textareaRef.current);
   }, [input]);
@@ -165,22 +173,47 @@ export function BossOrb() {
       return copy;
     });
 
+  // Turn picked files into attachments: images as base64 dataUrls, everything
+  // else as text. Capped at MAX_ATTACHMENTS.
+  const onFilesPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ''; // let the same file be re-picked later
+    for (const file of files) {
+      let next: OfficeAttachment | null = null;
+      try {
+        if (file.type.startsWith('image/')) {
+          next = { name: file.name, mimeType: file.type, dataUrl: await readAsDataURL(file) };
+        } else {
+          next = { name: file.name, mimeType: file.type || 'text/plain', text: await file.text() };
+        }
+      } catch { next = null; }
+      if (next) setAttachments((prev) => (prev.length >= MAX_ATTACHMENTS ? prev : [...prev, next!]));
+    }
+  };
+
+  const removeAttachment = (i: number) =>
+    setAttachments((prev) => prev.filter((_, idx) => idx !== i));
+
   const sendMessage = async (text: string) => {
-    if (!text.trim() || loading) return;
+    if ((!text.trim() && attachments.length === 0) || loading) return;
+    const outgoing = attachments;
+    const shownText = text.trim() || `📎 ${outgoing.length} attachment${outgoing.length === 1 ? '' : 's'}`;
 
     // Push the user turn + an empty assistant turn we stream into.
     setMessages((prev) => [
       ...prev,
-      { role: 'user', content: text, timestamp: Date.now() },
+      { role: 'user', content: shownText, timestamp: Date.now() },
       { role: 'assistant', content: '', timestamp: Date.now() },
     ]);
     setInput('');
+    setAttachments([]);
     setLoading(true);
 
     try {
       let streamed = '';
       await streamOfficeEaChat({
         message: text,
+        attachments: outgoing,
         onAssistantText: (agg) => { streamed = agg; setLastAssistant(agg); },
         onError: (m) => setLastAssistant(streamed || `Sorry - ${m}`),
       });
@@ -347,7 +380,7 @@ export function BossOrb() {
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-[80%] rounded-xl px-4 py-2 ${
+                  className={`max-w-[80%] max-h-[260px] overflow-y-auto rounded-xl px-4 py-2 ${
                     msg.role === 'user'
                       ? 'bg-v-blue text-white'
                       : 'bg-surface-2 text-text-primary border border-border'
@@ -373,6 +406,27 @@ export function BossOrb() {
 
           {/* Input */}
           <div className="p-4 border-t border-border">
+            {attachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {attachments.map((a, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 rounded bg-surface-2 border border-border px-2 py-1 text-xs text-text-secondary max-w-[160px]"
+                    title={a.name}
+                  >
+                    <span className="truncate">{a.name ?? 'file'}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(i)}
+                      className="shrink-0 text-text-muted hover:text-text-primary"
+                      aria-label="Remove attachment"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -380,6 +434,29 @@ export function BossOrb() {
               }}
               className="flex gap-2 items-end"
             >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,.txt,.md,.csv,.json,.log,.yaml,.yml"
+                className="hidden"
+                onChange={onFilesPicked}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading || attachments.length >= MAX_ATTACHMENTS}
+                title={attachments.length >= MAX_ATTACHMENTS ? 'Attachment limit reached' : 'Attach files'}
+                aria-label="Attach files"
+                className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              >
+                <Paperclip className="w-5 h-5" />
+              </button>
+              <DictationButton
+                compact
+                disabled={loading}
+                onTranscript={(t) => setInput((prev) => (prev ? `${prev.trimEnd()} ${t}` : t))}
+              />
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -393,12 +470,12 @@ export function BossOrb() {
                   }
                 }}
                 placeholder="Type a message..."
-                className="flex-1 resize-none leading-5 px-4 py-2 bg-surface-2 border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-v-blue"
+                className="flex-1 h-[78px] resize-none overflow-y-auto leading-5 px-4 py-2 bg-surface-2 border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-v-blue"
                 disabled={loading}
               />
               <button
                 type="submit"
-                disabled={!input.trim() || loading}
+                disabled={(!input.trim() && attachments.length === 0) || loading}
                 className="px-4 py-2 bg-v-blue text-white rounded-lg hover:bg-v-purple transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               >
                 <Send className="w-5 h-5" />

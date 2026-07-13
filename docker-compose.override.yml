@@ -1,0 +1,170 @@
+volumes:
+  bos_pg:
+    external: true
+    name: boss-ir_postgres_data
+  bos_redis:
+    external: true
+    name: boss-ir_redis_data
+  bos_weaviate:
+    external: true
+    name: boss-ir_weaviate_data
+  stt_models: {}
+  omnivoice_data: {}
+
+services:
+  web:
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.boss-ir.rule=Host(`ircustomdashboards.tech`)"
+      - traefik.http.routers.boss-ir.entrypoints=websecure
+      - traefik.http.routers.boss-ir.tls.certresolver=letsencrypt
+      - traefik.http.services.boss-ir.loadbalancer.server.port=80
+      - "traefik.http.routers.boss-ir-http.rule=Host(`ircustomdashboards.tech`)"
+      - traefik.http.routers.boss-ir-http.entrypoints=web
+      - traefik.http.routers.boss-ir-http.middlewares=boss-ir-redirect
+      - traefik.http.middlewares.boss-ir-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.boss-ir-redirect.redirectscheme.permanent=true
+
+  api:
+    environment:
+      BOSS_BACKGROUND_AGENTS: "on"
+      OMNIVOICE_URL: http://omnivoice:3900
+      OMNIVOICE_ENGINE: kittentts
+      OMNIVOICE_TIMEOUT_MS: '120000'
+      PUBLIC_BASE_URL: https://ircustomdashboards.tech
+      BOSS_HOST_BRIDGE_HOST: bosops@host.docker.internal
+      BOSS_HOST_BRIDGE_KEY: /data/home/.ssh/boss-host-bridge
+      BOSS_GIO_WORKSPACE: /home/boss/gio
+      BOSS_GIO_ATTACHMENT_ROOT: /home/boss/gio/.tmp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./ssh/boss-host-bridge:/data/home/.ssh/boss-host-bridge:ro
+      - ./gio-workspace:/home/boss/gio
+
+  stt:
+    build:
+      context: services/stt
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:18012:8000
+    volumes:
+      - stt_models:/app/models
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  tts:
+    build:
+      context: services/tts
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:18013:8003
+
+  omnivoice:
+    image: ghcr.io/debpalash/omnivoice-studio:latest
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:18019:3900
+    volumes:
+      - omnivoice_data:/app/omnivoice_data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import json, urllib.request; d=json.load(urllib.request.urlopen('http://localhost:3900/model/status', timeout=5)); raise SystemExit(0 if d.get('loaded') and d.get('status') == 'ready' else 1)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  livekit:
+    image: livekit/livekit-server
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./infra/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.kane-livekit.rule=Host(`ircustomdashboards.tech`) && PathPrefix(`/rtc`)"
+      - traefik.http.routers.kane-livekit.entrypoints=websecure
+      - traefik.http.routers.kane-livekit.tls.certresolver=letsencrypt
+      - traefik.http.routers.kane-livekit.priority=100
+      - traefik.http.services.kane-livekit.loadbalancer.server.port=7880
+      - traefik.docker.network=hermes-agent-epgg_default
+
+  board-agent:
+    build:
+      context: infra/board-agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_URL_INTERNAL: ws://livekit:7880
+      API_BASE: http://api:8001
+      WEB_BASE: https://ircustomdashboards.tech
+      PUBLIC_BASE: https://ircustomdashboards.tech
+
+  unipile:
+    profiles: ["unipile"]
+    build:
+      context: ./vasari_unipile
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.kane-unipile-webhooks.rule=Host(`ircustomdashboards.tech`) && PathPrefix(`/webhooks/unipile`)"
+      - traefik.http.routers.kane-unipile-webhooks.entrypoints=websecure
+      - traefik.http.routers.kane-unipile-webhooks.tls.certresolver=letsencrypt
+      - traefik.http.routers.kane-unipile-webhooks.priority=200
+      - traefik.http.routers.kane-unipile-webhooks.service=kane-unipile
+      - traefik.http.services.kane-unipile.loadbalancer.server.port=8000
+      - traefik.docker.network=hermes-agent-epgg_default
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://boss:${POSTGRES_PASSWORD}@postgres:5432/boss_ir
+      DB_SCHEMA: unipile
+      PUBLIC_BASE_URL: https://ircustomdashboards.tech
+      TZ: America/Chicago
+    command: ["api"]
+    ports:
+      - 127.0.0.1:18017:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=5)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  unipile_worker:
+    profiles: ["unipile"]
+    build:
+      context: ./vasari_unipile
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://boss:${POSTGRES_PASSWORD}@postgres:5432/boss_ir
+      DB_SCHEMA: unipile
+      PUBLIC_BASE_URL: https://ircustomdashboards.tech
+      TZ: America/Chicago
+    command: ["worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      unipile:
+        condition: service_healthy
+

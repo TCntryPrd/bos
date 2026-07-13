@@ -23,25 +23,6 @@ import { KanbanBoard } from '../components/kanban/KanbanBoard.js';
 import { SurfaceTabs, type SurfaceTab } from '../components/SurfaceTabs.js';
 import { DictationButton } from '../components/DictationButton';
 import { humanizeSpokenBrief } from '../lib/spokenBrief';
-import ajBloomPortrait from '../assets/rascal-ajbloom-anime.png';
-import alfalfaPortrait from '../assets/rascal-alfalfa-anime.png';
-import buckwheatPortrait from '../assets/rascal-buckwheat-anime.png';
-import butchPortrait from '../assets/rascal-butch-anime.png';
-import darlaPortrait from '../assets/rascal-darla-anime.png';
-import froggyPortrait from '../assets/rascal-froggy-anime.png';
-import msRobertsPortrait from '../assets/rascal-msroberts-anime.png';
-import peteyPortrait from '../assets/rascal-petey-anime.png';
-import porkyPortrait from '../assets/rascal-porky-anime.png';
-import spankyPortrait from '../assets/rascal-spanky-anime.png';
-import stymiePortrait from '../assets/rascal-stymie-anime.png';
-import wheezerPortrait from '../assets/rascal-wheezer-anime.png';
-import buckleyPortrait from '../assets/outsider-buckley-anime.png';
-import dallyPortrait from '../assets/outsider-dally-anime.png';
-import darryPortrait from '../assets/outsider-darry-anime.png';
-import gioPortrait from '../assets/outsider-gio-anime.png';
-import mercuryPortrait from '../assets/outsider-mercury-anime.png';
-import ponyboyPortrait from '../assets/outsider-ponyboy-anime.png';
-import sodapopPortrait from '../assets/outsider-sodapop-anime.png';
 
 type SpeechRecognitionAlternative = { transcript: string };
 type SpeechRecognitionResult = { isFinal: boolean; 0: SpeechRecognitionAlternative };
@@ -85,30 +66,135 @@ const SOFT_BLUE_GLASS_BODY: React.CSSProperties = {
   WebkitBackdropFilter: 'blur(12px) saturate(1.08)',
 };
 
-const RASCAL_PORTRAITS: Record<string, string> = {
-  ajbloom: ajBloomPortrait,
-  alfalfa: alfalfaPortrait,
-  buckwheat: buckwheatPortrait,
-  butch: butchPortrait,
-  darla: darlaPortrait,
-  froggy: froggyPortrait,
-  msroberts: msRobertsPortrait,
-  petey: peteyPortrait,
-  porky: porkyPortrait,
-  spanky: spankyPortrait,
-  stymie: stymiePortrait,
-  wheezer: wheezerPortrait,
-};
+// ── Agent avatar (user-customizable: emoji, animal, or image URL) ──────
+// Stored per-agent in localStorage under boss_agent_avatar:<handle>; falls back
+// to the initials AgentAvatar when unset. Reactive across the page via a custom
+// 'boss-avatar-changed' event so the header badge and portrait card stay in sync.
+const SYMBOL_EMOJI = ['🤖','🧠','💼','📊','📈','🎯','🚀','⚡','🛡️','🔧','🔑','💰','🎨','🗂️','📌','🧩','🔮','💡','⭐','🔥','✅','📎','🖥️','📅'];
+const ANIMAL_EMOJI = ['🦊','🐻','🦁','🐯','🐺','🦉','🐨','🐼','🐵','🦅','🐷','🐸','🐶','🐱','🐰','🦄','🐢','🦈','🐝','🦋','🐙','🦩','🐳','🦌'];
 
-const OUTSIDER_PORTRAITS: Record<string, string> = {
-  buckley: buckleyPortrait,
-  dally: dallyPortrait,
-  darry: darryPortrait,
-  gio: gioPortrait,
-  mercury: mercuryPortrait,
-  ponyboy: ponyboyPortrait,
-  slack: sodapopPortrait,
-};
+function avatarKey(handle: string): string {
+  return `boss_agent_avatar:${handle.toLowerCase()}`;
+}
+
+const isImageUrl = (v: string | null): boolean => !!v && /^https?:\/\//i.test(v);
+
+function useAgentAvatar(handle: string): [string | null, (v: string | null) => void] {
+  const read = () => { try { return localStorage.getItem(avatarKey(handle)) || null; } catch { return null; } };
+  const [avatar, setAvatar] = useState<string | null>(read);
+  useEffect(() => {
+    setAvatar(read());
+    const onChange = () => setAvatar(read());
+    window.addEventListener('boss-avatar-changed', onChange);
+    window.addEventListener('storage', onChange);
+    return () => {
+      window.removeEventListener('boss-avatar-changed', onChange);
+      window.removeEventListener('storage', onChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handle]);
+  const save = (v: string | null) => {
+    try {
+      if (v && v.trim()) localStorage.setItem(avatarKey(handle), v.trim());
+      else localStorage.removeItem(avatarKey(handle));
+    } catch { /* ignore */ }
+    window.dispatchEvent(new CustomEvent('boss-avatar-changed'));
+  };
+  return [avatar, save];
+}
+
+function AgentPortraitBadge({ handle, displayName, size }: { handle: string; displayName: string; size: number }) {
+  const [avatar] = useAgentAvatar(handle);
+  if (isImageUrl(avatar)) {
+    return <img src={avatar!} alt="" className="flex-shrink-0 rounded-full object-cover object-top" style={{ height: size, width: size }} />;
+  }
+  if (avatar) {
+    return (
+      <div className="flex flex-shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/25"
+        style={{ height: size, width: size, fontSize: Math.round(size * 0.58) }}>
+        <span aria-hidden>{avatar}</span>
+      </div>
+    );
+  }
+  return <AgentAvatar handle={handle} displayName={displayName} size={size} ring />;
+}
+
+function AvatarPicker({ current, onPick, onClose }: { current: string | null; onPick: (v: string | null) => void; onClose: () => void }) {
+  const [url, setUrl] = useState(isImageUrl(current) ? (current ?? '') : '');
+  const gridBtn = (e: string) =>
+    `flex h-9 items-center justify-center rounded-md border text-xl hover:bg-white/10 ${current === e ? 'border-cyan-400 bg-white/10' : 'border-white/12'}`;
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md overflow-hidden rounded-xl border border-white/15 bg-[#0d1512] text-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <div className="text-sm font-semibold">Choose an avatar</div>
+          <button type="button" onClick={onClose} className="rounded p-1 text-white/60 hover:text-white" aria-label="Close">
+            <XIcon className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="max-h-[70vh] space-y-5 overflow-y-auto px-4 py-4">
+          <div>
+            <div className="mb-2 text-[11px] uppercase tracking-wide text-white/50">Symbols</div>
+            <div className="grid grid-cols-8 gap-1.5">
+              {SYMBOL_EMOJI.map((e) => (
+                <button key={e} type="button" onClick={() => onPick(e)} className={gridBtn(e)}><span aria-hidden>{e}</span></button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-2 text-[11px] uppercase tracking-wide text-white/50">Animals</div>
+            <div className="grid grid-cols-8 gap-1.5">
+              {ANIMAL_EMOJI.map((e) => (
+                <button key={e} type="button" onClick={() => onPick(e)} className={gridBtn(e)}><span aria-hidden>{e}</span></button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-2 text-[11px] uppercase tracking-wide text-white/50">Image URL</div>
+            <div className="flex gap-2">
+              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/avatar.png"
+                className="flex-1 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/35 focus:border-cyan-400 focus:outline-none" />
+              <button type="button" disabled={!/^https?:\/\//i.test(url.trim())} onClick={() => onPick(url.trim())}
+                className="rounded-md bg-cyan-500 px-3 py-2 text-sm font-medium text-black disabled:opacity-40">Use</button>
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-between border-t border-white/10 px-4 py-3">
+          <button type="button" onClick={() => onPick(null)} className="text-[13px] text-white/60 hover:text-white">Reset to initials</button>
+          <button type="button" onClick={onClose} className="text-[13px] text-white/60 hover:text-white">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentPortrait({ handle, displayName }: { handle: string; displayName: string }) {
+  const [avatar, setAvatar] = useAgentAvatar(handle);
+  const [picking, setPicking] = useState(false);
+  return (
+    <>
+      {isImageUrl(avatar) ? (
+        <img src={avatar!} alt="" className="h-full w-full object-cover object-top" />
+      ) : avatar ? (
+        <div className="flex h-full w-full items-center justify-center bg-[#10251f]/86" style={{ fontSize: '4.5rem' }}>
+          <span aria-hidden>{avatar}</span>
+        </div>
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-[#10251f]/86">
+          <AgentAvatar handle={handle} displayName={displayName} size={112} ring />
+        </div>
+      )}
+      <button type="button" onClick={() => setPicking(true)}
+        className="absolute right-2 top-2 z-10 rounded-md border border-white/25 bg-black/45 p-1.5 text-white/85 backdrop-blur hover:bg-black/70"
+        aria-label="Change avatar" title="Change avatar">
+        <Pencil className="h-3.5 w-3.5" />
+      </button>
+      {picking && (
+        <AvatarPicker current={avatar} onPick={(v) => { setAvatar(v); setPicking(false); }} onClose={() => setPicking(false)} />
+      )}
+    </>
+  );
+}
 
 // ── Kind config ─────────────────────────────────────────────────────────────
 
@@ -389,6 +475,10 @@ function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: C
   const [draft, setDraft] = useState('');
   const [interim, setInterim] = useState('');
   const [listening, setListening] = useState(false);
+  // Whether the current draft was typed (vs spoken/dictated). Typed messages
+  // send as plain text and skip the spoken read-back, so you can TYPE instead
+  // of speak to the agent.
+  const [typedInput, setTypedInput] = useState(false);
   const [lastVoiceSummary, setLastVoiceSummary] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [pending, setPending] = useState('');
@@ -516,6 +606,7 @@ function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: C
       }
       if (finalText.trim()) {
         setDraft((prev) => `${prev}${prev ? ' ' : ''}${finalText.trim()}`);
+        setTypedInput(false); // spoken input -> keep voice-first behavior
       }
       setInterim(interimText.trim());
     };
@@ -542,10 +633,12 @@ function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: C
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text || streaming) return;
+    const wasTyped = typedInput; // typed -> plain text + no spoken read-back
     recognitionRef.current?.stop();
     setListening(false);
     setInterim('');
     setDraft('');
+    setTypedInput(false);
     setStreaming(true);
     setPending('');
     setStatusLabel('Coordinating...');
@@ -573,7 +666,7 @@ function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: C
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-          body: JSON.stringify({ message: buildVoiceFirstMessage(text, displayName, voiceOnly) }),
+          body: JSON.stringify({ message: wasTyped ? text : buildVoiceFirstMessage(text, displayName, voiceOnly) }),
           signal: controller.signal,
         },
       );
@@ -656,13 +749,13 @@ function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: C
       try {
         const fresh = await fetchMessages(cfg, handle, sessionId);
         setMessages(fresh);
-        if (voiceOnly) {
+        if (voiceOnly && !wasTyped) {
           const finalAssistant = [...fresh].reverse().find((m) => m.role === 'assistant')?.content ?? aggregated;
           void speakSummary(finalAssistant);
         }
       } catch {
         setMessages((m) => m);
-        if (voiceOnly) void speakSummary(aggregated);
+        if (voiceOnly && !wasTyped) void speakSummary(aggregated);
       }
       setPending('');
       setPendingStartedAt(null);
@@ -671,7 +764,7 @@ function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: C
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [cfg, displayName, draft, handle, sessionId, speakSummary, streaming, voiceOnly]);
+  }, [cfg, displayName, draft, handle, sessionId, speakSummary, streaming, typedInput, voiceOnly]);
 
   const visibleMessages = messages;
 
@@ -750,7 +843,17 @@ function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: C
         style={voiceOnly ? SOFT_BLUE_GLASS_HEADER : undefined}
       >
         {voiceOnly ? (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2">
+            <textarea
+              value={draft}
+              onChange={(e) => { setDraft(e.target.value); setTypedInput(true); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
+              placeholder={`Type or speak to ${displayName}…`}
+              disabled={streaming}
+              rows={2}
+              className="w-full resize-none rounded-md border border-[#1c83ab] bg-white/85 px-3 py-2 text-[13px] leading-relaxed text-[#061015] placeholder-[#164257]/60 focus:outline-none focus:ring-2 focus:ring-[#1c83ab]/50 disabled:opacity-50"
+            />
+            <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={listening ? stopListening : startListening}
@@ -782,7 +885,7 @@ function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: C
                 title="Send captured voice"
               >
                 <Send className="h-3.5 w-3.5" />
-                Send voice
+                Send
               </button>
             )}
             <button
@@ -803,22 +906,30 @@ function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: C
               Clear
             </button>
             <div className="min-w-[160px] flex-1 text-[12px] text-[#061015]">
-              {listening ? 'Listening...' : draft.trim() ? 'Voice captured. Send when ready.' : streaming ? `${displayName} is working...` : `Speak to ${displayName}.`}
+              {listening ? 'Listening...' : draft.trim() ? 'Ready to send.' : streaming ? `${displayName} is working...` : `Type or speak to ${displayName}.`}
               {interim ? <span className="text-[#274a5b]"> Capturing...</span> : null}
+            </div>
             </div>
           </div>
         ) : (
           <>
-            <div className="mb-2 min-h-[44px] rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-[13px] leading-relaxed text-text-primary">
-              {draft.trim() || (streaming ? 'Coordinating...' : `Speak to ${displayName}.`)}
-            </div>
+            <textarea
+              value={draft}
+              onChange={(e) => { setDraft(e.target.value); setTypedInput(true); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
+              placeholder={`Type or speak to ${displayName}…`}
+              disabled={streaming}
+              rows={2}
+              className="mb-2 w-full resize-none rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-[13px] leading-relaxed text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-50"
+            />
             <div className="flex flex-wrap items-center gap-2">
               <DictationButton
                 compact={false}
                 disabled={streaming}
-                onTranscript={(text) =>
-                  setDraft((prev) => (prev ? `${prev.trimEnd()} ${text}` : text))
-                }
+                onTranscript={(text) => {
+                  setDraft((prev) => (prev ? `${prev.trimEnd()} ${text}` : text));
+                  setTypedInput(false);
+                }}
               />
               {streaming ? (
                 <button
@@ -838,7 +949,7 @@ function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: C
                   style={{ background: 'linear-gradient(135deg, #b56cff 0%, #5cc8ff 100%)' }}
                 >
                   <Send className="h-3.5 w-3.5" />
-                  Send voice
+                  Send
                 </button>
               )}
               <button
@@ -1333,8 +1444,6 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
   }
 
   if (deskVisit) {
-    const portraitMap = kind === 'outsider' ? OUTSIDER_PORTRAITS : RASCAL_PORTRAITS;
-    const portraitSrc = portraitMap[agent.handle.toLowerCase()] ?? null;
     return (
       <div data-testid={cfg.testid} className="relative h-full min-h-0 overflow-hidden text-white">
         {auth.expired ? (
@@ -1349,15 +1458,7 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
           </Link>
           <span className="text-white/28">/</span>
           <div className="hidden sm:block">
-            {portraitSrc ? (
-              <img
-                src={portraitSrc}
-                alt=""
-                className="h-[30px] w-[30px] flex-shrink-0 rounded-full object-cover object-top"
-              />
-            ) : (
-              <AgentAvatar handle={agent.handle} displayName={agent.displayName} size={30} ring />
-            )}
+            <AgentPortraitBadge handle={agent.handle} displayName={agent.displayName} size={30} />
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-[14px] font-semibold leading-tight text-white">{agent.displayName}</div>
@@ -1396,13 +1497,7 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
             aspectRatio: '3 / 4',
           }}
         >
-          {portraitSrc ? (
-            <img src={portraitSrc} alt="" className="h-full w-full object-cover object-top" />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center bg-[#10251f]/86">
-              <AgentAvatar handle={agent.handle} displayName={agent.displayName} size={112} ring />
-            </div>
-          )}
+          <AgentPortrait handle={agent.handle} displayName={agent.displayName} />
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/78 to-transparent px-3 pb-3 pt-10">
             <div className="truncate text-sm font-semibold">{agent.displayName}</div>
             <div className="truncate text-[11px] text-white/62">{agent.client || agent.handle}</div>

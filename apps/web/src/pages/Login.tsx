@@ -13,7 +13,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, LogIn } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { BossMark } from '../components/shell/BossLogo';
-import { FrontSwitcher } from '../components/FrontSwitcher';
 import { isPlainBrand } from '../lib/brand';
 import entranceElevatorScene from '../assets/entrance-elevator-scene.png';
 
@@ -157,7 +156,6 @@ export function Login() {
         </button>
       </form>
 
-      <FrontSwitcher />
 
       {!onboardingComplete && (
         <div className="mt-6">

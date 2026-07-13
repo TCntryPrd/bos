@@ -6,3 +6,15 @@ backups/
 
 # host-bridge private key — NEVER commit
 ssh/
+
+# runtime/secret dirs + cruft (2026-07-13)
+codex-home/
+claude-home/
+.claude/
+gio-workspace/
+claude.json
+infra/livekit/livekit.yaml
+.ui-backup-*/
+*.bak
+*.bak-*
+Dockerfile.bak*
