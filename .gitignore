@@ -3,3 +3,6 @@ dist/
 .env
 *.env
 backups/
+
+# host-bridge private key — NEVER commit
+ssh/

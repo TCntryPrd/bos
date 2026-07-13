@@ -92,7 +92,8 @@ services:
     expose:
       - "8001"
     volumes:
-      - ./:/home/boss/boss-dev:ro
+      - ./:/home/boss/boss-dev
+      - ./:/data/home/boss-dev
       - bos_data:/data
       - bos_claude_home:/home/boss/.claude
       - bos_codex_home:/home/boss/.codex
