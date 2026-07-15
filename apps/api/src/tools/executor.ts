@@ -5136,9 +5136,22 @@ const BLOCKED_COMMANDS = [
 async function handleBash(args: Record<string, unknown>): Promise<string> {
   const command = String(args.command ?? '');
   const timeoutMs = Math.min(Number(args.timeout ?? 60000), 300000); // max 5 min
-  const cwd = String(args.cwd ?? HOST_BOSS_SRC);
+  const cwdRaw = String(args.cwd ?? HOST_BOSS_SRC);
+  // Agents think in host paths; remap known host prefixes onto the container
+  // mount. An unknown/missing cwd would surface as a cryptic
+  // "spawnSync /bin/sh ENOENT" from execSync, so fail it clearly instead.
+  const cwd = cwdRaw
+    .replace(/^\/home\/tcntryprd\/boss-dev(?=\/|$)/, HOST_BOSS_SRC)
+    .replace(/^\/docker\/[A-Za-z0-9._-]+(?=\/|$)/, HOST_BOSS_SRC);
 
   if (!command) return 'Error: command is required';
+
+  const { existsSync } = await import('node:fs');
+  if (!existsSync(cwd)) {
+    return `Error: cwd does not exist inside the api container: ${cwdRaw}` +
+      (cwd !== cwdRaw ? ` (remapped to ${cwd})` : '') +
+      `. The project tree is mounted at ${HOST_BOSS_SRC}; host-only paths must go through the host bridge exec instead.`;
+  }
 
   // Safety check
   for (const pattern of BLOCKED_COMMANDS) {
@@ -5199,6 +5212,12 @@ async function handleSelfPatch(args: Record<string, unknown>): Promise<string> {
 
     return `Patched ${filePath}: ${replaceAll ? `replaced ${count} occurrences` : 'replaced 1 occurrence'}`;
   } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === 'EACCES' || code === 'EPERM') {
+      return `Error patching ${filePath}: permission denied. The api container must run as uid 1000 ` +
+        `(compose user: "1000:1000") to write the mounted source tree. If this persists after a ` +
+        `redeploy, escalate the edit through the host bridge exec instead.`;
+    }
     return `Error patching ${filePath}: ${err instanceof Error ? err.message : String(err)}`;
   }
 }

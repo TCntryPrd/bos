@@ -23,6 +23,14 @@ for s in "${SERVICES[@]}"; do
   docker tag "$PROJECT-$s:latest" "$PROJECT-$s:last-good" 2>/dev/null || true
 done
 
+# Normalize tree ownership. Foreign uids (Windows-sourced syncs stamp 197609;
+# root-created files) break host pulls AND container self-edit. The api runs
+# pinned to 1000:1000 (compose) and must be able to write this tree. data/ is
+# excluded — service containers own their state dirs.
+say "normalize ownership (uid 1000, data/ excluded)"
+CHOWN="chown"; [ "$(id -u)" -eq 0 ] || CHOWN="sudo -n chown"
+find . -path ./data -prune -o ! -uid 1000 -print0 2>/dev/null | xargs -0 -r $CHOWN -h 1000:1000 2>/dev/null || say "WARN: ownership normalize incomplete (need root/sudo) — self-edit may hit EACCES"
+
 if ! docker compose build "${SERVICES[@]}"; then
   say "BUILD FAILED — containers untouched, reverting source to $BEFORE"
   git reset --hard "$BEFORE"; exit 1
