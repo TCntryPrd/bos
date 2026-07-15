@@ -103,8 +103,14 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
+    # Pin runtime uid/gid to the host owner of the bind-mounted project tree
+    # so agent self-edit (boss_self_patch / boss_fs / boss_bash) can write it.
+    # The image's boss user is just a label — this is the pin the Dockerfile
+    # comment has always described. HOME keeps CLI state dirs at /home/boss.
+    user: '1000:1000'
     env_file: .env
     environment:
+      HOME: /home/boss
       BOSS_BACKGROUND_AGENTS: 'off'
       TELEGRAM_BOT_TOKEN: ''
       BOSS_HOME_OVERRIDE: /home/boss
