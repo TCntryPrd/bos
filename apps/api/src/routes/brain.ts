@@ -46,9 +46,9 @@ const AVAILABLE_MODELS: ModelEntry[] = [
   { id: 'codex-cli',          name: 'Codex CLI',          tier: 'balanced', context: 200_000,   maxOutput: 64_000,  status: 'available' },
   // Claude models
   { id: 'claude-haiku-4-5',  name: 'Haiku 4.5',  tier: 'fast',     context: 200_000,   maxOutput: 64_000,  status: 'available' },
-  { id: 'claude-sonnet-4-5', name: 'Sonnet 4.5',  tier: 'balanced', context: 1_000_000, maxOutput: 64_000,  status: 'available' },
+  { id: 'claude-sonnet-5',  name: 'Sonnet 5',    tier: 'balanced', context: 1_000_000, maxOutput: 128_000, status: 'available' },
   { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6',  tier: 'balanced', context: 1_000_000, maxOutput: 64_000,  status: 'available' },
-  { id: 'claude-opus-4-5',   name: 'Opus 4.5',    tier: 'premium',  context: 1_000_000, maxOutput: 128_000, status: 'available' },
+  { id: 'claude-opus-4-8',   name: 'Opus 4.8',    tier: 'premium',  context: 1_000_000, maxOutput: 128_000, status: 'available' },
   { id: 'claude-opus-4-6',   name: 'Opus 4.6',    tier: 'premium',  context: 1_000_000, maxOutput: 128_000, status: 'available' },
   // OpenAI models
   { id: 'gpt-4o',             name: 'GPT-4o',             tier: 'balanced', context: 128_000,   maxOutput: 16_384,  status: 'available' },

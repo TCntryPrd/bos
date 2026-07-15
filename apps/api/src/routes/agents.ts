@@ -12,9 +12,7 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getPool } from '../db.js';
-import { findUnipileAccount, isUnipileConfigured, sendUnipileChatMessage, startUnipileWhatsAppChat } from '../lib/unipile.js';
-
-const UNIPILE_CHAT_PREFIX = 'unipile:';
+import { isWaBridgeConfigured, phoneToChatId, sendWhatsAppTextAndPersist } from '../lib/wa-bridge.js';
 
 function getTenantId(req: FastifyRequest): string {
   return req.tenant?.tenantId ?? 'default';
@@ -89,44 +87,27 @@ export default async function agentsRoutes(app: FastifyInstance): Promise<void> 
       const actionType = data.action_type;
       if (action === 'approve' || action === 'modify') {
         if (actionType === 'send_whatsapp') {
-          const chatId = data.chat_id as string;
+          const chatId = data.chat_id as string | undefined;
           const message = action === 'modify' && modification?.message
             ? String(modification.message)
             : String(data.draft_message);
 
-          if (isUnipileConfigured()) {
-            const liveChatId = chatId?.startsWith(UNIPILE_CHAT_PREFIX) ? chatId.slice(UNIPILE_CHAT_PREFIX.length) : chatId;
-            const account = await findUnipileAccount('WHATSAPP');
-            const sent = liveChatId
-              ? await sendUnipileChatMessage(liveChatId, message, account?.id)
-              : await startUnipileWhatsAppChat(String(data.phone ?? data.to ?? ''), message);
-            return reply.send({ ok: true, action: 'sent', messageId: sent.messageId });
+          if (!isWaBridgeConfigured()) {
+            return reply.code(503).send({ error: 'whatsapp_not_configured' });
           }
 
-          // Legacy OpenWA path, retained only when Unipile is not configured.
-          const OPENWA_BASE = process.env.OPENWA_BASE_URL ?? 'http://localhost:2785/api';
-          const OPENWA_SESSION = process.env.OPENWA_SESSION_ID;
-          const OPENWA_KEY = process.env.OPENWA_API_KEY;
-
-          const wa = await fetch(`${OPENWA_BASE}/sessions/${OPENWA_SESSION}/messages/send-text`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-API-Key': OPENWA_KEY ?? '' },
-            body: JSON.stringify({ chatId, text: message }),
-          });
-
-          if (!wa.ok) {
+          try {
+            // Existing thread → send to its chat id; otherwise derive one from
+            // the phone number on the notification data.
+            const targetChatId = chatId && chatId.trim()
+              ? chatId
+              : phoneToChatId(String(data.phone ?? data.to ?? ''));
+            const sent = await sendWhatsAppTextAndPersist(targetChatId, message);
+            return reply.send({ ok: true, action: 'sent', messageId: sent.messageId });
+          } catch (err) {
+            req.log.error({ err, chatId }, 'approved whatsapp send failed');
             return reply.code(502).send({ error: 'whatsapp_send_failed' });
           }
-
-          const waData = await wa.json() as { messageId?: string };
-          await pool.query(`
-            INSERT INTO boss_whatsapp_messages
-              (tenant_id, chat_id, wa_message_id, direction, from_me, body, message_type, ack_status, sent_at)
-            VALUES ('default', $1, $2, 'outbound', true, $3, 'chat', 'sent', NOW())
-            ON CONFLICT (tenant_id, wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING
-          `, [chatId, waData.messageId ?? null, message]);
-
-          return reply.send({ ok: true, action: 'sent', messageId: waData.messageId });
         }
 
         if (actionType === 'send_email') {

@@ -180,8 +180,8 @@ export function Login() {
 
   const hero = (subtitle: string, subtitleClass: string) => (
     <div className="text-center mb-8">
-      <div className="flex justify-center mb-6">
-        <BossMark scale={2.4} />
+      <div className={cn('mb-6', isPlainBrand ? 'flex justify-center' : 'w-full')}>
+        <BossMark scale={isPlainBrand ? 2.4 : 1.9} centered={!isPlainBrand} />
       </div>
       <p className={subtitleClass}>{subtitle}</p>
     </div>

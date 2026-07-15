@@ -163,8 +163,9 @@ export const connectorsApi = {
     ),
 };
 
+// Unipile is LinkedIn-ONLY. WhatsApp runs on the wa-bridge (see whatsappApi below).
 export interface UnipileAccountStatus {
-  provider: 'LINKEDIN' | 'WHATSAPP';
+  provider: 'LINKEDIN';
   configured: boolean;
   connected: boolean;
   accountId: string | null;
@@ -177,8 +178,8 @@ export interface UnipileAccountStatus {
 export const unipileApi = {
   getStatus: () =>
     request<{ configured: boolean; accounts: UnipileAccountStatus[]; checkedAt: string; error?: string }>('/unipile/status'),
-  getConnectLink: (provider: 'LINKEDIN' | 'WHATSAPP') =>
-    request<{ provider: 'LINKEDIN' | 'WHATSAPP'; url: string }>('/unipile/connect-link', {
+  getConnectLink: (provider: 'LINKEDIN') =>
+    request<{ provider: 'LINKEDIN'; url: string }>('/unipile/connect-link', {
       method: 'POST',
       body: JSON.stringify({ provider }),
     }),
@@ -523,7 +524,55 @@ export const settingsApi = {
     }),
 };
 
-// ─── WhatsApp ─────────────────────────────────────────────────────────────────
+// ─── WhatsApp (wa-bridge / Baileys) ───────────────────────────────────────────
+// WhatsApp runs on a self-hosted Baileys (@whiskeysockets/baileys) session — an
+// unofficial multi-device linked device. Pairing happens on the WhatsApp page
+// (disclaimer → QR scan), NOT in Settings/Connections.
+export interface WhatsappSessionStatus {
+  // 'not_configured' = env missing on this box; 'unreachable' = env set but the
+  // wa-bridge container did not answer (transient). Both are sent by the API.
+  status: 'ready' | 'scan_qr' | 'starting' | 'error' | 'not_configured' | 'unreachable';
+  phone?: string | null;
+}
+
+/** No `qr` means no code to show yet — `reason` says why (never an error). */
+export type WhatsappQrReason = 'pending' | 'already_paired';
+
+export interface WhatsappQr {
+  qr: string | null;
+  reason: WhatsappQrReason | null;
+}
+
+export interface WhatsappStatus {
+  provider: 'baileys';
+  configured: boolean;
+  paired: boolean;
+  session: WhatsappSessionStatus;
+  disclaimerAcceptedAt: string | null;
+  /** True once a history import has completed — the page stops offering it. */
+  historyImported: boolean;
+  historyImportedAt: string | null;
+}
+
+export interface WhatsappImportSummary {
+  chats: number;
+  threadsUpserted: number;
+  messagesInserted: number;
+  messagesSkipped: number;
+  mediaFetched: number;
+  errors: string[];
+}
+
+/** Progress of the background history import (in-process on the API — resets on restart). */
+export interface WhatsappImportStatus {
+  running: boolean;
+  startedAt: string | null;
+  finishedAt: string | null;
+  progress: { chatsDone: number; chatsTotal: number; messagesInserted: number };
+  lastError: string | null;
+  summary: WhatsappImportSummary | null;
+}
+
 export interface WhatsappThread {
   chat_id: string;
   display_name: string | null;
@@ -547,6 +596,7 @@ export interface WhatsappMessage {
   body: string | null;
   message_type: string;
   media_url: string | null;
+  reply_to_wa_message_id: string | null;
   ack_status: string | null;
   sent_at: string;
 }
@@ -565,6 +615,20 @@ export interface WhatsappContact {
 }
 
 export const whatsappApi = {
+  getStatus: () =>
+    request<WhatsappStatus>('/whatsapp/status'),
+  getQr: () =>
+    request<WhatsappQr>('/whatsapp/qr'),
+  ackDisclaimer: () =>
+    request<{ ok: boolean; disclaimerAcceptedAt: string }>(
+      '/whatsapp/disclaimer-ack',
+      { method: 'POST' },
+    ),
+  logout: () =>
+    request<{ ok: boolean }>(
+      '/whatsapp/logout',
+      { method: 'POST' },
+    ),
   listThreads: () =>
     request<{ threads: WhatsappThread[] }>('/whatsapp/threads'),
   listContacts: () =>
@@ -593,6 +657,18 @@ export const whatsappApi = {
       '/whatsapp/start-conversation',
       { method: 'POST', body: JSON.stringify({ phone, message }) },
     ),
+  /**
+   * Kick off the bulk import of the history WhatsApp pushed to the bridge at
+   * pairing time. Returns as soon as the background job starts (409 if one is
+   * already running) — poll getImportStatus() for progress.
+   */
+  importHistory: (opts?: { chatLimit?: number; perChatLimit?: number; media?: boolean }) =>
+    request<{ started: boolean }>(
+      '/whatsapp/import-history',
+      { method: 'POST', body: JSON.stringify(opts ?? {}) },
+    ),
+  getImportStatus: () =>
+    request<WhatsappImportStatus>('/whatsapp/import-history/status'),
 };
 
 // ─── Employee Agents (headless persistent agents — observability) ───────────────

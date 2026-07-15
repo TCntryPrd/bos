@@ -22,8 +22,8 @@ function getBaseUrl(request?: { headers: Record<string, unknown> }): string {
 }
 
 function normalizeProvider(value: unknown): UnipileProvider | null {
-  const normalized = String(value ?? '').toUpperCase();
-  return normalized === 'LINKEDIN' || normalized === 'WHATSAPP' ? normalized : null;
+  // Unipile is LinkedIn-only. WhatsApp runs on the Baileys bridge (see routes/whatsapp.ts).
+  return String(value ?? '').toUpperCase() === 'LINKEDIN' ? 'LINKEDIN' : null;
 }
 
 export async function unipileRoutes(server: FastifyInstance): Promise<void> {
@@ -49,7 +49,7 @@ export async function unipileRoutes(server: FastifyInstance): Promise<void> {
           type: 'object',
           required: ['provider'],
           properties: {
-            provider: { type: 'string', enum: ['LINKEDIN', 'WHATSAPP'] },
+            provider: { type: 'string', enum: ['LINKEDIN'] },
           },
           additionalProperties: false,
         },
@@ -57,7 +57,7 @@ export async function unipileRoutes(server: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const provider = normalizeProvider(request.body.provider);
-      if (!provider) return reply.status(400).send({ error: 'provider must be LINKEDIN or WHATSAPP' });
+      if (!provider) return reply.status(400).send({ error: 'provider must be LINKEDIN' });
 
       const baseUrl = getBaseUrl(request);
       try {

@@ -86,7 +86,7 @@ export function ChatPane({ thread }: Props) {
 
   if (!thread) {
     return (
-      <section className="aios-panel flex items-center justify-center text-text-muted text-[12.5px]">
+      <section className="aios-frost-surface--dark aios-panel flex items-center justify-center text-text-muted text-[12.5px]">
         Pick or create a thread to start.
       </section>
     );
@@ -94,7 +94,7 @@ export function ChatPane({ thread }: Props) {
 
   return (
     <section
-      className="aios-panel overflow-hidden flex flex-col min-h-0 min-w-0"
+      className="aios-frost-surface--dark aios-panel overflow-hidden flex flex-col min-h-0 min-w-0"
       style={{ background: 'linear-gradient(180deg, rgba(26,31,48,0.5), rgba(14,18,30,0.75))', backdropFilter: 'blur(18px)' }}
     >
       <header className="px-4 py-2.5 border-b border-border flex items-center gap-3">

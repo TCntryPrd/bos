@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS boss_fb_messages (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, mid)
 );
--- WhatsApp surface tables. Pre-exist on the owner's BOS (legacy OpenWA); this
+-- WhatsApp surface tables. Shared with the WhatsApp bridge (Baileys); this
 -- self-provisions them on a fresh box (e.g. a client) so the WhatsApp Cloud
 -- webhook fan-out + tile work everywhere. IF NOT EXISTS = no-op where present.
 CREATE TABLE IF NOT EXISTS boss_whatsapp_threads (

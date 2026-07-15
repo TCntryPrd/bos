@@ -116,7 +116,7 @@ export function EmployeeAgents() {
   }, [load]);
 
   return (
-    <div className="aios-page aios-page-pad min-h-full" data-testid="employee-agents-page">
+    <div className="aios-page aios-page-pad aios-frost-content min-h-full" data-testid="employee-agents-page">
       <header className="aios-command-hero mb-4 flex flex-wrap items-start justify-between gap-3 px-4 py-3">
         <div>
           <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">Your Team</div>

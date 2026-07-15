@@ -445,7 +445,13 @@ export async function runLocalChatTurn(
   // Resume an existing CC session; --session-id only works for brand-new ids.
   if (input.ccSessionId) args.push('--resume', ccSessionId);
   else args.push('--session-id', ccSessionId);
-  if (input.model && input.model.length > 0) args.push('--model', input.model);
+  // BOS default: Sonnet 5 at high reasoning effort. A caller-supplied model wins;
+  // otherwise fall back to CLAUDE_MODEL, then the hard default.
+  const model = (input.model && input.model.length > 0)
+    ? input.model
+    : (process.env.CLAUDE_MODEL || 'claude-sonnet-5');
+  args.push('--model', model);
+  args.push('--effort', process.env.CLAUDE_EFFORT || 'high');
   if (input.systemPrompt && input.systemPrompt.trim().length > 0) {
     args.push('--append-system-prompt', input.systemPrompt);
   }

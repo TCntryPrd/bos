@@ -31,7 +31,7 @@ import { useCooThreads } from '../components/coo/useCooThreads.js';
 const T = {
   bg: '#05060F',
   panel: '#0B0E1D',
-  panel2: '#11152E',
+  panel2: 'var(--aios-frost-dark, #11152E)',
   panel3: '#181D3A',
   border: '#232A4D',
   borderSoft: 'rgba(181,108,255,0.16)',
@@ -164,7 +164,7 @@ function Panel({ title, icon: Icon, children, action, collapsible = true }: {
     return next;
   });
   return (
-    <section className="aios-panel min-h-0 min-w-0 flex flex-col">
+    <section className="aios-frost-surface--dark aios-panel min-h-0 min-w-0 flex flex-col">
       <header
         className={`h-9 px-3 flex items-center gap-2 shrink-0 ${collapsible ? 'cursor-pointer' : ''}`}
         style={{ borderBottom: collapsed ? 'none' : `1px solid ${T.borderSoft}` }}
@@ -212,7 +212,7 @@ function TopBar({ brain, loading, lastActivity, mode, setMode }: {
   const gw = claudeGateway(brain);
   const [claudeName] = useAgentName('claude');
   return (
-    <header className="h-14 px-4 flex items-center gap-3 border-b shrink-0" style={{ background: T.panel, borderColor: T.border }}>
+    <header className="aios-frost-surface--dark h-14 px-4 flex items-center gap-3 border-b shrink-0" style={{ background: T.panel, borderColor: T.border }}>
       <ClaudeMark />
       <div className="min-w-0">
         <div

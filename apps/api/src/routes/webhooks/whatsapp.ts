@@ -1,24 +1,33 @@
 /**
- * OpenWA webhook receiver — inbound WhatsApp messages + ack updates.
+ * WhatsApp bridge webhook receiver — inbound WhatsApp messages + ack updates.
  *
  * POST /api/webhooks/whatsapp
  *
- * Payload shapes (per OpenWA events enum):
+ * Payload shapes (per the bridge's events enum):
  *   - message.received  → upsert thread + insert inbound message row, bump unread
  *   - message.sent      → upsert thread + insert outbound message row (echo of our own send)
  *   - message.ack       → update existing message row's ack_status
  *   - session.*         → log only (status changes, qr, etc.)
  *
- * Auth: shared-secret header OPENWA_WEBHOOK_TOKEN. OpenWA is configured
+ * Auth: shared-secret header WA_BRIDGE_WEBHOOK_TOKEN. The bridge is configured
  * to send `X-Webhook-Token: <token>`. Without the header or with the
  * wrong value, returns 401. The endpoint itself is in the public-paths
  * list (no tenant context — webhook is anonymous third party).
  *
- * Returns 200 quickly even on parse errors so OpenWA's retry policy
+ * Returns 200 quickly even on parse errors so the bridge's retry policy
  * doesn't hammer us; persistence failures are logged.
  */
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { getPool } from '../../db.js';
+import { getWaBridgeConfig, getWaContact, isWaBridgeConfigured, listWaGroups } from '../../lib/wa-bridge.js';
+
+/** Constant-time compare. Hashing first equalizes length so timingSafeEqual never throws. */
+function safeEqual(a: string, b: string): boolean {
+  const ah = createHash('sha256').update(a).digest();
+  const bh = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ah, bh);
+}
 
 interface WaPayload {
   event?: string;
@@ -87,7 +96,7 @@ function previewBody(body: string | undefined | null, type: string | undefined):
 
 function phoneFromChatId(chatId: string | undefined): string | null {
   if (!chatId) return null;
-  // Format 1: "15397777906@c.us" - standard format with phone
+  // Format 1: "15551234567@c.us" - standard format with phone
   const standard = chatId.match(/^(\d+)@c\.us$/);
   if (standard) return `+${standard[1]}`;
 
@@ -104,7 +113,7 @@ function phoneFromChatId(chatId: string | undefined): string | null {
 }
 
 function tsToDate(ts: number | undefined): Date {
-  // OpenWA returns seconds since epoch on inbound; coerce to ms.
+  // The bridge returns seconds since epoch on inbound; coerce to ms.
   if (!ts || !isFinite(ts)) return new Date();
   const ms = ts > 1e12 ? ts : ts * 1000;
   return new Date(ms);
@@ -120,6 +129,40 @@ function nameFromContact(contact: {
   return contact.verifiedName || contact.name || contact.formattedName || contact.pushName || contact.pushname || null;
 }
 
+// A WhatsApp group message carries the sender's push name, not the group
+// subject. Keep a short-lived group-subject cache so a busy group does not
+// repeatedly ask the bridge for the full group list, and never use a sender as
+// a group title.
+const GROUP_NAME_CACHE_TTL_MS = 5 * 60 * 1000;
+let groupNames = new Map<string, string>();
+let groupNamesFetchedAt = 0;
+let groupNamesRefresh: Promise<void> | null = null;
+
+async function fetchWaGroupName(chatId: string, log?: FastifyInstance['log']): Promise<string | null> {
+  if (!isWaBridgeConfigured()) return null;
+
+  if (Date.now() - groupNamesFetchedAt >= GROUP_NAME_CACHE_TTL_MS && !groupNamesRefresh) {
+    groupNamesRefresh = listWaGroups()
+      .then((groups) => {
+        const next = new Map<string, string>();
+        for (const group of groups) {
+          if (group.id && group.name) next.set(group.id, group.name);
+        }
+        groupNames = next;
+        groupNamesFetchedAt = Date.now();
+      })
+      .catch((err) => {
+        log?.debug({ err, chatId }, 'failed to refresh WhatsApp group names');
+      })
+      .finally(() => {
+        groupNamesRefresh = null;
+      });
+  }
+
+  if (groupNamesRefresh) await groupNamesRefresh;
+  return groupNames.get(chatId) ?? null;
+}
+
 function authorFromMessageId(id: string, chatId: string, isGroup: boolean): string | null {
   if (!isGroup || !id) return null;
   const suffix = id.slice(id.lastIndexOf('_') + 1);
@@ -127,23 +170,11 @@ function authorFromMessageId(id: string, chatId: string, isGroup: boolean): stri
   return suffix.includes('@') ? suffix : null;
 }
 
-async function fetchOpenWaContactName(contactId: string, log?: FastifyInstance['log']): Promise<string | null> {
+async function fetchWaContactName(contactId: string, log?: FastifyInstance['log']): Promise<string | null> {
+  if (!isWaBridgeConfigured()) return null;
   try {
-    const OPENWA_BASE = process.env.OPENWA_BASE_URL ?? 'http://localhost:2785/api';
-    const OPENWA_SESSION = process.env.OPENWA_SESSION_ID;
-    const OPENWA_KEY = process.env.OPENWA_API_KEY;
-    const contactRes = await fetch(`${OPENWA_BASE}/sessions/${OPENWA_SESSION}/contacts/${encodeURIComponent(contactId)}`, {
-      headers: { 'X-API-Key': OPENWA_KEY ?? '' },
-    });
-    if (!contactRes.ok) return null;
-    const contact = await contactRes.json() as {
-      name?: string;
-      pushName?: string;
-      pushname?: string;
-      formattedName?: string;
-      verifiedName?: string;
-    };
-    return nameFromContact(contact);
+    const contact = await getWaContact(contactId);
+    return contact ? nameFromContact(contact) : null;
   } catch (err) {
     log?.debug({ err, contactId }, 'failed to fetch contact name');
     return null;
@@ -194,19 +225,26 @@ export async function whatsappWebhookRoutes(server: FastifyInstance) {
     '/whatsapp',
     { config: { skipAuth: true } },
     async (request, reply) => {
-      const expectedToken = process.env.OPENWA_WEBHOOK_TOKEN;
+      const expectedToken = process.env.WA_BRIDGE_WEBHOOK_TOKEN;
       if (!expectedToken) {
-        request.log.error('OPENWA_WEBHOOK_TOKEN not configured');
+        // HARD REFUSAL: without a shared secret we cannot authenticate the
+        // sender, so nothing gets persisted. Loud on purpose — an operator
+        // seeing dropped messages should find this immediately.
+        request.log.error(
+          { event: (request.body as WaPayload | undefined)?.event ?? null },
+          'WA_BRIDGE_WEBHOOK_TOKEN is NOT configured — REFUSING to persist inbound WhatsApp webhook. Set WA_BRIDGE_WEBHOOK_TOKEN in the API env and configure the WhatsApp bridge to send X-Webhook-Token.',
+        );
         return reply.status(200).send({ ok: true, persisted: false, reason: 'token_not_configured' });
       }
 
+      // Header only. A `?token=` query param would land in traefik/api access
+      // logs in plaintext; the bridge always sends the header.
       const headerToken = request.headers['x-webhook-token'] ?? request.headers['x-api-key'];
-      const queryToken = (request.query as Record<string, string> | undefined)?.token;
-      const got =
-        (typeof headerToken === 'string' ? headerToken : Array.isArray(headerToken) ? headerToken[0] : '') ||
-        (typeof queryToken === 'string' ? queryToken : '');
-      if (got !== expectedToken) {
-        request.log.warn({ hasHeader: !!headerToken, hasQuery: !!queryToken }, 'whatsapp webhook: bad token');
+      const got = typeof headerToken === 'string'
+        ? headerToken
+        : Array.isArray(headerToken) ? (headerToken[0] ?? '') : '';
+      if (!got || !safeEqual(got, expectedToken)) {
+        request.log.warn({ hasHeader: !!headerToken }, 'whatsapp webhook: bad token');
         return reply.status(401).send({ error: 'unauthorized' });
       }
 
@@ -228,13 +266,13 @@ export async function whatsappWebhookRoutes(server: FastifyInstance) {
             // fromMe: explicit event name wins; otherwise check boolean flag or
             // id string prefix (whatsapp-web.js encodes as "true_<chatId>_<msgId>")
             // or check if 'from' field matches our session phone number
-            const SESSION_PHONE = process.env.OPENWA_SESSION_PHONE ?? '15397777906';
+            const sessionPhone = process.env.WA_BRIDGE_SESSION_PHONE ?? '';
             const idStr = typeof data.id === 'string' ? data.id : '';
             const fromPhone = typeof data.from === 'string' ? data.from.replace(/@.+$/, '') : '';
             const fromMe = event === 'message.sent'
               || data.fromMe === true
               || idStr.startsWith('true_')
-              || fromPhone === SESSION_PHONE;
+              || (Boolean(sessionPhone) && fromPhone === sessionPhone);
             const direction = fromMe ? 'outbound' : 'inbound';
             request.log.info({ event, idStr, fromMeFlag: data.fromMe, fromMe, direction, chatId, author: data.author, to: data.to, from: data.from }, 'wa webhook fromMe detection');
             const isGroup = data.isGroupMsg === true || chatId.endsWith('@g.us');
@@ -242,19 +280,18 @@ export async function whatsappWebhookRoutes(server: FastifyInstance) {
             const author = data.author || data.sender || authorFromMessageId(idStr, chatId, isGroup);
             let senderName = data.senderName || data.sender_name || null;
             if (!senderName && isGroup && author && !fromMe) {
-              senderName = nameFromContact(data) ?? await fetchOpenWaContactName(author, request.log);
+              senderName = nameFromContact(data) ?? await fetchWaContactName(author, request.log);
             }
 
-            // Fetch display name: prefer notifyName from webhook, otherwise fetch from OpenWA
-            let displayName = data.notifyName || null;
-            if (!displayName && !isGroup) {
-              displayName = await fetchOpenWaContactName(chatId, request.log);
-            }
-
-            // Final fallback: use formatted phone from chatId
-            if (!displayName) {
-              const phone = phoneFromChatId(chatId);
-              displayName = phone;
+            // In a group, notifyName is the last sender — never its title.
+            // Resolve the actual group subject from the bridge. Direct chats
+            // continue to prefer the contact's own name, then their phone.
+            let displayName: string | null;
+            if (isGroup) {
+              displayName = await fetchWaGroupName(chatId, request.log);
+            } else {
+              displayName = data.notifyName || await fetchWaContactName(chatId, request.log);
+              if (!displayName) displayName = phoneFromChatId(chatId);
             }
             const preview = previewBody(data.body ?? null, data.type);
 
@@ -265,13 +302,12 @@ export async function whatsappWebhookRoutes(server: FastifyInstance) {
 
             // Fetch media URL if this is a media message
             let mediaUrl = data.mediaUrl ?? null;
-            if (!mediaUrl && data.hasMedia && data.id && (data.type === 'image' || data.type === 'video' || data.type === 'audio' || data.type === 'ptt' || data.type === 'document')) {
+            if (!mediaUrl && data.hasMedia && data.id && isWaBridgeConfigured()
+              && (data.type === 'image' || data.type === 'video' || data.type === 'audio' || data.type === 'ptt' || data.type === 'document')) {
               try {
-                const OPENWA_BASE = process.env.OPENWA_BASE_URL ?? 'http://localhost:2785/api';
-                const OPENWA_SESSION = process.env.OPENWA_SESSION_ID;
-                const OPENWA_KEY = process.env.OPENWA_API_KEY;
-                const mediaRes = await fetch(`${OPENWA_BASE}/sessions/${OPENWA_SESSION}/messages/${data.id}/media`, {
-                  headers: { 'X-API-Key': OPENWA_KEY ?? '' }
+                const config = getWaBridgeConfig();
+                const mediaRes = await fetch(`${config.baseUrl}/sessions/${encodeURIComponent(config.sessionId)}/messages/${encodeURIComponent(data.id)}/media`, {
+                  headers: { 'X-API-Key': config.apiKey },
                 });
                 if (mediaRes.ok) {
                   const mediaData = await mediaRes.json() as { url?: string };
@@ -328,9 +364,13 @@ export async function whatsappWebhookRoutes(server: FastifyInstance) {
                   sender_name, body, message_type, media_url, reply_to_wa_message_id, ack_status, sent_at)
                VALUES ('default', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                ON CONFLICT (tenant_id, wa_message_id) WHERE wa_message_id IS NOT NULL
-                 DO UPDATE SET
-                   author = COALESCE(boss_whatsapp_messages.author, EXCLUDED.author),
-                   sender_name = COALESCE(boss_whatsapp_messages.sender_name, EXCLUDED.sender_name)`,
+               DO UPDATE SET
+                 author = COALESCE(boss_whatsapp_messages.author, EXCLUDED.author),
+                 sender_name = COALESCE(boss_whatsapp_messages.sender_name, EXCLUDED.sender_name),
+                 reply_to_wa_message_id = COALESCE(
+                   boss_whatsapp_messages.reply_to_wa_message_id,
+                   EXCLUDED.reply_to_wa_message_id
+                 )`,
               [chatId, data.id ?? null, direction, fromMe, author ?? null, senderName,
                data.body ?? null, data.type ?? 'text', mediaUrl,
                data.quotedMsgId ?? null, ackLabel(data.ack), sentAt],
@@ -372,7 +412,7 @@ export async function whatsappWebhookRoutes(server: FastifyInstance) {
         }
       } catch (err) {
         request.log.error({ err, event }, 'wa webhook: persistence failed');
-        // 200 anyway so OpenWA doesn't retry-storm.
+        // 200 anyway so the bridge doesn't retry-storm.
         return reply.status(200).send({ ok: true, persisted: false, error: 'persistence_failed' });
       }
     },

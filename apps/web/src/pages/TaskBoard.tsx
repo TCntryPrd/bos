@@ -6,7 +6,7 @@ export default function TaskBoard() {
   const initialNewTask = searchParams.get('new') === 'task';
 
   return (
-    <div className="aios-page planning-room-page aios-page-pad h-full min-h-0 flex flex-col">
+    <div className="aios-page planning-room-page aios-page-pad aios-frost-content h-full min-h-0 flex flex-col">
       <div className="planning-room-header">
         <div>
           <div className="vs-mono text-[10px] uppercase tracking-[0.24em] text-slate-500">War Room</div>

@@ -28,7 +28,7 @@ import { ALL_GOOGLE_TOOLS } from './google.js';
 import { ALL_CTO_TOOLS } from './cto.js';
 import { ALL_N8N_TOOLS } from './n8n.js';
 import { ALL_HA_TOOLS } from './homeassistant.js';
-import { ALL_SLACK_TOOLS } from './slack.js';
+import { ALL_SLACK_TOOLS, READONLY_SLACK_TOOLS } from './slack.js';
 import { ALL_TELEGRAM_TOOLS } from './telegram.js';
 import { ALL_NOTION_TOOLS } from './notion.js';
 import { ALL_MIRO_TOOLS } from './miro.js';
@@ -75,6 +75,7 @@ import { ALL_AGENT_EVAL_TOOLS } from './agent-evals.js';
 import { ALL_CLIENT_ROUTING_TOOLS } from './client-routing.js';
 import { filterToolsByTrust, type TrustTier } from './trust.js';
 import { getUnipileConnectionStatus, isUnipileConfigured } from '../lib/unipile.js';
+import { isWaBridgeConfigured } from '../lib/wa-bridge.js';
 
 // Passkey management is CLI-only — no brain tools. Admin uses terminal.
 
@@ -124,7 +125,10 @@ export async function getAvailableTools(
   // ── Slack ─────────────────────────────────────────────────────────────────
   // Available whenever SLACK_BOT_TOKEN (xoxb-...) is configured.
   if (process.env.SLACK_BOT_TOKEN) {
-    tools.push(...ALL_SLACK_TOOLS);
+    // Client boxes get READ-ONLY Slack: the bot token belongs to the operator's
+    // workspace, so an agent here must be able to pull from the approved
+    // channels but never post into them. SLACK_READONLY=true enforces that.
+    tools.push(...(process.env.SLACK_READONLY === 'true' ? READONLY_SLACK_TOOLS : ALL_SLACK_TOOLS));
   }
 
   // ── Meta (Facebook / Instagram / Threads / legacy WhatsApp Cloud / Ads) ─────
@@ -142,13 +146,12 @@ export async function getAvailableTools(
     // boss_meta_credentials not present yet — skip silently
   }
 
-  if (!metaToolsAdded && isUnipileConfigured()) {
-    try {
-      const whatsapp = await getUnipileConnectionStatus('WHATSAPP');
-      if (whatsapp.connected) tools.push(...ALL_WHATSAPP_TOOLS);
-    } catch {
-      // no Unipile WhatsApp account yet — skip silently
-    }
+  // ── WhatsApp (wa-bridge) ──────────────────────────────────────────────────
+  // Gated on bridge env config only — a cheap check, never a network call.
+  // The send handler surfaces pairing errors at call time if the session is
+  // not actually connected.
+  if (!metaToolsAdded && isWaBridgeConfigured()) {
+    tools.push(...ALL_WHATSAPP_TOOLS);
   }
 
   // ── LinkedIn ──────────────────────────────────────────────────────────────

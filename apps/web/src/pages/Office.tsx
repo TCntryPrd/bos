@@ -548,7 +548,7 @@ export default function Office() {
 
       <main className="office-room-grid relative z-10 grid h-full min-h-0 gap-3 overflow-x-hidden overflow-y-auto p-3 lg:overflow-hidden">
         <aside className="min-h-0 space-y-3 overflow-y-auto">
-          <section className="rounded-lg border border-white/16 bg-black/42 p-3 backdrop-blur-md">
+          <section className="aios-frost-surface--dark rounded-lg border border-white/16 bg-black/42 p-3 backdrop-blur-md">
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -570,7 +570,7 @@ export default function Office() {
             <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => saveAvatar(e.target.files?.[0] ?? null)} />
           </section>
 
-          <section className="rounded-lg border border-white/16 bg-black/42 p-3 backdrop-blur-md">
+          <section className="aios-frost-surface--dark rounded-lg border border-white/16 bg-black/42 p-3 backdrop-blur-md">
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs font-semibold"><History className="h-4 w-4" /> Conversations</div>
               <button type="button" onClick={createThread} className="rounded-md border border-white/14 p-1.5 text-white/78" title="New conversation">
@@ -601,7 +601,7 @@ export default function Office() {
         </aside>
 
         <section className="flex min-h-0 flex-col justify-end">
-          <div className="mb-3 max-w-3xl rounded-lg border border-white/16 bg-black/38 p-4 shadow-2xl backdrop-blur-md">
+          <div className="aios-frost-surface--dark mb-3 max-w-3xl rounded-lg border border-white/16 bg-black/38 p-4 shadow-2xl backdrop-blur-md">
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-white/78">
               <Radio className="h-4 w-4 text-emerald-300" />
               Live Office
@@ -611,11 +611,23 @@ export default function Office() {
             </div>
           </div>
 
-          <div className="max-w-3xl rounded-lg border border-white/16 bg-[#0d1114]/86 p-3 shadow-2xl backdrop-blur-xl">
-            <div className="mb-3 min-h-[52px] rounded-lg border border-white/10 bg-white/8 p-3 text-sm leading-relaxed text-white/82">
-              {transcript || interim || 'Speak to your EA.'}
-              {interim && <span className="text-white/45"> {interim}</span>}
-            </div>
+          <div className="aios-frost-surface--dark max-w-3xl rounded-lg border border-white/16 bg-[#0d1114]/86 p-3 shadow-2xl backdrop-blur-xl">
+            <textarea
+              value={transcript}
+              onChange={(e) => setTranscript(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void sendToEa();
+                }
+              }}
+              placeholder="Speak or type to your EA."
+              disabled={sending}
+              className="mb-3 h-[78px] w-full resize-none overflow-y-auto rounded-lg border border-white/10 bg-white/8 p-3 text-sm leading-relaxed text-white/82 placeholder:text-white/45 focus:border-emerald-300/50 focus:outline-none disabled:opacity-60"
+            />
+            {interim && (
+              <div className="-mt-2 mb-3 px-1 text-xs text-white/45">{interim}</div>
+            )}
             {attachments.length > 0 && (
               <div className="mb-3 grid gap-2 sm:grid-cols-2">
                 {attachments.map((attachment) => {
@@ -713,12 +725,12 @@ export default function Office() {
         </section>
 
         <aside className="min-h-0 space-y-3 overflow-y-auto">
-          <section className="rounded-lg border border-white/16 bg-black/42 p-3 backdrop-blur-md">
+          <section className="aios-frost-surface--dark rounded-lg border border-white/16 bg-black/42 p-3 backdrop-blur-md">
             <div className="mb-3 flex items-center gap-2 text-xs font-semibold"><PhoneIncoming className="h-4 w-4" /> Phone</div>
             <div className="space-y-2 text-xs text-white/68">
               <div className="flex items-center justify-between"><span>Inbound</span><span className={phoneReady ? 'text-emerald-300' : 'text-amber-200'}>{phoneReady ? 'ready' : 'pending'}</span></div>
               <div className="flex items-center justify-between"><span>Outbound</span><span className={outboundReady ? 'text-emerald-300' : 'text-amber-200'}>{outboundReady ? 'ready' : 'needs number'}</span></div>
-              <div className="flex items-center justify-between"><span>Caller</span><span>{twilio?.allowedCaller ?? 'locked'}</span></div>
+              <div className="flex items-center justify-between"><span>Caller</span><span>{twilio?.allowedCaller || 'Coming Soon'}</span></div>
             </div>
             <button
               type="button"
@@ -730,7 +742,7 @@ export default function Office() {
             </button>
           </section>
 
-          <section className="rounded-lg border border-white/16 bg-black/42 p-3 backdrop-blur-md">
+          <section className="aios-frost-surface--dark rounded-lg border border-white/16 bg-black/42 p-3 backdrop-blur-md">
             <div className="mb-3 text-xs font-semibold">History</div>
             <div className="space-y-2">
               {activity.map((item) => (

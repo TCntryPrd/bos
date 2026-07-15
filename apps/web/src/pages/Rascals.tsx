@@ -125,7 +125,7 @@ function DeskTag({ agent, index }: DeskTagProps) {
   return (
     <Link
       to={to}
-      className={`group absolute z-20 flex min-w-[88px] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-bold shadow-2xl ring-1 backdrop-blur-sm transition hover:-translate-y-[calc(50%+2px)] focus:outline-none focus:ring-2 focus:ring-emerald-200 sm:min-w-[96px] sm:text-[12px] ${
+      className={`aios-frost-surface${darkTag || highContrastTag ? '--dark' : ''} group absolute z-20 flex min-w-[88px] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-bold shadow-2xl ring-1 backdrop-blur-sm transition hover:-translate-y-[calc(50%+2px)] focus:outline-none focus:ring-2 focus:ring-emerald-200 sm:min-w-[96px] sm:text-[12px] ${
         highContrastTag
           ? 'border-[#ffe7a3]/95 bg-[#07140f]/96 text-white ring-[#ffe7a3]/35 hover:bg-[#0d2118]'
           : darkTag
@@ -160,7 +160,7 @@ interface OverflowDockProps {
 function OverflowDock({ title, agents }: OverflowDockProps) {
   if (agents.length === 0) return null;
   return (
-    <div className="rounded-lg border border-white/35 bg-white/55 p-3 text-[#15201d] shadow-xl backdrop-blur-xl">
+    <div className="aios-frost-surface rounded-lg border border-white/35 bg-white/55 p-3 text-[#15201d] shadow-xl backdrop-blur-xl">
       <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#53655d]">{title}</div>
       <div className="flex flex-wrap gap-2">
         {agents.map((agent) => (
@@ -188,7 +188,7 @@ function WallOfficeTag({ agent, index }: WallOfficeTagProps) {
   return (
     <Link
       to={`/agents/${agent.handle}`}
-      className="group absolute z-20 flex min-w-[90px] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-1.5 rounded-md border border-[#b7e2c8]/80 bg-[#12251f]/90 px-2.5 py-1.5 text-[10.5px] font-bold text-[#fff9e8] shadow-2xl ring-1 ring-white/15 backdrop-blur-md transition hover:-translate-y-[calc(50%+2px)] hover:bg-[#18352d] focus:outline-none focus:ring-2 focus:ring-amber-200"
+      className="aios-frost-surface--dark group absolute z-20 flex min-w-[90px] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-1.5 rounded-md border border-[#b7e2c8]/80 bg-[#12251f]/90 px-2.5 py-1.5 text-[10.5px] font-bold text-[#fff9e8] shadow-2xl ring-1 ring-white/15 backdrop-blur-md transition hover:-translate-y-[calc(50%+2px)] hover:bg-[#18352d] focus:outline-none focus:ring-2 focus:ring-amber-200"
       style={{
         left: position.left,
         top: position.top,
@@ -411,7 +411,7 @@ export function Rascals() {
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/14 via-transparent to-black/8" aria-hidden />
 
       <div className="relative z-10 h-full">
-        <div className="absolute right-3 top-3 z-30 flex items-center gap-2 rounded-full border border-white/24 bg-[#101815]/44 p-1.5 text-[#fff9e8] shadow-2xl backdrop-blur-md">
+        <div className="aios-frost-surface--dark absolute right-3 top-3 z-30 flex items-center gap-2 rounded-full border border-white/24 bg-[#101815]/44 p-1.5 text-[#fff9e8] shadow-2xl backdrop-blur-md">
           <div
             className="hidden items-center gap-1.5 rounded-full border border-white/14 bg-white/14 px-3 py-2 text-[11px] font-semibold text-white/88 sm:flex"
             title={`${rascalCount} client manager desks, ${staffCount} wall offices`}
@@ -448,7 +448,7 @@ export function Rascals() {
 
         <div className="absolute inset-0">
           {agents && agents.length === 0 ? (
-            <div className="absolute left-1/2 top-1/2 w-[min(520px,calc(100%-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/34 bg-white/68 p-6 text-[#15201d] shadow-xl backdrop-blur-md">
+            <div className="aios-frost-surface absolute left-1/2 top-1/2 w-[min(520px,calc(100%-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/34 bg-white/68 p-6 text-[#15201d] shadow-xl backdrop-blur-md">
               <EmptyState
                 title="No client managers yet"
                 description="Add a client manager to get started — give them a handle, a display name, and a role."

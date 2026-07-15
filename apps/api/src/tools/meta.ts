@@ -1,5 +1,6 @@
 /**
- * Meta (Facebook / Instagram / Threads / WhatsApp Cloud / Ads) brain tools.
+ * Meta (Facebook / Instagram / Threads / Ads) brain tools + the WhatsApp
+ * send tool (which routes through the WhatsApp bridge — lib/wa-bridge.ts — not Meta Cloud).
  *
  * Definitions + execution handlers live together here; executor.ts imports
  * META_TOOL_HANDLERS and spreads it into its TOOL_HANDLERS map, and index.ts
@@ -12,9 +13,9 @@ import type { BrainTool } from '@boss/brain';
 import {
   getMetaCreds, metaStatus,
   fbListConversations, fbGetMessages, fbSendMessage, fbPublishPost,
-  igPublishPost, threadsPublish, adsInsights, waCloudSend,
+  igPublishPost, threadsPublish, adsInsights,
 } from '../lib/meta-graph.js';
-import { isUnipileConfigured, startUnipileWhatsAppChat } from '../lib/unipile.js';
+import { isWaBridgeConfigured, phoneToChatId, sendWhatsAppTextAndPersist } from '../lib/wa-bridge.js';
 
 // ── Definitions ─────────────────────────────────────────────────────────────
 export const metaStatusTool: BrainTool = {
@@ -110,7 +111,7 @@ export const metaAdsInsightsTool: BrainTool = {
 
 export const metaWaSendTool: BrainTool = {
   name: 'meta_wa_send',
-  description: 'Send a WhatsApp text message through the connected Unipile WhatsApp account. to is an E.164 phone number, with or without "+".',
+  description: 'Send a WhatsApp text message through the connected WhatsApp session. to is an E.164 phone number, with or without "+".',
   parameters: {
     type: 'object',
     properties: {
@@ -238,17 +239,11 @@ async function handleWaSend(args: Record<string, unknown>): Promise<string> {
   const to = str(args.to);
   const text = str(args.text);
   if (!to || !text) return 'Error: to and text are required.';
-  if (isUnipileConfigured()) {
-    const sent = await startUnipileWhatsAppChat(to, text);
-    return `Sent WhatsApp message via Unipile to ${to}${sent.messageId ? ` (message_id ${sent.messageId})` : ''}.`;
+  if (!isWaBridgeConfigured()) {
+    return 'WhatsApp is not connected yet. Pair a phone on the WhatsApp page first.';
   }
-
-  const c = await creds();
-  if (!c.whatsapp.phoneNumberId || !c.whatsapp.accessToken) {
-    return 'WhatsApp is not connected through Unipile yet. Connect WhatsApp in Settings -> Connections first.';
-  }
-  await waCloudSend(c, to.replace(/^\+/, ''), text);
-  return `Sent WhatsApp Cloud message to ${to}.`;
+  const sent = await sendWhatsAppTextAndPersist(phoneToChatId(to), text);
+  return `Sent WhatsApp message to ${to}${sent.messageId ? ` (message_id ${sent.messageId})` : ''}.`;
 }
 
 export const META_TOOL_HANDLERS: Record<string, Handler> = {

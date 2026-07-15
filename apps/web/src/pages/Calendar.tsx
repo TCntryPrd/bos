@@ -575,7 +575,7 @@ export function Calendar() {
   // ── Render ─────────────────────────────────────────────────────
 
   return (
-    <div className="aios-page aios-page-pad flex flex-col h-full min-h-0 gap-3">
+    <div className="aios-page aios-page-pad aios-frost-content flex flex-col h-full min-h-0 gap-3">
       {/* Header */}
       <div className="aios-command-hero flex-shrink-0 flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="flex items-center gap-3">

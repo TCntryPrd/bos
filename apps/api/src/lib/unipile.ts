@@ -1,4 +1,16 @@
-export type UnipileProvider = 'LINKEDIN' | 'WHATSAPP';
+/**
+ * Unipile client — LinkedIn ONLY.
+ *
+ * WhatsApp was removed from Unipile entirely (2026-07): WhatsApp now runs on
+ * the WhatsApp bridge (lib/wa-bridge.ts). Unipile serves exactly one provider here —
+ * LINKEDIN — for connection status, hosted-auth links, and post publishing.
+ * Do not reintroduce chat/messaging helpers or a WHATSAPP provider.
+ *
+ * Credentials on this box come from the environment only (UNIPILE_BASE_URL /
+ * UNIPILE_API_KEY). There is no runtime_config fallback here — do not add one
+ * without also adding lib/unipile-config.ts.
+ */
+export type UnipileProvider = 'LINKEDIN';
 
 export interface UnipileAccount {
   id: string;
@@ -19,41 +31,6 @@ export interface UnipileConnectionStatus {
   accountType: string | null;
   health: string;
   checkedAt: string;
-}
-
-export interface UnipileChat {
-  id: string;
-  account_id?: string;
-  account_type?: string;
-  provider_id?: string;
-  attendee_provider_id?: string;
-  attendee?: Record<string, unknown> | null;
-  attendees?: Array<Record<string, unknown>>;
-  name?: string | null;
-  subject?: string | null;
-  timestamp?: string | null;
-  unread_count?: number;
-  archived?: number | boolean;
-  type?: number | string | null;
-}
-
-export interface UnipileMessage {
-  id?: string;
-  message_id?: string | null;
-  account_id?: string;
-  chat_id?: string;
-  sender_id?: string;
-  sender?: Record<string, unknown> | null;
-  attendee?: Record<string, unknown> | null;
-  sender_name?: string | null;
-  sender_full_name?: string | null;
-  text?: string | null;
-  timestamp?: string;
-  is_sender?: number | boolean;
-  message_type?: string;
-  attachments?: unknown[];
-  delivered?: number | boolean;
-  seen?: number | boolean;
 }
 
 export interface UnipilePostMedia {
@@ -83,7 +60,11 @@ function normalizeBaseUrl(value: string): string {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
-export function getUnipileConfig(): UnipileConfig | null {
+/**
+ * Async only so call sites read the same as the boxes that resolve Unipile
+ * credentials from runtime_config. Here it is a pure environment read.
+ */
+export async function getUnipileConfig(): Promise<UnipileConfig | null> {
   const baseUrl = normalizeBaseUrl(envValue(['UNIPILE_BASE_URL', 'UNIPILE_API_URL', 'UNIPILE_DSN']));
   const apiKey = envValue(['UNIPILE_API_KEY', 'UNIPILE_TOKEN']);
   if (!baseUrl || !apiKey) return null;
@@ -91,11 +72,13 @@ export function getUnipileConfig(): UnipileConfig | null {
 }
 
 export function isUnipileConfigured(): boolean {
-  return Boolean(getUnipileConfig());
+  const baseUrl = normalizeBaseUrl(envValue(['UNIPILE_BASE_URL', 'UNIPILE_API_URL', 'UNIPILE_DSN']));
+  const apiKey = envValue(['UNIPILE_API_KEY', 'UNIPILE_TOKEN']);
+  return Boolean(baseUrl && apiKey);
 }
 
 async function unipileFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const config = getUnipileConfig();
+  const config = await getUnipileConfig();
   if (!config) throw new Error('Unipile is not configured.');
 
   const headers = new Headers(init.headers);
@@ -136,10 +119,8 @@ function accountMatches(account: UnipileAccount, provider: UnipileProvider): boo
   return type === provider || type.includes(provider);
 }
 
-function preferredAccountId(provider: UnipileProvider): string {
-  return provider === 'LINKEDIN'
-    ? envValue(['UNIPILE_LINKEDIN_ACCOUNT_ID'])
-    : envValue(['UNIPILE_WHATSAPP_ACCOUNT_ID']);
+function preferredAccountId(): string {
+  return envValue(['UNIPILE_LINKEDIN_ACCOUNT_ID']);
 }
 
 function accountHealth(account: UnipileAccount | null): string {
@@ -165,7 +146,7 @@ export async function listUnipileAccounts(limit = 250): Promise<UnipileAccount[]
 
 export async function findUnipileAccount(provider: UnipileProvider): Promise<UnipileAccount | null> {
   const accounts = await listUnipileAccounts();
-  const preferred = preferredAccountId(provider);
+  const preferred = preferredAccountId();
   if (preferred) {
     const match = accounts.find((account) => account.id === preferred);
     if (match) return match;
@@ -175,7 +156,7 @@ export async function findUnipileAccount(provider: UnipileProvider): Promise<Uni
 }
 
 export async function getUnipileConnectionStatus(provider: UnipileProvider): Promise<UnipileConnectionStatus> {
-  const configured = isUnipileConfigured();
+  const configured = Boolean(await getUnipileConfig());
   const checkedAt = new Date().toISOString();
   if (!configured) {
     return {
@@ -204,25 +185,25 @@ export async function getUnipileConnectionStatus(provider: UnipileProvider): Pro
 
 export async function getUnipileStatus(): Promise<{ configured: boolean; accounts: UnipileConnectionStatus[]; checkedAt: string }> {
   const checkedAt = new Date().toISOString();
-  if (!isUnipileConfigured()) {
+  if (!await getUnipileConfig()) {
     return {
       configured: false,
       checkedAt,
-      accounts: [
-        await getUnipileConnectionStatus('LINKEDIN'),
-        await getUnipileConnectionStatus('WHATSAPP'),
-      ],
+      accounts: [await getUnipileConnectionStatus('LINKEDIN')],
     };
   }
 
   const accounts = await listUnipileAccounts();
-  const statusFor = (provider: UnipileProvider): UnipileConnectionStatus => {
-    const preferred = preferredAccountId(provider);
-    const account = preferred
-      ? accounts.find((item) => item.id === preferred) ?? { id: preferred, type: provider, name: null }
-      : accounts.find((item) => accountMatches(item, provider)) ?? null;
-    return {
-      provider,
+  const preferred = preferredAccountId();
+  const account = preferred
+    ? accounts.find((item) => item.id === preferred) ?? { id: preferred, type: 'LINKEDIN', name: null }
+    : accounts.find((item) => accountMatches(item, 'LINKEDIN')) ?? null;
+
+  return {
+    configured: true,
+    checkedAt,
+    accounts: [{
+      provider: 'LINKEDIN',
       configured: true,
       connected: Boolean(account?.id),
       accountId: account?.id ?? null,
@@ -230,13 +211,7 @@ export async function getUnipileStatus(): Promise<{ configured: boolean; account
       accountType: account?.type ?? null,
       health: accountHealth(account),
       checkedAt,
-    };
-  };
-
-  return {
-    configured: true,
-    checkedAt,
-    accounts: [statusFor('LINKEDIN'), statusFor('WHATSAPP')],
+    }],
   };
 }
 
@@ -250,7 +225,7 @@ export async function createUnipileHostedAuthLink(
     expiresOn?: string;
   } = {},
 ): Promise<{ url: string }> {
-  const config = getUnipileConfig();
+  const config = await getUnipileConfig();
   if (!config) throw new Error('Unipile is not configured.');
   const expiresOn = options.expiresOn ?? new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
   const body = {
@@ -271,55 +246,6 @@ export async function createUnipileHostedAuthLink(
   });
   if (!data.url) throw new Error('Unipile did not return a hosted auth URL.');
   return { url: data.url };
-}
-
-export async function listUnipileChats(provider: UnipileProvider, limit = 100): Promise<UnipileChat[]> {
-  const account = await findUnipileAccount(provider);
-  if (!account?.id) return [];
-  const safeLimit = Math.min(Math.max(Math.trunc(limit) || 100, 1), 200);
-  const params = new URLSearchParams({
-    limit: String(safeLimit),
-    account_id: account.id,
-    account_type: provider,
-  });
-  const data = await unipileFetch<{ items?: UnipileChat[] }>(`/api/v1/chats?${params.toString()}`);
-  return Array.isArray(data.items) ? data.items : [];
-}
-
-export async function listUnipileChatMessages(chatId: string, limit = 50): Promise<UnipileMessage[]> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  const data = await unipileFetch<{ items?: UnipileMessage[] }>(
-    `/api/v1/chats/${encodeURIComponent(chatId)}/messages?${params.toString()}`,
-  );
-  const messages = Array.isArray(data.items) ? data.items : [];
-  return messages.sort((a, b) => String(a.timestamp ?? '').localeCompare(String(b.timestamp ?? '')));
-}
-
-export async function sendUnipileChatMessage(chatId: string, text: string, accountId?: string): Promise<{ messageId: string | null }> {
-  const form = new FormData();
-  form.set('text', text);
-  if (accountId) form.set('account_id', accountId);
-  const data = await unipileFetch<{ message_id?: string | null }>(
-    `/api/v1/chats/${encodeURIComponent(chatId)}/messages`,
-    { method: 'POST', body: form },
-  );
-  return { messageId: data.message_id ?? null };
-}
-
-export async function startUnipileWhatsAppChat(phone: string, text: string): Promise<{ chatId: string | null; messageId: string | null; accountId: string }> {
-  const account = await findUnipileAccount('WHATSAPP');
-  if (!account?.id) throw new Error('Unipile WhatsApp is not connected.');
-  const digits = phone.replace(/\D/g, '');
-  if (!digits) throw new Error('A phone number is required.');
-  const form = new FormData();
-  form.set('account_id', account.id);
-  form.set('text', text);
-  form.append('attendees_ids', `${digits}@s.whatsapp.net`);
-  const data = await unipileFetch<{ chat_id?: string | null; message_id?: string | null }>('/api/v1/chats', {
-    method: 'POST',
-    body: form,
-  });
-  return { chatId: data.chat_id ?? null, messageId: data.message_id ?? null, accountId: account.id };
 }
 
 async function mediaToBlob(media: UnipilePostMedia): Promise<{ blob: Blob; filename: string }> {

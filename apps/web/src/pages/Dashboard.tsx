@@ -2421,14 +2421,24 @@ function WhatsAppPanel({ state }: { state: WhatsAppState }) {
   );
 }
 
+// Unipile is LinkedIn-ONLY. WhatsApp connection state comes from
+// /api/whatsapp/status (wa-bridge) — see WhatsAppConnStatus below.
 interface UnipileDashboardStatus {
   configured: boolean;
   accounts: Array<{
-    provider: 'LINKEDIN' | 'WHATSAPP';
+    provider: 'LINKEDIN';
     connected: boolean;
     name: string | null;
     health: string;
   }>;
+}
+
+interface WhatsAppConnStatus {
+  provider: 'baileys';
+  configured: boolean;
+  paired: boolean;
+  session: { status: 'ready' | 'scan_qr' | 'starting' | 'error'; phone?: string };
+  disclaimerAcceptedAt: string | null;
 }
 
 function LinkedInLaunchTile({ unipile }: { unipile: UnipileDashboardStatus | null }) {
@@ -2471,9 +2481,8 @@ function LinkedInLaunchTile({ unipile }: { unipile: UnipileDashboardStatus | nul
   );
 }
 
-function WhatsAppLaunchTile({ whatsappState, unipile }: { whatsappState: WhatsAppState; unipile: UnipileDashboardStatus | null }) {
+function WhatsAppLaunchTile({ whatsappState, wa }: { whatsappState: WhatsAppState; wa: WhatsAppConnStatus | null }) {
   const navigate = useNavigate();
-  const whatsapp = unipile?.accounts?.find((account) => account.provider === 'WHATSAPP');
   const unread = whatsappState.list.reduce((sum, thread) => sum + thread.unread_count, 0);
 
   return (
@@ -2495,7 +2504,7 @@ function WhatsAppLaunchTile({ whatsappState, unipile }: { whatsappState: WhatsAp
             <span className="text-[14px] font-semibold">WhatsApp Inbox</span>
           </div>
           <div className="mt-1 text-[12px]" style={{ color: DASH.textMuted }}>
-            {whatsappState.loaded ? `${whatsappState.list.length} live Unipile threads` : 'Loading live Unipile threads'}
+            {whatsappState.loaded ? `${whatsappState.list.length} live threads` : 'Loading live threads'}
           </div>
         </div>
         <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" style={{ color: DASH.textMuted }} />
@@ -2504,8 +2513,8 @@ function WhatsAppLaunchTile({ whatsappState, unipile }: { whatsappState: WhatsAp
         <span className="text-[28px] font-semibold">{whatsappState.loaded ? unread : '-'}</span>
         <span className="text-[12px]" style={{ color: DASH.textMuted }}>unread</span>
       </div>
-      <div className="mt-1 vs-mono text-[10px] uppercase tracking-[0.14em]" style={{ color: !!whatsapp?.connected ? '#25D366' : DASH.textMuted }}>
-        {whatsapp?.connected ? `Connected via Unipile${whatsapp.health ? ` - ${whatsapp.health}` : ''}` : 'Not connected'}
+      <div className="mt-1 vs-mono text-[10px] uppercase tracking-[0.14em]" style={{ color: !!wa?.paired ? '#25D366' : DASH.textMuted }}>
+        {wa?.paired ? `Connected via WhatsApp bridge${wa.session?.phone ? ` - ${wa.session.phone}` : ''}` : 'Not connected'}
       </div>
     </button>
   );
@@ -2753,7 +2762,7 @@ function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
       accent="linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)"
       className="flex-1"
       meta={
-        <span className="vs-mono text-[10px]" style={{ color: '#9AA8C2' }} data-testid="timeline-meta">
+        <span className="vs-mono text-[11px]" style={{ color: '#36526D' }} data-testid="timeline-meta">
           {loading
             ? 'LOADING…'
             : `${youBlocks.length} EVENTS · ${Object.values(taskByAgent).reduce((s, b) => s + b.length, 0)} TASKS`}
@@ -2762,13 +2771,13 @@ function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
     >
       <div className="px-3.5 pt-2.5 pb-4 relative" data-testid="timeline-panel">
         {empty && (
-          <div className="text-[12px] italic py-3" style={{ color: '#74849A' }}>
+          <div className="text-[13px] italic py-3" style={{ color: '#36526D' }}>
             No events or tasks scheduled in the {startH}–{endH}:00 window today.
           </div>
         )}
         {!empty && (
           <>
-            <div className="flex relative h-4 ml-[110px]" style={{ color: '#74849A' }}>
+            <div className="flex relative h-4 ml-[110px]" style={{ color: '#36526D' }}>
               {hours.map((h) => (
                 <div key={h} className="vs-mono flex-1 text-[10px]">
                   {h}:00
@@ -2810,10 +2819,10 @@ function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
                       style={{ background: 'linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)' }}
                     />
                   )}
-                  <span className="text-[11px] truncate" style={{ color: '#F1F4FF' }}>
+                  <span className="text-[12px] truncate" style={{ color: '#102A43' }}>
                     {lane.title}
                     {lane.allDay ? (
-                      <span className="vs-mono ml-1 text-[9px]" style={{ color: '#74849A' }}>
+                      <span className="vs-mono ml-1 text-[10px]" style={{ color: '#36526D' }}>
                         +{lane.allDay}d
                       </span>
                     ) : null}
@@ -2854,7 +2863,7 @@ function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
                       key={`${lane.agent ?? 'you'}-${bi}`}
                       {...(b.href ? { href: b.href, target: '_blank', rel: 'noreferrer' } : {})}
                       title={b.href ? `${b.label} — open in Google Calendar` : b.label}
-                      className="absolute flex items-center gap-1.5 rounded-md text-[10.5px] px-2 truncate"
+                      className="absolute flex items-center gap-1.5 rounded-md text-[11.5px] px-2 truncate"
                       style={{
                         top: b.row * (rowHeight + rowGap),
                         height: rowHeight,
@@ -2862,7 +2871,7 @@ function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
                         width: `calc(${Math.max(2, pct(b.endH) - pct(b.startH))}% - 2px)`,
                         background: `linear-gradient(135deg, ${b.hue}44, ${b.hue}22)`,
                         border: `1px solid ${b.hue}88`,
-                        color: '#F1F4FF',
+                        color: '#102A43',
                         boxShadow: `inset 0 0 12px ${b.hue}22`,
                         cursor: b.href ? 'pointer' : 'default',
                         textDecoration: 'none',
@@ -4658,6 +4667,7 @@ export default function Dashboard() {
   const stageRef = useRef<HTMLDivElement>(null);
   const empAgents = useEmployeeAgents();
   const { data: unipileStatus } = usePolledJson<UnipileDashboardStatus>('api/unipile/status', 30_000);
+  const { data: waStatus } = usePolledJson<WhatsAppConnStatus>('api/whatsapp/status', 30_000);
   const automationsTotal =
     (automationsState.data?.n8n.status?.total ?? 0) +
     (automationsState.data?.make.status?.total ?? 0);
@@ -4709,7 +4719,7 @@ export default function Dashboard() {
     const whatsappUnread = whatsappState.list.reduce((sum, thread) => sum + thread.unread_count, 0);
     const slackOpen = slackAttentionState.list.length;
     const linkedin = unipileStatus?.accounts?.find((account) => account.provider === 'LINKEDIN');
-    const whatsapp = unipileStatus?.accounts?.find((account) => account.provider === 'WHATSAPP');
+    const whatsappPaired = !!waStatus?.paired;
     const nextEvent = [...calendarState.list]
       .filter((e) => e.start && new Date(e.start).getTime() >= Date.now())
       .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())[0];
@@ -4882,13 +4892,13 @@ export default function Dashboard() {
         key: 'whatsapp',
         label: 'WhatsApp',
         display: whatsappState.loaded ? `${whatsappUnread} unread` : 'loading WhatsApp',
-        status: !whatsappState.loaded ? 'neutral' : whatsappUnread > 0 ? 'attention' : whatsapp?.connected ? 'good' : 'watch',
-        source: 'Unipile',
+        status: !whatsappState.loaded ? 'neutral' : whatsappUnread > 0 ? 'attention' : whatsappPaired ? 'good' : 'watch',
+        source: 'WhatsApp Bridge · Baileys',
         route: '/whatsapp',
-        hint: whatsapp?.connected ? `WhatsApp: ${whatsapp.name ?? 'connected'}` : 'Open WhatsApp to reconnect.',
+        hint: whatsappPaired ? `WhatsApp: ${waStatus?.session?.phone ?? 'connected'}` : 'Open WhatsApp to pair.',
         details: whatsappState.list.length > 0
           ? whatsappState.list.slice(0, 5).map((thread) => `${thread.display_name ?? thread.phone ?? 'Thread'}: ${thread.unread_count} unread`)
-          : [`Health: ${whatsapp?.health ?? 'unknown'}`],
+          : [`Session: ${waStatus?.session?.status ?? 'unknown'}`],
       },
       {
         key: 'automations',
@@ -4948,6 +4958,7 @@ export default function Dashboard() {
     tasksState,
     tasksToday,
     unipileStatus,
+    waStatus,
     whatsappState,
   ]);
 
@@ -5002,7 +5013,7 @@ export default function Dashboard() {
       />
     ),
     launch_linkedin: <LinkedInLaunchTile unipile={unipileStatus} />,
-    launch_whatsapp: <WhatsAppLaunchTile whatsappState={whatsappState} unipile={unipileStatus} />,
+    launch_whatsapp: <WhatsAppLaunchTile whatsappState={whatsappState} wa={waStatus} />,
     agents:   <AgentRoster />,
     tasks:    <KanbanPeek state={tasksState} />,
     activity: <LiveActivity state={recentActivityState} />,

@@ -9,6 +9,7 @@ volumes:
     external: true
     name: boss-ir_weaviate_data
   stt_models: {}
+  wa_bridge_session: {}
   omnivoice_data: {}
 
 services:
@@ -28,14 +29,21 @@ services:
   api:
     environment:
       BOSS_BACKGROUND_AGENTS: "on"
+      SLACK_READONLY: "true"
+      SLACK_STRICT_CHANNELS: "true"
       OMNIVOICE_URL: http://omnivoice:3900
       OMNIVOICE_ENGINE: kittentts
       OMNIVOICE_TIMEOUT_MS: '120000'
       PUBLIC_BASE_URL: https://ircustomdashboards.tech
+      GOOGLE_REDIRECT_URI: https://ircustomdashboards.tech/api/connectors/oauth/google/callback
       BOSS_HOST_BRIDGE_HOST: bosops@host.docker.internal
       BOSS_HOST_BRIDGE_KEY: /data/home/.ssh/boss-host-bridge
       BOSS_GIO_WORKSPACE: /home/boss/gio
       BOSS_GIO_ATTACHMENT_ROOT: /home/boss/gio/.tmp
+      WA_BRIDGE_URL: http://wa-bridge:2785/api
+      WA_BRIDGE_SESSION_ID: ${WA_BRIDGE_SESSION_ID}
+      WA_BRIDGE_API_KEY: ${WA_BRIDGE_API_KEY}
+      WA_BRIDGE_WEBHOOK_TOKEN: ${WA_BRIDGE_WEBHOOK_TOKEN}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -134,6 +142,7 @@ services:
       DATABASE_URL: postgresql://boss:${POSTGRES_PASSWORD}@postgres:5432/boss_ir
       DB_SCHEMA: unipile
       PUBLIC_BASE_URL: https://ircustomdashboards.tech
+      GOOGLE_REDIRECT_URI: https://ircustomdashboards.tech/api/connectors/oauth/google/callback
       TZ: America/Chicago
     command: ["api"]
     ports:
@@ -160,6 +169,7 @@ services:
       DATABASE_URL: postgresql://boss:${POSTGRES_PASSWORD}@postgres:5432/boss_ir
       DB_SCHEMA: unipile
       PUBLIC_BASE_URL: https://ircustomdashboards.tech
+      GOOGLE_REDIRECT_URI: https://ircustomdashboards.tech/api/connectors/oauth/google/callback
       TZ: America/Chicago
     command: ["worker"]
     depends_on:
@@ -168,3 +178,22 @@ services:
       unipile:
         condition: service_healthy
 
+  wa-bridge:
+    build:
+      context: ./services/wa-bridge
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      WA_BRIDGE_API_KEY: ${WA_BRIDGE_API_KEY}
+      WA_BRIDGE_SESSION_ID: ${WA_BRIDGE_SESSION_ID}
+      WA_BRIDGE_WEBHOOK_URL: http://api:8001/api/webhooks/whatsapp
+      WA_BRIDGE_WEBHOOK_TOKEN: ${WA_BRIDGE_WEBHOOK_TOKEN}
+      TZ: America/Chicago
+    volumes:
+      - wa_bridge_session:/data/session
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:2785/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s

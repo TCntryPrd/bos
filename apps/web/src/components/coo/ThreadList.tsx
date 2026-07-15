@@ -20,7 +20,7 @@ export function ThreadList({ threads, activeId, isLoading, onPick, onRename, onD
   const atCap = threads.length >= MAX_THREADS;
 
   return (
-    <aside className="aios-panel p-2 flex flex-col gap-1 overflow-y-auto">
+    <aside className="aios-frost-surface--dark aios-panel p-2 flex flex-col gap-1 overflow-y-auto">
       <div className="flex items-center justify-between px-2 pt-1 pb-2">
         <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-info">
           Threads <span className="text-text-muted">{threads.length}/{MAX_THREADS}</span>

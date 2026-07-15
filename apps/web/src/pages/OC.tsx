@@ -20,7 +20,7 @@ import { KanbanBoard } from '../components/kanban/KanbanBoard.js';
 const T = {
   bg: '#05060F',
   panel: '#0B0E1D',
-  panel2: '#11152E',
+  panel2: 'var(--aios-frost-dark, #11152E)',
   panel3: '#181D3A',
   border: '#232A4D',
   borderSoft: 'rgba(139,92,246,0.16)',
@@ -286,7 +286,7 @@ function Panel({ title, icon: Icon, children, action }: {
   action?: React.ReactNode;
 }) {
   return (
-    <section className="aios-panel min-h-0 flex flex-col">
+    <section className="aios-frost-surface--dark aios-panel min-h-0 flex flex-col">
       <header className="h-9 px-3 flex items-center gap-2 border-b" style={{ borderColor: T.borderSoft }}>
         <Icon className="h-3.5 w-3.5" style={{ color: T.violet }} />
         <h2 className="text-xs font-semibold flex-1" style={{ color: T.text }}>{title}</h2>
@@ -309,7 +309,7 @@ function TopBar({ overview, loading, mode, setMode }: {
   const backend = overview?.gateway === 'live' ? 'ok' : overview?.gateway === 'down' ? 'error' : 'idle';
   const [codexName] = useAgentName('codex');
   return (
-    <header className="h-14 px-4 flex items-center gap-3 border-b shrink-0" style={{ background: T.panel, borderColor: T.border }}>
+    <header className="aios-frost-surface--dark h-14 px-4 flex items-center gap-3 border-b shrink-0" style={{ background: T.panel, borderColor: T.border }}>
       <div className="h-9 w-9 rounded flex items-center justify-center" style={{ background: T.violetDim, border: `1px solid ${T.border}` }}>
         <Sparkles className="h-4 w-4" style={{ color: T.violet }} />
       </div>

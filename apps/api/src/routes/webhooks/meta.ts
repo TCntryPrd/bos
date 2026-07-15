@@ -12,7 +12,7 @@
  *        raw body with META_APP_SECRET (env, mirrored from creds; falls back to
  *        the decrypted app secret) and reject mismatches. Successful deliveries
  *        are persisted to boss_meta_events and fanned out per product:
- *          - whatsapp_business_account → boss_whatsapp_* (source-agnostic w/ OpenWA)
+ *          - whatsapp_business_account → boss_whatsapp_* (source-agnostic w/ the WhatsApp bridge)
  *          - page (Messenger)          → boss_fb_threads / boss_fb_messages
  *          - instagram (DMs)           → boss_fb_threads (platform='instagram')
  *        then 200 within Meta's 2-second window.

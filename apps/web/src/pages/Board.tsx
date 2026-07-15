@@ -212,7 +212,7 @@ function Seat({
         )}
         <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/70 to-transparent" />
       </div>
-      <div className="max-w-[180px] rounded-md border border-white/14 bg-black/64 px-2.5 py-1 text-center text-[11px] font-medium leading-tight text-white/88 shadow-xl backdrop-blur-md">
+      <div className="aios-frost-surface--dark max-w-[180px] rounded-md border border-white/14 bg-black/64 px-2.5 py-1 text-center text-[11px] font-medium leading-tight text-white/88 shadow-xl backdrop-blur-md">
         <div className="truncate">{advisor.display_name}</div>
         {advisor.title && <div className="truncate text-[9px] text-white/58">{advisor.title}</div>}
       </div>
@@ -275,7 +275,8 @@ export default function Board() {
 
   const selected = useMemo(() => advisors.find((advisor) => advisor.id === selectedId) ?? null, [advisors, selectedId]);
   const visibleAdvisors = orderedAdvisors(advisors).slice(0, SEAT_POSITIONS.length);
-  const emptySeatCount = Math.max(0, Math.min(SEAT_POSITIONS.length - visibleAdvisors.length, 1));
+  // Keep the boardroom scene clear; advisors are added from the header control.
+  const emptySeatCount = 0;
 
   const loadBoard = useCallback(() => {
     api<{ board: { name: string } | null; advisors: Advisor[] }>('api/board')
@@ -537,7 +538,7 @@ export default function Board() {
       <main className={`relative z-10 grid h-full min-h-0 gap-3 p-3 ${showSidePanel ? 'grid-cols-[minmax(0,1fr)_340px]' : 'grid-cols-1'}`}>
         <section className="relative min-h-0 overflow-hidden">
           <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
-            <div className="rounded-lg border border-white/14 bg-black/46 px-3 py-2 shadow-xl backdrop-blur-md">
+            <div className="aios-frost-surface--dark rounded-lg border border-white/14 bg-black/46 px-3 py-2 shadow-xl backdrop-blur-md">
               <div className="text-[10px] uppercase tracking-[0.24em] text-white/56">Your</div>
               <div className="text-sm font-semibold">{boardName}</div>
             </div>
@@ -588,7 +589,7 @@ export default function Board() {
           </div>
 
           <div
-            className="absolute bottom-4 z-20 w-[min(920px,calc(100%-36px))] -translate-x-1/2 rounded-lg border border-white/16 bg-[#090d10]/78 p-3 shadow-2xl backdrop-blur-xl"
+            className="aios-frost-surface--dark absolute bottom-4 z-20 w-[min(920px,calc(100%-36px))] -translate-x-1/2 rounded-lg border border-white/16 bg-[#090d10]/78 p-3 shadow-2xl backdrop-blur-xl"
             style={{ left: TABLE_CENTER_LEFT }}
           >
             <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -675,7 +676,7 @@ export default function Board() {
         </section>
 
         {showSidePanel && (
-        <aside className="flex min-h-0 flex-col rounded-lg border border-white/14 bg-black/40 shadow-2xl backdrop-blur-xl">
+        <aside className="aios-frost-surface--dark flex min-h-0 flex-col rounded-lg border border-white/14 bg-black/40 shadow-2xl backdrop-blur-xl">
             <>
               <div className="border-b border-white/10 p-4">
                 {selected ? (

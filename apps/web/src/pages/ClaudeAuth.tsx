@@ -176,7 +176,7 @@ export function ClaudeAuth() {
           </div>
         </section>
 
-        <section className="aios-workbench flex min-h-0 flex-1 flex-col bg-[#080b10]">
+        <section className="aios-frost-surface--dark aios-workbench flex min-h-0 flex-1 flex-col bg-[#080b10]">
           <div className="flex items-center gap-2 border-b border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
             <Terminal className="h-4 w-4" aria-hidden />
             <span className="font-mono">claude</span>

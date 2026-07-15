@@ -171,7 +171,7 @@ function twilioCredentials() {
   const authToken = process.env.TWILIO_AUTH_TOKEN || '';
   const apiKeySid = process.env.TWILIO_API_KEY_SID || '';
   const fromNumber = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM_NUMBER || '';
-  const allowedCaller = process.env.TWILIO_ALLOWED_CALLER || '+15397777906';
+  const allowedCaller = process.env.TWILIO_ALLOWED_CALLER || '';
   return {
     accountSid,
     authToken,

@@ -49,19 +49,19 @@ declare global {
 }
 
 const SOFT_BLUE_GLASS: React.CSSProperties = {
-  background: 'linear-gradient(145deg, rgba(226, 248, 255, 0.88), rgba(196, 235, 251, 0.82))',
+  background: 'var(--aios-frost-light, rgb(242 244 247 / .55))',
   backdropFilter: 'blur(18px) saturate(1.14)',
   WebkitBackdropFilter: 'blur(18px) saturate(1.14)',
 };
 
 const SOFT_BLUE_GLASS_HEADER: React.CSSProperties = {
-  background: 'linear-gradient(145deg, rgba(211, 242, 255, 0.94), rgba(181, 225, 246, 0.9))',
+  background: 'var(--aios-frost-light, rgb(242 244 247 / .55))',
   backdropFilter: 'blur(14px) saturate(1.16)',
   WebkitBackdropFilter: 'blur(14px) saturate(1.16)',
 };
 
 const SOFT_BLUE_GLASS_BODY: React.CSSProperties = {
-  background: 'rgba(223, 247, 255, 0.9)',
+  background: 'var(--aios-frost-light, rgb(242 244 247 / .55))',
   backdropFilter: 'blur(12px) saturate(1.08)',
   WebkitBackdropFilter: 'blur(12px) saturate(1.08)',
 };
@@ -1452,7 +1452,7 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
           </div>
         ) : null}
 
-        <header className="absolute left-4 right-4 top-4 z-30 flex items-center gap-3 rounded-lg border border-white/18 bg-[#101714]/62 px-4 py-3 shadow-2xl backdrop-blur-xl">
+        <header className="aios-frost-surface--dark absolute left-4 right-4 top-4 z-30 flex items-center gap-3 rounded-lg border border-white/18 bg-[#101714]/62 px-4 py-3 shadow-2xl backdrop-blur-xl">
           <Link to={cfg.indexRoute} className="inline-flex items-center gap-1 text-[12px] text-white/68 hover:text-white" aria-label={`Back to ${cfg.indexLabel.toLowerCase()}`}>
             <ArrowLeft className="h-3.5 w-3.5" /> {cfg.indexLabel}
           </Link>
@@ -1547,7 +1547,7 @@ function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
   return (
     <div
       data-testid={cfg.testid}
-      className={deskVisit ? 'flex h-full flex-1 flex-col gap-3 overflow-hidden p-4 text-white' : 'flex h-full flex-1 flex-col'}
+      className={deskVisit ? 'aios-frost-content flex h-full flex-1 flex-col gap-3 overflow-hidden p-4 text-white' : 'aios-frost-content flex h-full flex-1 flex-col'}
     >
       {auth.expired ? (
         <div className="bg-warning/15 border-b border-warning/40 text-warning px-4 py-2 text-[12px]">

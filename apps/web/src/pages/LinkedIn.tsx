@@ -595,7 +595,7 @@ export default function LinkedInPage() {
   };
 
   return (
-    <div className="aios-page aios-page-pad h-full overflow-auto text-text-primary">
+    <div className="aios-page aios-page-pad aios-frost-content h-full overflow-auto text-text-primary">
       <header className="aios-command-hero mb-5 flex flex-col gap-4 px-4 py-3 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <div className="vs-mono text-[11px] uppercase tracking-[0.22em] text-text-muted">LinkedIn system</div>

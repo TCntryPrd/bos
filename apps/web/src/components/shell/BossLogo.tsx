@@ -12,19 +12,27 @@ import { isPlainBrand } from '../../lib/brand';
  * The badge is black artwork, so `.ir-mark` is inverted to white in the dark
  * (Executive) theme (see index.css).
  */
-export function BossMark({ scale = 1, collapsed = false }: { scale?: number; collapsed?: boolean }) {
+export function BossMark({
+  scale = 1,
+  collapsed = false,
+  centered = false,
+}: { scale?: number; collapsed?: boolean; centered?: boolean }) {
   const size = 28 * scale;
   const name = getAiosName();
+  const centeredLockup = centered && !collapsed;
   return (
-    <div className="flex items-center" style={{ gap: 10 * scale }}>
+    <div
+      className={centeredLockup ? 'relative flex w-full items-center justify-center' : 'flex items-center'}
+      style={centeredLockup ? undefined : { gap: 10 * scale }}
+    >
       <img
         src={irBadge}
         alt="Industry Rockstar"
-        className="ir-mark flex-shrink-0 object-contain"
+        className={`ir-mark flex-shrink-0 object-contain${centeredLockup ? ' absolute left-0 top-1/2 -translate-y-1/2' : ''}`}
         style={{ width: size, height: size }}
       />
       {!collapsed && (
-        <div className="leading-none">
+        <div className={centeredLockup ? 'leading-none text-center' : 'leading-none'}>
           <div className="font-bold text-text-primary" style={{ fontSize: 15 * scale, letterSpacing: '0.18em' }}>
             BOS
             {name ? (

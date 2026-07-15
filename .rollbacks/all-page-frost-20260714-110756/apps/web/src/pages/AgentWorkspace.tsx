@@ -1,0 +1,1646 @@
+/**
+ * AgentWorkspace — per-agent 4-pane workspace, parameterized by kind.
+ *
+ * v1.6.9 generalized this component so the same UI serves both
+ * /rascals/<handle> and /outsiders/<handle>. The exported wrappers
+ * RascalWorkspace and OutsiderWorkspace pin `kind` and let the lazy
+ * importer in App.tsx pick which one to render. The file name remains
+ * RascalWorkspace.tsx for build-cache stability.
+ *
+ * Pane layout (unchanged from v1.6.5/v1.6.6):
+ *   - left: file tree
+ *   - center top: file editor (read + edit + If-Match save)
+ *   - center bottom: chat (CC CLI subprocess via SSE)
+ *   - right: agenda (.boss/agenda.md, polled every 3s)
+ */
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { ArrowLeft, FolderOpen, Send, Loader2, Square, ChevronRight, ChevronDown, File as FileIcon, FileText, Folder, RefreshCw, Pencil, Save, X as XIcon, Mic, MicOff, Volume2, Monitor } from 'lucide-react';
+import { AgentAvatar } from '../components/AgentAvatar';
+import { PageLoader } from '../components/LoadingSpinner';
+import { KanbanBoard } from '../components/kanban/KanbanBoard.js';
+import { SurfaceTabs, type SurfaceTab } from '../components/SurfaceTabs.js';
+import { DictationButton } from '../components/DictationButton';
+import { humanizeSpokenBrief } from '../lib/spokenBrief';
+
+type SpeechRecognitionAlternative = { transcript: string };
+type SpeechRecognitionResult = { isFinal: boolean; 0: SpeechRecognitionAlternative };
+type SpeechRecognitionResultList = { length: number; [index: number]: SpeechRecognitionResult };
+type SpeechRecognitionEventLike = { resultIndex: number; results: SpeechRecognitionResultList };
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onend: (() => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  abort: () => void;
+  start: () => void;
+  stop: () => void;
+};
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  }
+}
+
+const SOFT_BLUE_GLASS: React.CSSProperties = {
+  background: 'linear-gradient(145deg, rgba(226, 248, 255, 0.88), rgba(196, 235, 251, 0.82))',
+  backdropFilter: 'blur(18px) saturate(1.14)',
+  WebkitBackdropFilter: 'blur(18px) saturate(1.14)',
+};
+
+const SOFT_BLUE_GLASS_HEADER: React.CSSProperties = {
+  background: 'linear-gradient(145deg, rgba(211, 242, 255, 0.94), rgba(181, 225, 246, 0.9))',
+  backdropFilter: 'blur(14px) saturate(1.16)',
+  WebkitBackdropFilter: 'blur(14px) saturate(1.16)',
+};
+
+const SOFT_BLUE_GLASS_BODY: React.CSSProperties = {
+  background: 'rgba(223, 247, 255, 0.9)',
+  backdropFilter: 'blur(12px) saturate(1.08)',
+  WebkitBackdropFilter: 'blur(12px) saturate(1.08)',
+};
+
+// ── Agent avatar (user-customizable: emoji, animal, or image URL) ──────
+// Stored per-agent in localStorage under boss_agent_avatar:<handle>; falls back
+// to the initials AgentAvatar when unset. Reactive across the page via a custom
+// 'boss-avatar-changed' event so the header badge and portrait card stay in sync.
+const SYMBOL_EMOJI = ['🤖','🧠','💼','📊','📈','🎯','🚀','⚡','🛡️','🔧','🔑','💰','🎨','🗂️','📌','🧩','🔮','💡','⭐','🔥','✅','📎','🖥️','📅'];
+const ANIMAL_EMOJI = ['🦊','🐻','🦁','🐯','🐺','🦉','🐨','🐼','🐵','🦅','🐷','🐸','🐶','🐱','🐰','🦄','🐢','🦈','🐝','🦋','🐙','🦩','🐳','🦌'];
+
+function avatarKey(handle: string): string {
+  return `boss_agent_avatar:${handle.toLowerCase()}`;
+}
+
+const isImageUrl = (v: string | null): boolean => !!v && /^https?:\/\//i.test(v);
+
+function useAgentAvatar(handle: string): [string | null, (v: string | null) => void] {
+  const read = () => { try { return localStorage.getItem(avatarKey(handle)) || null; } catch { return null; } };
+  const [avatar, setAvatar] = useState<string | null>(read);
+  useEffect(() => {
+    setAvatar(read());
+    const onChange = () => setAvatar(read());
+    window.addEventListener('boss-avatar-changed', onChange);
+    window.addEventListener('storage', onChange);
+    return () => {
+      window.removeEventListener('boss-avatar-changed', onChange);
+      window.removeEventListener('storage', onChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handle]);
+  const save = (v: string | null) => {
+    try {
+      if (v && v.trim()) localStorage.setItem(avatarKey(handle), v.trim());
+      else localStorage.removeItem(avatarKey(handle));
+    } catch { /* ignore */ }
+    window.dispatchEvent(new CustomEvent('boss-avatar-changed'));
+  };
+  return [avatar, save];
+}
+
+function AgentPortraitBadge({ handle, displayName, size }: { handle: string; displayName: string; size: number }) {
+  const [avatar] = useAgentAvatar(handle);
+  if (isImageUrl(avatar)) {
+    return <img src={avatar!} alt="" className="flex-shrink-0 rounded-full object-cover object-top" style={{ height: size, width: size }} />;
+  }
+  if (avatar) {
+    return (
+      <div className="flex flex-shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/25"
+        style={{ height: size, width: size, fontSize: Math.round(size * 0.58) }}>
+        <span aria-hidden>{avatar}</span>
+      </div>
+    );
+  }
+  return <AgentAvatar handle={handle} displayName={displayName} size={size} ring />;
+}
+
+function AvatarPicker({ current, onPick, onClose }: { current: string | null; onPick: (v: string | null) => void; onClose: () => void }) {
+  const [url, setUrl] = useState(isImageUrl(current) ? (current ?? '') : '');
+  const gridBtn = (e: string) =>
+    `flex h-9 items-center justify-center rounded-md border text-xl hover:bg-white/10 ${current === e ? 'border-cyan-400 bg-white/10' : 'border-white/12'}`;
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md overflow-hidden rounded-xl border border-white/15 bg-[#0d1512] text-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <div className="text-sm font-semibold">Choose an avatar</div>
+          <button type="button" onClick={onClose} className="rounded p-1 text-white/60 hover:text-white" aria-label="Close">
+            <XIcon className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="max-h-[70vh] space-y-5 overflow-y-auto px-4 py-4">
+          <div>
+            <div className="mb-2 text-[11px] uppercase tracking-wide text-white/50">Symbols</div>
+            <div className="grid grid-cols-8 gap-1.5">
+              {SYMBOL_EMOJI.map((e) => (
+                <button key={e} type="button" onClick={() => onPick(e)} className={gridBtn(e)}><span aria-hidden>{e}</span></button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-2 text-[11px] uppercase tracking-wide text-white/50">Animals</div>
+            <div className="grid grid-cols-8 gap-1.5">
+              {ANIMAL_EMOJI.map((e) => (
+                <button key={e} type="button" onClick={() => onPick(e)} className={gridBtn(e)}><span aria-hidden>{e}</span></button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-2 text-[11px] uppercase tracking-wide text-white/50">Image URL</div>
+            <div className="flex gap-2">
+              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/avatar.png"
+                className="flex-1 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/35 focus:border-cyan-400 focus:outline-none" />
+              <button type="button" disabled={!/^https?:\/\//i.test(url.trim())} onClick={() => onPick(url.trim())}
+                className="rounded-md bg-cyan-500 px-3 py-2 text-sm font-medium text-black disabled:opacity-40">Use</button>
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-between border-t border-white/10 px-4 py-3">
+          <button type="button" onClick={() => onPick(null)} className="text-[13px] text-white/60 hover:text-white">Reset to initials</button>
+          <button type="button" onClick={onClose} className="text-[13px] text-white/60 hover:text-white">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentPortrait({ handle, displayName }: { handle: string; displayName: string }) {
+  const [avatar, setAvatar] = useAgentAvatar(handle);
+  const [picking, setPicking] = useState(false);
+  return (
+    <>
+      {isImageUrl(avatar) ? (
+        <img src={avatar!} alt="" className="h-full w-full object-cover object-top" />
+      ) : avatar ? (
+        <div className="flex h-full w-full items-center justify-center bg-[#10251f]/86" style={{ fontSize: '4.5rem' }}>
+          <span aria-hidden>{avatar}</span>
+        </div>
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-[#10251f]/86">
+          <AgentAvatar handle={handle} displayName={displayName} size={112} ring />
+        </div>
+      )}
+      <button type="button" onClick={() => setPicking(true)}
+        className="absolute right-2 top-2 z-10 rounded-md border border-white/25 bg-black/45 p-1.5 text-white/85 backdrop-blur hover:bg-black/70"
+        aria-label="Change avatar" title="Change avatar">
+        <Pencil className="h-3.5 w-3.5" />
+      </button>
+      {picking && (
+        <AvatarPicker current={avatar} onPick={(v) => { setAvatar(v); setPicking(false); }} onClose={() => setPicking(false)} />
+      )}
+    </>
+  );
+}
+
+// ── Kind config ─────────────────────────────────────────────────────────────
+
+type AgentKind = 'rascal' | 'outsider';
+
+interface KindConfig {
+  apiBase:     string; // 'api/agents/rascals' or 'api/agents/outsiders'
+  listKey:     'rascals' | 'outsiders';
+  indexRoute:  string; // '/rascals' or '/outsiders'
+  indexLabel:  string;
+  agentNoun:   string;
+  testid:      string; // 'rascal-workspace' or 'outsider-workspace'
+  chatTestid:  string; // 'rascal-chat-panel' or 'outsider-chat-panel'
+}
+
+const KIND_CONFIG: Record<AgentKind, KindConfig> = {
+  rascal: {
+    apiBase:    'api/agents/rascals',
+    listKey:    'rascals',
+    indexRoute: '/rascals',
+    indexLabel: 'Client Managers',
+    agentNoun:  'client manager',
+    testid:     'rascal-workspace',
+    chatTestid: 'rascal-chat-panel',
+  },
+  outsider: {
+    apiBase:    'api/agents/outsiders',
+    listKey:    'outsiders',
+    indexRoute: '/rascals',
+    indexLabel: 'Client Managers',
+    agentNoun:  'outsider',
+    testid:     'outsider-workspace',
+    chatTestid: 'outsider-chat-panel',
+  },
+};
+
+// ── Auth helpers ────────────────────────────────────────────────────────────
+
+function formatTimestamp(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const diffMs = Date.now() - t;
+  if (diffMs < 5_000) return 'just now';
+  if (diffMs < 60_000) return `${Math.floor(diffMs / 1_000)}s ago`;
+  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`;
+  if (diffMs < 86_400_000) {
+    return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  return new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+const AUTH_EXPIRED_EVENT = 'boss-auth-expired';
+
+async function authedFetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
+  const token = localStorage.getItem('boss_token') ?? '';
+  const headers = new Headers(init?.headers);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const res = await fetch(input, { ...init, headers });
+  if (res.status === 401) {
+    try { window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT)); } catch { /* SSR safety */ }
+  }
+  return res;
+}
+
+function useAuthHealth(): { expired: boolean } {
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    const onExpired = () => setExpired(true);
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
+  return { expired };
+}
+
+// ── Domain types ────────────────────────────────────────────────────────────
+
+interface Agent {
+  tenantId:    string;
+  handle:      string;
+  displayName: string;
+  cli:         'claude' | 'ollama';
+  client:      string;
+  projectDir:  string;
+  enabled:     boolean;
+  createdAt:   string;
+  updatedAt:   string;
+}
+
+interface ChatSession {
+  id:          string;
+  rascalHandle: string;
+  name:        string;
+  model:       string;
+  archived:    boolean;
+  createdAt:   string;
+  updatedAt:   string;
+}
+
+interface DirEntry {
+  name:       string;
+  path:       string;
+  type:       'file' | 'directory' | 'other';
+  size:       number | null;
+  modifiedAt: string | null;
+}
+
+interface FileContent {
+  path:       string;
+  bytes:      number;
+  modifiedAt: string;
+  content:    string;
+  etag:       string;
+}
+
+interface FileWriteResponse {
+  path:       string;
+  bytes:      number;
+  modifiedAt: string;
+  etag:       string;
+}
+
+interface ChatMessage {
+  id:        string;
+  role:      'user' | 'assistant' | 'system';
+  content:   string;
+  createdAt: string;
+}
+
+// ── Fetchers ────────────────────────────────────────────────────────────────
+
+async function fetchAgent(cfg: KindConfig, handle: string): Promise<Agent | null> {
+  const res = await authedFetch(`${cfg.apiBase}?handle=${encodeURIComponent(handle)}`);
+  if (!res.ok) return null;
+  const body = (await res.json()) as Record<string, Agent[]>;
+  return body[cfg.listKey]?.[0] ?? null;
+}
+
+async function fetchSessions(cfg: KindConfig, handle: string): Promise<ChatSession[]> {
+  const res = await authedFetch(`${cfg.apiBase}/${encodeURIComponent(handle)}/sessions`);
+  if (!res.ok) return [];
+  const body = (await res.json()) as { sessions: ChatSession[] };
+  return body.sessions;
+}
+
+async function fetchDirectory(cfg: KindConfig, handle: string, path: string): Promise<DirEntry[]> {
+  const res = await authedFetch(
+    `${cfg.apiBase}/${encodeURIComponent(handle)}/files?path=${encodeURIComponent(path)}`,
+  );
+  if (!res.ok) return [];
+  const body = (await res.json()) as { entries: DirEntry[] };
+  return body.entries;
+}
+
+async function fetchFileContent(cfg: KindConfig, handle: string, path: string): Promise<{ ok: true; data: FileContent } | { ok: false; error: string; status: number }> {
+  const res = await authedFetch(
+    `${cfg.apiBase}/${encodeURIComponent(handle)}/files/content?path=${encodeURIComponent(path)}`,
+  );
+  if (!res.ok) {
+    let body: { error?: string } = {};
+    try { body = await res.json(); } catch { /* ignore */ }
+    return { ok: false, error: body.error ?? `HTTP ${res.status}`, status: res.status };
+  }
+  return { ok: true, data: (await res.json()) as FileContent };
+}
+
+async function putFileContent(
+  cfg: KindConfig,
+  handle: string,
+  path: string,
+  content: string,
+  ifMatch: string,
+): Promise<{ ok: true; data: FileWriteResponse } | { ok: false; status: number; error: string; currentEtag?: string }> {
+  const res = await authedFetch(
+    `${cfg.apiBase}/${encodeURIComponent(handle)}/files/content`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'If-Match': `"${ifMatch}"`,
+      },
+      body: JSON.stringify({ path, content }),
+    },
+  );
+  if (!res.ok) {
+    let body: { error?: string; currentEtag?: string } = {};
+    try { body = await res.json(); } catch { /* ignore */ }
+    return { ok: false, status: res.status, error: body.error ?? `HTTP ${res.status}`, currentEtag: body.currentEtag };
+  }
+  return { ok: true, data: (await res.json()) as FileWriteResponse };
+}
+
+async function fetchAgenda(cfg: KindConfig, handle: string): Promise<{ path: string; content: string } | null> {
+  const res = await authedFetch(`${cfg.apiBase}/${encodeURIComponent(handle)}/agenda`);
+  if (!res.ok) return null;
+  return (await res.json()) as { path: string; content: string };
+}
+
+async function ensureDefaultSession(cfg: KindConfig, handle: string, existing: ChatSession[]): Promise<ChatSession | null> {
+  const found = existing.find((s) => !s.archived);
+  if (found) return found;
+  const res = await authedFetch(`${cfg.apiBase}/${encodeURIComponent(handle)}/sessions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'default' }),
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as ChatSession;
+}
+
+async function fetchMessages(cfg: KindConfig, handle: string, sessionId: string): Promise<ChatMessage[]> {
+  const res = await authedFetch(
+    `${cfg.apiBase}/${encodeURIComponent(handle)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+  );
+  if (!res.ok) throw new Error(`messages ${res.status}`);
+  const body = (await res.json()) as { messages: ChatMessage[] };
+  return body.messages;
+}
+function chatCacheKey(cfg: KindConfig, handle: string, sessionId: string): string {
+  return `boss_${cfg.listKey}_${handle}_${sessionId}_messages`;
+}
+function readChatCache(cfg: KindConfig, handle: string, sessionId: string): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(chatCacheKey(cfg, handle, sessionId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ChatMessage[];
+    return Array.isArray(parsed) ? parsed.filter((m) => m && typeof m.id === 'string' && typeof m.content === 'string').slice(-40) : [];
+  } catch { return []; }
+}
+function writeChatCache(cfg: KindConfig, handle: string, sessionId: string, messages: ChatMessage[]): void {
+  try { localStorage.setItem(chatCacheKey(cfg, handle, sessionId), JSON.stringify(messages.slice(-40))); } catch { /* ignore */ }
+}
+
+// ── ChatPanel ───────────────────────────────────────────────────────────────
+
+function buildVoiceFirstMessage(text: string, displayName: string, visualWorkMode = false): string {
+  if (visualWorkMode) {
+    return [
+      `CEO voice request for ${displayName}: ${text}`,
+      '',
+      'This is a voice-first desk visit. The CEO does not want their spoken words displayed back in the UI.',
+      'Start your response with a short section exactly titled "Voice summary:" followed by 1-3 concise sentences suitable for spoken readback.',
+      'After that, keep the normal visible work details on screen when useful, including decisions, artifacts, tool outcomes, and relevant supporting detail.',
+      'Do not put step-by-step tool narration in the Voice summary. The visible screen can contain fuller working detail.',
+    ].join('\n');
+  }
+  return [
+    `CEO voice request for ${displayName}: ${text}`,
+    '',
+    'Respond like an executive assistant/client manager in a voice-first workspace.',
+    'Do not narrate internal reasoning, tool use, command output, logs, or implementation play-by-play.',
+    'Give a concise spoken summary of the work done, the requested result, and any decision or next step needed.',
+  ].join('\n');
+}
+
+function extractVoiceSummary(text: string): string {
+  return humanizeSpokenBrief(text, 420);
+}
+
+function browserSpeakText(text: string): void {
+  if (!window.speechSynthesis || !text.trim()) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text.slice(0, 1200));
+  utterance.rate = 0.96;
+  utterance.pitch = 0.95;
+  window.speechSynthesis.speak(utterance);
+}
+
+interface ChatPanelProps {
+  cfg:         KindConfig;
+  handle:      string;
+  sessionId:   string;
+  displayName: string;
+  voiceOnly?:  boolean;
+}
+
+function ChatPanel({ cfg, handle, sessionId, displayName, voiceOnly = false }: ChatPanelProps) {
+  const [messages, setMessages] = useState<ChatMessage[]>(() => readChatCache(cfg, handle, sessionId));
+  const [draft, setDraft] = useState('');
+  const [interim, setInterim] = useState('');
+  const [listening, setListening] = useState(false);
+  // Whether the current draft was typed (vs spoken/dictated). Typed messages
+  // send as plain text and skip the spoken read-back, so you can TYPE instead
+  // of speak to the agent.
+  const [typedInput, setTypedInput] = useState(false);
+  const [lastVoiceSummary, setLastVoiceSummary] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const [pending, setPending] = useState('');
+  const [pendingStartedAt, setPendingStartedAt] = useState<string | null>(null);
+  const [statusLabel, setStatusLabel] = useState<string | null>(null);
+  // Active subagent tool_use IDs. When the agent spawns a `general-purpose`
+  // (or other) subagent via the Agent tool, the main chat blocks until the
+  // sub returns — surface that to the user so the chat doesn't look frozen.
+  const [activeSubagents, setActiveSubagents] = useState<Set<string>>(new Set());
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => { writeChatCache(cfg, handle, sessionId, messages); }, [cfg, handle, sessionId, messages]);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.abort();
+      audioRef.current?.pause();
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+    };
+  }, []);
+
+  // Initial load + background polling. Server-side persist-on-frame
+  // updates the assistant row every ~2s while the agent is generating,
+  // so polling every 3s gives a near-live view of any in-flight turn —
+  // including ones started on a different tab or by a heartbeat cron.
+  // Skipped while `streaming` is true (the local SSE is the canonical
+  // source during a turn this tab initiated). Pauses when the tab is
+  // hidden; resumes immediately on visibility change.
+  const streamingRef = useRef(streaming);
+  useEffect(() => { streamingRef.current = streaming; }, [streaming]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      if (streamingRef.current) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      let fresh: ChatMessage[];
+      try { fresh = await fetchMessages(cfg, handle, sessionId); }
+      catch { return; }
+      if (cancelled) return;
+      setMessages((prev) => {
+        if (prev.length === fresh.length) {
+          const a = prev[prev.length - 1];
+          const b = fresh[fresh.length - 1];
+          if (a?.id === b?.id && a?.content === b?.content) return prev;
+        }
+        return fresh;
+      });
+    };
+    void refresh();
+    const timer = setInterval(() => { void refresh(); }, 3_000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [cfg, handle, sessionId]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages.length, pending, statusLabel]);
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  const speakSummary = useCallback(async (text: string) => {
+    const summary = extractVoiceSummary(text);
+    if (!summary) return;
+    setLastVoiceSummary(summary);
+    try {
+      const token = localStorage.getItem('boss_token') ?? '';
+      const res = await fetch('api/tts/persona', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          text: summary,
+          surface: cfg.listKey,
+          handle,
+          displayName,
+          title: cfg.agentNoun,
+        }),
+      });
+      if (!res.ok) throw new Error(`TTS ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      audioRef.current?.pause();
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      audio.onerror = () => URL.revokeObjectURL(url);
+      audioRef.current = audio;
+      await audio.play();
+    } catch {
+      browserSpeakText(summary);
+    }
+  }, [cfg.agentNoun, cfg.listKey, displayName, handle]);
+
+  const startListening = useCallback(() => {
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Recognition || streaming) {
+      setStatusLabel(Recognition ? null : 'Speech recognition is unavailable in this browser.');
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.onresult = (event) => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        if (result.isFinal) finalText += result[0].transcript;
+        else interimText += result[0].transcript;
+      }
+      if (finalText.trim()) {
+        setDraft((prev) => `${prev}${prev ? ' ' : ''}${finalText.trim()}`);
+        setTypedInput(false); // spoken input -> keep voice-first behavior
+      }
+      setInterim(interimText.trim());
+    };
+    recognition.onerror = () => {
+      setListening(false);
+      setInterim('');
+    };
+    recognition.onend = () => {
+      setListening(false);
+      setInterim('');
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+    setListening(true);
+    setStatusLabel(null);
+  }, [streaming]);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    setListening(false);
+    setInterim('');
+  }, []);
+
+  const send = useCallback(async () => {
+    const text = draft.trim();
+    if (!text || streaming) return;
+    const wasTyped = typedInput; // typed -> plain text + no spoken read-back
+    recognitionRef.current?.stop();
+    setListening(false);
+    setInterim('');
+    setDraft('');
+    setTypedInput(false);
+    setStreaming(true);
+    setPending('');
+    setStatusLabel('Coordinating...');
+    const startedAt = new Date().toISOString();
+    setPendingStartedAt(startedAt);
+    const userTurn: ChatMessage = {
+      id: `local-${Date.now()}`,
+      role: 'user',
+      content: text,
+      createdAt: startedAt,
+    };
+    setMessages((m) => [...m, userTurn]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const token = localStorage.getItem('boss_token') ?? '';
+    let aggregated = '';
+    try {
+      const res = await fetch(
+        `${cfg.apiBase}/${encodeURIComponent(handle)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ message: wasTyped ? text : buildVoiceFirstMessage(text, displayName, voiceOnly) }),
+          signal: controller.signal,
+        },
+      );
+      if (!res.ok || !res.body) {
+        if (res.status === 401) {
+          try { window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT)); } catch { /* ignore */ }
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl = buf.indexOf('\n\n');
+        while (nl !== -1) {
+          const block = buf.slice(0, nl);
+          buf = buf.slice(nl + 2);
+          nl = buf.indexOf('\n\n');
+          const dataLine = block.split('\n').find((l) => l.startsWith('data: '));
+          const eventLine = block.split('\n').find((l) => l.startsWith('event: '));
+          if (!dataLine) continue;
+          let payload: Record<string, unknown>;
+          try { payload = JSON.parse(dataLine.slice(6)); } catch { continue; }
+          if (eventLine?.startsWith('event: frame') && payload.type === 'assistant') {
+            const message = payload.message as { content?: Array<{ type: string; text?: string; name?: string; id?: string }> } | undefined;
+            let sawText = false;
+            for (const block of message?.content ?? []) {
+              if (block.type === 'text' && block.text) { aggregated += block.text; sawText = true; }
+              else if (block.type === 'tool_use' && block.name) {
+                setStatusLabel('Coordinating request...');
+                if (block.name === 'Agent' && block.id) {
+                  const toolId = block.id;
+                  setActiveSubagents((s) => { const n = new Set(s); n.add(toolId); return n; });
+                }
+              }
+            }
+            if (sawText) {
+              setStatusLabel(null);
+              setPending(aggregated);
+            }
+          } else if (eventLine?.startsWith('event: frame') && payload.type === 'user') {
+            // tool_result frames close out subagent spawns. The content is
+            // an array of blocks; each tool_result block carries the
+            // matching tool_use_id.
+            const message = payload.message as
+              | { content?: Array<{ type?: string; tool_use_id?: string }> | string }
+              | undefined;
+            const blocks = Array.isArray(message?.content) ? message?.content : [];
+            for (const block of blocks ?? []) {
+              if (block.type === 'tool_result' && block.tool_use_id) {
+                const toolId = block.tool_use_id;
+                setActiveSubagents((s) => {
+                  if (!s.has(toolId)) return s;
+                  const n = new Set(s); n.delete(toolId); return n;
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as { name?: string }).name === 'AbortError') {
+        // Client-side abort — backend gets the disconnect and SIGTERMs
+        // the subprocess; partial assistant text is persisted with an
+        // [interrupted] marker. We just stop streaming.
+      } else {
+        const errMsg: ChatMessage = {
+          id: `err-${Date.now()}`,
+          role: 'system',
+          content: `Send failed: ${err instanceof Error ? err.message : String(err)}`,
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((m) => [...m, errMsg]);
+      }
+    } finally {
+      // Refresh from DB to pick up the persisted assistant turn (canonical).
+      try {
+        const fresh = await fetchMessages(cfg, handle, sessionId);
+        setMessages(fresh);
+        if (voiceOnly && !wasTyped) {
+          const finalAssistant = [...fresh].reverse().find((m) => m.role === 'assistant')?.content ?? aggregated;
+          void speakSummary(finalAssistant);
+        }
+      } catch {
+        setMessages((m) => m);
+        if (voiceOnly && !wasTyped) void speakSummary(aggregated);
+      }
+      setPending('');
+      setPendingStartedAt(null);
+      setStatusLabel(null);
+      setActiveSubagents(new Set());
+      setStreaming(false);
+      abortRef.current = null;
+    }
+  }, [cfg, displayName, draft, handle, sessionId, speakSummary, streaming, typedInput, voiceOnly]);
+
+  const visibleMessages = messages;
+
+  return (
+    <div
+      className={`flex flex-1 flex-col min-h-0 ${voiceOnly ? 'text-[#03070a]' : ''}`}
+      data-testid={cfg.chatTestid}
+      style={voiceOnly ? SOFT_BLUE_GLASS_BODY : undefined}
+    >
+      <div
+        ref={scrollRef}
+        className={`flex-1 min-h-0 overflow-y-auto space-y-3 ${voiceOnly ? 'px-5 py-4' : 'px-4 py-3'}`}
+        style={voiceOnly ? SOFT_BLUE_GLASS_BODY : undefined}
+      >
+        {visibleMessages.length === 0 && !pending && !statusLabel ? (
+          <div className={`text-[12px] text-center pt-6 ${voiceOnly ? 'text-[#1d2f38]' : 'text-text-muted'}`}>
+            {voiceOnly ? `${displayName}'s screen is ready.` : `No messages yet. Say hi to ${displayName}.`}
+          </div>
+        ) : null}
+        {/* Cap render to last 10 messages. Long histories with multi-MB
+            assistant turns (code dumps) were locking up the browser even
+            after the 20-cap; dropping to 10 + per-message 50KB truncation
+            on the server is what's keeping the page snappy. Older messages
+            still live in boss_chat_messages — query with ?limit=N. */}
+        {visibleMessages.length > 10 ? (
+          <div className={`text-[10px] italic text-center py-2 border-y ${voiceOnly ? 'border-[#71b9d8]/80 text-[#1d2f38]' : 'border-border/30 text-text-muted/70'}`}>
+            … {visibleMessages.length - 10} earlier message{visibleMessages.length - 10 === 1 ? '' : 's'} hidden (recent 10 shown)
+          </div>
+        ) : null}
+        {visibleMessages.slice(-10).map((m) => (
+          <div key={m.id} className={`text-[13px] ${voiceOnly ? (m.role === 'system' ? 'text-[#5c2600]' : 'text-[#03070a]') : m.role === 'user' ? 'text-text-primary' : m.role === 'system' ? 'text-warning' : 'text-text-secondary'}`}>
+            <div className="flex items-baseline justify-between gap-3 mb-0.5">
+              <div className={`vs-mono text-[9px] uppercase tracking-[0.22em] ${voiceOnly ? 'text-[#164257]' : 'text-text-muted'}`}>
+                {m.role === 'user' ? 'You' : m.role === 'system' ? 'System' : displayName}
+              </div>
+              <div className={`vs-mono text-[9px] ${voiceOnly ? 'text-[#274a5b]' : 'text-text-muted/70'}`} title={new Date(m.createdAt).toLocaleString()}>
+                {formatTimestamp(m.createdAt)}
+              </div>
+            </div>
+            <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+          </div>
+        ))}
+        {pending || statusLabel || activeSubagents.size > 0 ? (
+          <div className={`text-[13px] ${voiceOnly ? 'text-[#03070a]' : 'text-text-secondary'}`}>
+            <div className="flex items-baseline justify-between gap-3 mb-0.5">
+              <div className={`vs-mono text-[9px] uppercase tracking-[0.22em] ${voiceOnly ? 'text-[#164257]' : 'text-text-muted'}`}>{displayName}</div>
+              <div className="flex items-center gap-2">
+                {activeSubagents.size > 0 ? (
+                  <div
+                    className="inline-flex items-center gap-1 vs-mono text-[9px] px-1.5 py-0.5 rounded border border-accent/40 bg-accent/10 text-accent"
+                    title="Supporting work is running. Stop will interrupt it."
+                  >
+                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                    ACTIVE
+                  </div>
+                ) : null}
+                {pendingStartedAt ? (
+                  <div className={`vs-mono text-[9px] ${voiceOnly ? 'text-[#274a5b]' : 'text-text-muted/70'}`}>{formatTimestamp(pendingStartedAt)}</div>
+                ) : null}
+              </div>
+            </div>
+            {statusLabel && !pending ? (
+              <div className="inline-flex items-center gap-1.5 vs-mono text-[10.5px] text-accent">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                {statusLabel}
+              </div>
+            ) : pending ? (
+              <div className="whitespace-pre-wrap leading-relaxed">{pending}<span className="animate-pulse">▌</span></div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      <form
+        onSubmit={(e) => { e.preventDefault(); void send(); }}
+        className={`flex-shrink-0 border-t px-3 py-2 ${voiceOnly ? 'border-[#71b9d8]/90 bg-[#bfe8fb]/98' : 'border-border bg-surface-1/30'}`}
+        style={voiceOnly ? SOFT_BLUE_GLASS_HEADER : undefined}
+      >
+        {voiceOnly ? (
+          <div className="flex flex-col gap-2">
+            <textarea
+              value={draft}
+              onChange={(e) => { setDraft(e.target.value); setTypedInput(true); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
+              placeholder={`Type or speak to ${displayName}…`}
+              disabled={streaming}
+              rows={2}
+              className="w-full resize-none rounded-md border border-[#1c83ab] bg-white/85 px-3 py-2 text-[13px] leading-relaxed text-[#061015] placeholder-[#164257]/60 focus:outline-none focus:ring-2 focus:ring-[#1c83ab]/50 disabled:opacity-50"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={listening ? stopListening : startListening}
+              disabled={streaming}
+              className={`inline-flex h-11 w-11 items-center justify-center rounded-md border transition disabled:opacity-40 ${
+                listening
+                  ? 'border-red-300/70 bg-red-100 text-red-700'
+                  : 'border-[#1c83ab] bg-white/78 text-[#061015] hover:bg-white'
+              }`}
+              title={listening ? 'Stop listening' : `Speak to ${displayName}`}
+            >
+              {listening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+            </button>
+            {streaming ? (
+              <button
+                type="button"
+                onClick={cancel}
+                className="inline-flex h-11 items-center gap-1.5 rounded-md border border-amber-300/60 bg-amber-100 px-3 text-[12px] font-semibold text-amber-800 hover:bg-amber-50"
+                title="Stop the current voice request"
+              >
+                <Square className="h-3.5 w-3.5" />
+                Stop
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!draft.trim()}
+                className="inline-flex h-11 items-center gap-1.5 rounded-md bg-[#56bf9b] px-3 text-[12px] font-bold text-[#07140f] shadow-lg shadow-[#6fb8ca]/25 disabled:opacity-35"
+                title="Send captured voice"
+              >
+                <Send className="h-3.5 w-3.5" />
+                Send
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void speakSummary(lastVoiceSummary)}
+              disabled={!lastVoiceSummary.trim()}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-[#71b9d8] bg-white/72 text-[#061015] disabled:opacity-35"
+              title="Replay spoken summary"
+            >
+              <Volume2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => { setDraft(''); setInterim(''); }}
+              disabled={(!draft.trim() && !interim.trim()) || streaming}
+              className="ml-auto h-11 rounded-md border border-[#71b9d8] bg-white/72 px-3 text-[12px] text-[#061015] disabled:opacity-35"
+            >
+              Clear
+            </button>
+            <div className="min-w-[160px] flex-1 text-[12px] text-[#061015]">
+              {listening ? 'Listening...' : draft.trim() ? 'Ready to send.' : streaming ? `${displayName} is working...` : `Type or speak to ${displayName}.`}
+              {interim ? <span className="text-[#274a5b]"> Capturing...</span> : null}
+            </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <textarea
+              value={draft}
+              onChange={(e) => { setDraft(e.target.value); setTypedInput(true); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
+              placeholder={`Type or speak to ${displayName}…`}
+              disabled={streaming}
+              rows={2}
+              className="mb-2 w-full resize-none rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-[13px] leading-relaxed text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-50"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <DictationButton
+                compact={false}
+                disabled={streaming}
+                onTranscript={(text) => {
+                  setDraft((prev) => (prev ? `${prev.trimEnd()} ${text}` : text));
+                  setTypedInput(false);
+                }}
+              />
+              {streaming ? (
+                <button
+                  type="button"
+                  onClick={cancel}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/15 px-3 py-2 text-[12px] font-semibold text-text-primary hover:bg-warning/25"
+                  title="Stop the current voice request"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!draft.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-[12px] font-semibold text-[#0a0c12] disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #b56cff 0%, #5cc8ff 100%)' }}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  Send
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setDraft('')}
+                disabled={!draft.trim() || streaming}
+                className="rounded-md border border-border bg-surface-2/50 px-3 py-2 text-[12px] text-text-muted hover:text-text-primary disabled:opacity-45"
+              >
+                Clear
+              </button>
+            </div>
+          </>
+        )}
+      </form>
+    </div>
+  );
+}
+
+// ── FileTree ────────────────────────────────────────────────────────────────
+
+interface FileTreeNodeProps {
+  cfg:        KindConfig;
+  handle:     string;
+  entry:      DirEntry;
+  depth:      number;
+  onOpen:     (path: string) => void;
+  activePath: string | null;
+  softBlue?:   boolean;
+}
+
+function FileTreeNode({ cfg, handle, entry, depth, onOpen, activePath, softBlue = false }: FileTreeNodeProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [children, setChildren] = useState<DirEntry[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const toggle = useCallback(async () => {
+    if (entry.type !== 'directory') return;
+    if (!expanded && !children) {
+      setLoading(true);
+      const e = await fetchDirectory(cfg, handle, entry.path);
+      setChildren(e);
+      setLoading(false);
+    }
+    setExpanded((v) => !v);
+  }, [cfg, handle, entry, expanded, children]);
+
+  const isActive = activePath === entry.path;
+  const indent = depth * 12;
+
+  if (entry.type === 'directory') {
+    return (
+      <div>
+        <button
+          type="button"
+          onClick={() => void toggle()}
+          className={`w-full flex items-center gap-1 text-[12px] py-0.5 px-2 ${softBlue ? 'text-[#03070a] hover:bg-white/52' : 'text-text-secondary hover:bg-surface-2/40'}`}
+          style={{ paddingLeft: 8 + indent }}
+        >
+          {expanded ? <ChevronDown className="w-3 h-3 flex-shrink-0" /> : <ChevronRight className="w-3 h-3 flex-shrink-0" />}
+          <Folder className={`w-3 h-3 flex-shrink-0 ${softBlue ? 'text-[#0e5c80]' : 'text-accent/70'}`} />
+          <span className="truncate">{entry.name}</span>
+        </button>
+        {expanded && children
+          ? children.map((c) => (
+              <FileTreeNode key={c.path} cfg={cfg} handle={handle} entry={c} depth={depth + 1} onOpen={onOpen} activePath={activePath} softBlue={softBlue} />
+            ))
+          : null}
+        {expanded && loading ? (
+          <div className={`text-[11px] px-2 py-1 ${softBlue ? 'text-[#1d2f38]' : 'text-text-muted'}`} style={{ paddingLeft: 24 + indent }}>Loading…</div>
+        ) : null}
+      </div>
+    );
+  }
+
+  const isMd = entry.name.endsWith('.md');
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(entry.path)}
+      className={`w-full flex items-center gap-1 text-[12px] py-0.5 px-2 ${
+        softBlue
+          ? isActive
+            ? 'bg-white/70 text-[#03070a]'
+            : 'text-[#03070a] hover:bg-white/52'
+          : isActive
+            ? 'bg-accent/15 text-text-primary'
+            : 'hover:bg-surface-2/40 text-text-secondary'
+      }`}
+      style={{ paddingLeft: 8 + indent + 12 }}
+    >
+      {isMd ? <FileText className={`w-3 h-3 flex-shrink-0 ${softBlue ? 'text-[#0e5c80]' : 'text-text-muted'}`} /> : <FileIcon className={`w-3 h-3 flex-shrink-0 ${softBlue ? 'text-[#0e5c80]' : 'text-text-muted'}`} />}
+      <span className="truncate">{entry.name}</span>
+    </button>
+  );
+}
+
+interface FileTreeProps {
+  cfg:        KindConfig;
+  handle:     string;
+  onOpen:     (path: string) => void;
+  activePath: string | null;
+  softBlue?:   boolean;
+}
+
+function FileTree({ cfg, handle, onOpen, activePath, softBlue = false }: FileTreeProps) {
+  const [entries, setEntries] = useState<DirEntry[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchDirectory(cfg, handle, '.').then((e) => { if (!cancelled) setEntries(e); });
+    return () => { cancelled = true; };
+  }, [cfg, handle]);
+
+  if (!entries) {
+    return <div className={`text-[11px] px-3 py-2 ${softBlue ? 'text-[#1d2f38]' : 'text-text-muted'}`}>Loading project files…</div>;
+  }
+  if (entries.length === 0) {
+    return <div className={`text-[11px] px-3 py-2 ${softBlue ? 'text-[#1d2f38]' : 'text-text-muted'}`}>Project directory is empty.</div>;
+  }
+  return (
+    <div className="py-1">
+      {entries.map((e) => (
+        <FileTreeNode key={e.path} cfg={cfg} handle={handle} entry={e} depth={0} onOpen={onOpen} activePath={activePath} softBlue={softBlue} />
+      ))}
+    </div>
+  );
+}
+
+// ── FileEditor ──────────────────────────────────────────────────────────────
+
+interface FileEditorProps {
+  cfg:    KindConfig;
+  handle: string;
+  path:   string | null;
+}
+
+function FileEditor({ cfg, handle, path }: FileEditorProps) {
+  const [data, setData] = useState<FileContent | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState<{ currentEtag: string } | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const loadFresh = useCallback(async (h: string, p: string, opts?: { keepDraft?: boolean }) => {
+    setLoading(true);
+    setError(null);
+    const res = await fetchFileContent(cfg, h, p);
+    if (res.ok) {
+      setData(res.data);
+      if (!opts?.keepDraft) setDraft(res.data.content);
+    } else {
+      setData(null);
+      setError(res.error);
+    }
+    setLoading(false);
+  }, [cfg]);
+
+  useEffect(() => {
+    if (!path) {
+      setData(null); setError(null); setEditing(false); setDraft(''); setConflict(null); setSaveError(null);
+      return;
+    }
+    let cancelled = false;
+    setData(null);
+    setEditing(false);
+    setDraft('');
+    setConflict(null);
+    setSaveError(null);
+    void (async () => {
+      if (cancelled) return;
+      await loadFresh(handle, path);
+    })();
+    return () => { cancelled = true; };
+  }, [handle, path, loadFresh]);
+
+  const dirty = editing && data !== null && draft !== data.content;
+
+  const onSave = useCallback(async () => {
+    if (!path || !data) return;
+    setSaving(true);
+    setSaveError(null);
+    const res = await putFileContent(cfg, handle, path, draft, data.etag);
+    setSaving(false);
+    if (res.ok) {
+      setEditing(false);
+      setConflict(null);
+      await loadFresh(handle, path);
+    } else if (res.status === 412) {
+      setConflict({ currentEtag: res.currentEtag ?? '' });
+    } else {
+      const map: Record<string, string> = {
+        path_escape: 'Path escapes project root.',
+        too_large: 'File exceeds the 1 MB write cap.',
+      };
+      setSaveError(map[res.error] ?? `Save failed: ${res.error}`);
+    }
+  }, [cfg, path, data, draft, handle, loadFresh]);
+
+  const onCancel = useCallback(() => {
+    if (!data) return;
+    setEditing(false);
+    setDraft(data.content);
+    setSaveError(null);
+    setConflict(null);
+  }, [data]);
+
+  const onResolveDiscardServer = useCallback(async () => {
+    if (!path) return;
+    setConflict(null);
+    setSaving(true);
+    const fresh = await fetchFileContent(cfg, handle, path);
+    if (!fresh.ok) {
+      setSaving(false);
+      setSaveError(`Could not refetch etag: ${fresh.error}`);
+      return;
+    }
+    const res = await putFileContent(cfg, handle, path, draft, fresh.data.etag);
+    setSaving(false);
+    if (res.ok) {
+      setEditing(false);
+      await loadFresh(handle, path);
+    } else {
+      setSaveError(`Save failed after force-refresh: ${res.error}`);
+    }
+  }, [cfg, handle, path, draft, loadFresh]);
+
+  const onResolveDiscardMine = useCallback(async () => {
+    if (!path) return;
+    setConflict(null);
+    await loadFresh(handle, path);
+    setEditing(false);
+  }, [handle, path, loadFresh]);
+
+  if (!path) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-[12px] text-text-muted px-4 text-center">
+        Select a file from the tree to view its contents.
+      </div>
+    );
+  }
+  if (loading && !data) {
+    return <div className="flex-1 flex items-center justify-center text-[12px] text-text-muted">Loading {path}…</div>;
+  }
+  if (error) {
+    const niceError =
+      error === 'binary_rejected' ? 'Binary file — preview not supported.'
+      : error === 'too_large' ? 'File exceeds the 1 MB preview cap.'
+      : error === 'not_found' ? 'File not found.'
+      : error === 'path_escape' ? 'Path escapes project root.'
+      : `Could not load file: ${error}`;
+    return <div className="flex-1 flex items-center justify-center text-[12px] text-warning px-4 text-center">{niceError}</div>;
+  }
+  if (!data) return null;
+
+  return (
+    <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+      <div className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-1.5 border-b border-border bg-surface-1/30">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="vs-mono text-[11px] text-text-secondary truncate">{data.path}</span>
+          {dirty ? <span className="vs-mono text-[10px] text-warning flex-shrink-0">• unsaved</span> : null}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="vs-mono text-[10px] text-text-muted">
+            {data.bytes.toLocaleString()} B · {new Date(data.modifiedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+          </span>
+          {editing ? (
+            <>
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={saving}
+                className="text-[11px] text-text-muted hover:text-text-primary px-2 py-1 inline-flex items-center gap-1 disabled:opacity-50"
+              >
+                <XIcon className="w-3 h-3" /> Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void onSave()}
+                disabled={saving || !dirty}
+                className="text-[11px] font-semibold text-[#0a0c12] px-3 py-1 rounded-md inline-flex items-center gap-1 disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #b56cff 0%, #5cc8ff 100%)' }}
+              >
+                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                {saving ? 'Saving' : 'Save'}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setEditing(true); setDraft(data.content); }}
+              className="text-[11px] font-semibold text-text-primary px-2 py-1 rounded-md border border-border hover:border-accent/60 inline-flex items-center gap-1"
+            >
+              <Pencil className="w-3 h-3" /> Edit
+            </button>
+          )}
+        </div>
+      </div>
+      {saveError ? (
+        <div className="flex-shrink-0 px-4 py-1.5 text-[11px] text-danger bg-danger/10 border-b border-danger/30">
+          {saveError}
+        </div>
+      ) : null}
+      {conflict ? (
+        <div className="flex-shrink-0 px-4 py-2 text-[11.5px] bg-warning/15 border-b border-warning/40 flex items-center justify-between gap-3">
+          <span className="text-warning">
+            File changed on disk while you were editing. Choose how to resolve:
+          </span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => void onResolveDiscardMine()}
+              className="text-[11px] text-text-muted hover:text-text-primary px-2 py-1"
+            >
+              Discard mine (reload)
+            </button>
+            <button
+              type="button"
+              onClick={() => void onResolveDiscardServer()}
+              disabled={saving}
+              className="text-[11px] font-semibold text-[#0a0c12] px-2 py-1 rounded-md disabled:opacity-50"
+              style={{ background: 'linear-gradient(135deg, #b56cff 0%, #5cc8ff 100%)' }}
+            >
+              Overwrite (force save)
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {editing ? (
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          spellCheck={false}
+          className="flex-1 min-h-0 min-w-0 resize-none bg-surface-0/40 px-4 py-3 text-[12px] leading-relaxed font-mono text-text-primary focus:outline-none"
+        />
+      ) : (
+        <pre className="flex-1 min-h-0 min-w-0 overflow-auto px-4 py-3 text-[12px] leading-relaxed font-mono text-text-primary whitespace-pre">
+          {data.content}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// ── AgendaPanel ─────────────────────────────────────────────────────────────
+
+interface AgendaPanelProps {
+  cfg:          KindConfig;
+  handle:       string;
+  fallbackPath: string;
+  agentNoun:    string;
+}
+
+function AgendaPanel({ cfg, handle, fallbackPath, agentNoun }: AgendaPanelProps) {
+  const [content, setContent] = useState<string | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const tick = async () => {
+      const res = await fetchAgenda(cfg, handle);
+      if (cancelled) return;
+      if (res) {
+        setMissing(false);
+        setContent((prev) => (prev === res.content ? prev : res.content));
+      } else {
+        setContent(null);
+        setMissing(true);
+      }
+      setLastRefreshed(Date.now());
+    };
+    void tick();
+    timer = setInterval(() => { void tick(); }, 3_000);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [cfg, handle]);
+
+  const refreshNow = useCallback(async () => {
+    setRefreshing(true);
+    const res = await fetchAgenda(cfg, handle);
+    if (res) {
+      setMissing(false);
+      setContent(res.content);
+    } else {
+      setContent(null);
+      setMissing(true);
+    }
+    setLastRefreshed(Date.now());
+    setRefreshing(false);
+  }, [cfg, handle]);
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-shrink-0 flex items-center justify-between gap-2 px-4 py-1.5 border-b border-border bg-surface-1/30">
+        <span className="vs-mono text-[10px] text-text-muted">
+          {lastRefreshed ? `Last refreshed ${formatTimestamp(new Date(lastRefreshed).toISOString())}` : 'Polling every 3s'}
+        </span>
+        <button
+          type="button"
+          onClick={() => void refreshNow()}
+          disabled={refreshing}
+          className="text-text-muted hover:text-text-primary disabled:opacity-50"
+          aria-label="Refresh agenda"
+          title="Refresh now"
+        >
+          <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+      {missing ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 px-4 text-center">
+          <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">No agenda yet</div>
+          <div className="text-[11px] text-text-muted max-w-xs">
+            The {agentNoun} hasn't written {fallbackPath} yet. Ask them to draft one in chat.
+          </div>
+        </div>
+      ) : content === null ? (
+        <div className="flex-1 flex items-center justify-center text-[11px] text-text-muted">Loading agenda…</div>
+      ) : (
+        <pre className="flex-1 min-h-0 overflow-auto px-4 py-3 text-[12px] leading-relaxed whitespace-pre-wrap text-text-secondary">
+          {content}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// ── AgentWorkspaceImpl + wrappers ───────────────────────────────────────────
+
+interface AgentWorkspaceImplProps {
+  kind: AgentKind;
+}
+
+function AgentWorkspaceImpl({ kind }: AgentWorkspaceImplProps) {
+  const cfg = useMemo(() => KIND_CONFIG[kind], [kind]);
+  const { handle } = useParams<{ handle: string }>();
+  const auth = useAuthHealth();
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [activeSession, setActiveSession] = useState<ChatSession | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [view, setView] = useState<SurfaceTab>('chat');
+  const deskVisit = kind === 'rascal' || kind === 'outsider';
+
+  useEffect(() => {
+    if (!handle) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setNotFound(false);
+      const a = await fetchAgent(cfg, handle);
+      if (cancelled) return;
+      if (!a) {
+        setAgent(null);
+        setActiveSession(null);
+        setNotFound(true);
+        setLoading(false);
+        return;
+      }
+      setNotFound(false);
+      setAgent(a);
+      const list = await fetchSessions(cfg, handle);
+      if (cancelled) return;
+      const sess = await ensureDefaultSession(cfg, handle, list);
+      if (cancelled) return;
+      setActiveSession(sess);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [cfg, handle]);
+
+  if (loading && !agent) return <PageLoader />;
+
+  if (notFound || !agent) {
+    return (
+      <div className="flex-1 p-6 space-y-3">
+        <Link to={cfg.indexRoute} className="inline-flex items-center gap-1.5 text-[12px] text-text-muted hover:text-text-primary">
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to {cfg.indexLabel.toLowerCase()}
+        </Link>
+        <div className="rounded-xl border border-danger/40 bg-danger/10 p-4 text-[13px] text-danger">
+          {cfg.agentNoun.charAt(0).toUpperCase() + cfg.agentNoun.slice(1)} <span className="vs-mono">{handle}</span> not found in this workspace.
+        </div>
+      </div>
+    );
+  }
+
+  if (deskVisit) {
+    return (
+      <div data-testid={cfg.testid} className="relative h-full min-h-0 overflow-hidden text-white">
+        {auth.expired ? (
+          <div className="absolute inset-x-4 top-4 z-40 rounded-lg border border-amber-200/35 bg-amber-950/80 px-4 py-2 text-[12px] text-amber-100 backdrop-blur-md">
+            Your session expired. <button type="button" onClick={() => window.location.reload()} className="underline">Reload</button> to sign in again.
+          </div>
+        ) : null}
+
+        <header className="absolute left-4 right-4 top-4 z-30 flex items-center gap-3 rounded-lg border border-white/18 bg-[#101714]/62 px-4 py-3 shadow-2xl backdrop-blur-xl">
+          <Link to={cfg.indexRoute} className="inline-flex items-center gap-1 text-[12px] text-white/68 hover:text-white" aria-label={`Back to ${cfg.indexLabel.toLowerCase()}`}>
+            <ArrowLeft className="h-3.5 w-3.5" /> {cfg.indexLabel}
+          </Link>
+          <span className="text-white/28">/</span>
+          <div className="hidden sm:block">
+            <AgentPortraitBadge handle={agent.handle} displayName={agent.displayName} size={30} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[14px] font-semibold leading-tight text-white">{agent.displayName}</div>
+            <div className="vs-mono truncate text-[10.5px] text-white/50">
+              {agent.client || agent.handle} · <span className="uppercase">{agent.cli}</span>
+            </div>
+          </div>
+          {agent.projectDir ? (
+            <div className="hidden items-center gap-1.5 font-mono text-[11px] text-white/52 lg:flex" title={agent.projectDir}>
+              <FolderOpen className="h-3.5 w-3.5" />
+              <span className="truncate max-w-[28ch]">{agent.projectDir}</span>
+            </div>
+          ) : null}
+          <SurfaceTabs value={view} onChange={setView} />
+        </header>
+
+        <aside
+          className="absolute bottom-5 left-4 top-[104px] z-20 flex w-[270px] min-h-0 flex-col overflow-hidden rounded-lg border border-[#71b9d8] text-[#03070a] shadow-2xl shadow-black/20"
+          style={SOFT_BLUE_GLASS}
+        >
+          <div className="flex-shrink-0 border-b border-[#71b9d8]/90 px-4 py-3" style={SOFT_BLUE_GLASS_HEADER}>
+            <div className="vs-mono text-[10px] uppercase tracking-[0.22em] text-[#164257]">Workspace Tree</div>
+            <div className="mt-1 truncate text-[11px] text-[#061015]">{activeFile ?? 'Browse their workspace'}</div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto py-1">
+            <FileTree cfg={cfg} handle={agent.handle} onOpen={setActiveFile} activePath={activeFile} softBlue />
+          </div>
+        </aside>
+
+        <div
+          className="absolute z-10 overflow-hidden rounded-xl border border-white/20 bg-black/12 shadow-2xl shadow-black/35"
+          style={{
+            left: '30%',
+            top: '17%',
+            width: 'clamp(176px, 15vw, 260px)',
+            aspectRatio: '3 / 4',
+          }}
+        >
+          <AgentPortrait handle={agent.handle} displayName={agent.displayName} />
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/78 to-transparent px-3 pb-3 pt-10">
+            <div className="truncate text-sm font-semibold">{agent.displayName}</div>
+            <div className="truncate text-[11px] text-white/62">{agent.client || agent.handle}</div>
+          </div>
+        </div>
+
+        <section
+          className="absolute z-20 flex min-h-0 flex-col overflow-hidden rounded-lg border border-[#71b9d8] text-[#03070a] shadow-2xl shadow-black/26 ring-1 ring-white/35"
+          style={{
+            ...SOFT_BLUE_GLASS,
+            right: '7%',
+            top: '18%',
+            height: '44%',
+            width: '40.5%',
+          }}
+        >
+          <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-[#71b9d8]/90 px-4 py-2" style={SOFT_BLUE_GLASS_HEADER}>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[12px] font-semibold text-[#03070a]">
+                <Monitor className="h-4 w-4 text-[#0e5c80]" />
+                {agent.displayName}'s screen
+              </div>
+              <div className="vs-mono mt-0.5 truncate text-[9.5px] uppercase tracking-[0.18em] text-[#164257]">
+                {view === 'tasks' ? 'Task board' : 'Live work feed'}
+              </div>
+            </div>
+            <div className="hidden rounded-full border border-[#71b9d8] bg-white/72 px-2.5 py-1 text-[10px] font-semibold text-[#061015] md:block">
+              Voice only
+            </div>
+          </div>
+          {view === 'tasks' ? (
+            <div className="min-h-0 flex-1 overflow-hidden bg-white/92 text-[#101714]">
+              <KanbanBoard scope={{ kind, handle: agent.handle }} />
+            </div>
+          ) : activeSession ? (
+            <ChatPanel cfg={cfg} handle={agent.handle} sessionId={activeSession.id} displayName={agent.displayName} voiceOnly />
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-[12px] text-white/54">
+              Initialising voice desk...
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-testid={cfg.testid}
+      className={deskVisit ? 'flex h-full flex-1 flex-col gap-3 overflow-hidden p-4 text-white' : 'flex h-full flex-1 flex-col'}
+    >
+      {auth.expired ? (
+        <div className="bg-warning/15 border-b border-warning/40 text-warning px-4 py-2 text-[12px]">
+          Your session expired. <button type="button" onClick={() => window.location.reload()} className="underline">Reload</button> to sign in again.
+        </div>
+      ) : null}
+
+      <header className={`flex items-center gap-3 border-border px-5 py-3 ${deskVisit ? 'rounded-lg border bg-white/48 text-[#12201b] shadow-2xl backdrop-blur-xl' : 'border-b bg-surface-1/60'}`}>
+        <Link to={cfg.indexRoute} className="inline-flex items-center gap-1 text-[12px] text-text-muted hover:text-text-primary" aria-label={`Back to ${cfg.indexLabel.toLowerCase()}`}>
+          <ArrowLeft className="w-3.5 h-3.5" /> {cfg.indexLabel}
+        </Link>
+        <span className="text-text-muted">/</span>
+        <AgentAvatar handle={agent.handle} displayName={agent.displayName} size={32} ring />
+        <div className="min-w-0 flex-1">
+          <div className={`truncate text-[14px] font-semibold leading-tight ${deskVisit ? 'text-[#101714]' : 'text-text-primary'}`}>{agent.displayName}</div>
+          <div className={`vs-mono truncate text-[10.5px] ${deskVisit ? 'text-[#40524b]' : 'text-text-muted'}`}>
+            {agent.handle} · {agent.client || '—'} · <span className="uppercase">{agent.cli}</span>
+          </div>
+        </div>
+        {agent.projectDir ? (
+          <div className={`hidden items-center gap-1.5 font-mono text-[11px] md:flex ${deskVisit ? 'text-[#40524b]' : 'text-text-muted'}`} title={agent.projectDir}>
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span className="truncate max-w-[28ch]">{agent.projectDir}</span>
+          </div>
+        ) : null}
+        <SurfaceTabs value={view} onChange={setView} />
+      </header>
+
+      {view === 'tasks' ? (
+        <div className={deskVisit ? 'min-h-0 flex-1 overflow-hidden rounded-lg border border-white/26 bg-white/55 shadow-2xl backdrop-blur-xl' : 'flex-1 min-h-0 overflow-hidden'}>
+          <KanbanBoard scope={{ kind, handle: agent.handle }} />
+        </div>
+      ) : (
+      <div className={deskVisit ? 'grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_300px] gap-3' : 'grid flex-1 min-h-0 grid-cols-[260px_1fr_280px] gap-px bg-border'}>
+        <aside className={`flex min-h-0 flex-col ${deskVisit ? 'overflow-hidden rounded-lg border border-white/26 bg-white/55 text-[#12201b] shadow-2xl backdrop-blur-xl' : 'bg-surface-1/40'}`}>
+          <div className={`vs-mono flex-shrink-0 border-b border-border px-4 py-2 text-[10px] uppercase tracking-[0.22em] ${deskVisit ? 'text-[#53655d]' : 'text-text-muted'}`}>
+            Project files
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <FileTree cfg={cfg} handle={agent.handle} onOpen={setActiveFile} activePath={activeFile} />
+          </div>
+        </aside>
+
+        <main className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${deskVisit ? 'rounded-lg border border-white/26 bg-[#101714]/72 shadow-2xl backdrop-blur-xl' : 'bg-surface-0/60'}`}>
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="vs-mono flex-shrink-0 border-b border-border px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-text-muted">
+              File editor
+            </div>
+            <FileEditor cfg={cfg} handle={agent.handle} path={activeFile} />
+          </section>
+          <div
+            className="flex-shrink-0"
+            style={{
+              height: '6px',
+              background: 'linear-gradient(90deg, transparent 0%, rgba(181,108,255,0.55) 30%, rgba(92,200,255,0.55) 70%, transparent 100%)',
+            }}
+            aria-hidden
+          />
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="vs-mono flex-shrink-0 border-b border-border px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-text-muted">
+              {deskVisit ? 'Voice desk' : 'Chat'} with {agent.displayName}
+            </div>
+            {activeSession ? (
+              <ChatPanel cfg={cfg} handle={agent.handle} sessionId={activeSession.id} displayName={agent.displayName} />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-[12px] text-text-muted">
+                Initialising chat session…
+              </div>
+            )}
+          </section>
+        </main>
+
+        <aside className={`flex min-h-0 flex-col ${deskVisit ? 'overflow-hidden rounded-lg border border-white/26 bg-white/55 text-[#12201b] shadow-2xl backdrop-blur-xl' : 'bg-surface-1/40'}`}>
+          <div className={`vs-mono flex-shrink-0 border-b border-border px-4 py-2 text-[10px] uppercase tracking-[0.22em] ${deskVisit ? 'text-[#53655d]' : 'text-text-muted'}`}>
+            Agenda · agenda.md
+          </div>
+          <AgendaPanel
+            cfg={cfg}
+            handle={agent.handle}
+            agentNoun={cfg.agentNoun}
+            fallbackPath={agent.projectDir ? `${agent.projectDir}/.boss/agenda.md` : '<projectDir>/.boss/agenda.md'}
+          />
+        </aside>
+      </div>
+      )}
+    </div>
+  );
+}
+
+export function RascalWorkspace() {
+  return <AgentWorkspaceImpl kind="rascal" />;
+}
+
+export function OutsiderWorkspace() {
+  return <AgentWorkspaceImpl kind="outsider" />;
+}

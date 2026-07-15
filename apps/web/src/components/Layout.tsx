@@ -233,7 +233,7 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <div
-      className={`relative flex h-screen overflow-hidden aios-room-shell aios-room-${roomTone}`}
+      className={`relative flex h-screen overflow-hidden aios-room-shell aios-room-${roomTone}${healthImmersive ? '' : ' aios-non-health'}`}
       style={{ background: rascalsImmersive || roomTone === 'bullpen' ? '#d8d1c2' : '#06080b' }}
     >
       {shellScene && (

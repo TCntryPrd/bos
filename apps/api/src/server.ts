@@ -34,7 +34,7 @@ import { outsidersRoutes } from './routes/outsiders.js';
 import { metaWebhookRoutes } from './routes/webhooks/meta.js';
 import { whatsappWebhookRoutes } from './routes/webhooks/whatsapp.js';
 import { quickbooksWebhookRoutes } from './routes/webhooks/quickbooks.js';
-import { whatsappRoutes } from './routes/whatsapp.js';
+import { whatsappRoutes, startWhatsAppScheduledDispatcher } from './routes/whatsapp.js';
 import { metaRoutes } from './routes/meta.js';
 import { META_CREDENTIALS_DDL } from './lib/meta-graph.js';
 import { slackFeedRoutes } from './routes/slack-feed.js';
@@ -248,6 +248,11 @@ export async function buildServer() {
 
       // Slack sales feed poller — captures team-reported sales from channels.
       startSlackFeedPoller(server.log);
+
+      // WhatsApp scheduled-message dispatcher — sends due approved rows from
+      // boss_whatsapp_scheduled via the WhatsApp bridge. Safe no-op when the
+      // bridge is not configured (each tick re-checks env).
+      startWhatsAppScheduledDispatcher(server.log);
     } catch (err) {
       server.log.error({ err }, 'Failed to initialize database');
       throw err;

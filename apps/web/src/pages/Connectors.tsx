@@ -9,7 +9,7 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  Plug, RefreshCw, ExternalLink, Trash2, CheckCircle2, Loader2, KeyRound, Linkedin, MessageCircle,
+  Plug, RefreshCw, ExternalLink, Trash2, CheckCircle2, Loader2, KeyRound, Linkedin,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { connectorsApi, unipileApi, type UnipileAccountStatus } from '../lib/api';
@@ -40,7 +40,7 @@ const META: Record<string, { hue: string; initials: string; keyLabel: string; he
   github:        { hue: '#E8ECF4', initials: 'GH', keyLabel: 'Personal access token', help: 'GitHub → Settings → Developer settings → tokens.', helpUrl: 'https://github.com/settings/tokens' },
   youtube:       { hue: '#FF5C5C', initials: 'YT', keyLabel: 'API key', help: 'YouTube Data API key (can reuse your Gemini/Google key).', helpUrl: 'https://console.cloud.google.com/apis/credentials' },
   miro:          { hue: '#FFD02F', initials: 'Mi', keyLabel: 'Access token', help: 'Powers the Canvas board surface. Create an access token in your Miro app settings.', helpUrl: 'https://miro.com/app/settings/user-profile/apps' },
-  unipile:       { hue: '#20B26B', initials: 'Up', keyLabel: 'Unipile API key', help: 'Shared provider for live LinkedIn and WhatsApp accounts. Base URL is your DSN, for example https://api50.unipile.com:18056.', helpUrl: 'https://www.unipile.com/' },
+  unipile:       { hue: '#0A66C2', initials: 'Up', keyLabel: 'Unipile API key', help: 'Provider for the live LinkedIn account (LinkedIn only — WhatsApp pairs by QR on the WhatsApp page). Base URL is your DSN, for example https://api50.unipile.com:18056.', helpUrl: 'https://www.unipile.com/' },
 };
 
 function StatusPill({ on }: { on: boolean }) {
@@ -180,18 +180,18 @@ function IntegrationCard({ integ, onConnectOAuth, onChanged }: {
   );
 }
 
+// Unipile is LinkedIn-ONLY — WhatsApp runs on the wa-bridge and pairs by QR on the
+// WhatsApp page, not here.
 function UnipileAccountCard({ status, onConnect }: { status: UnipileAccountStatus; onConnect: (provider: UnipileAccountStatus['provider']) => void }) {
-  const isLinkedIn = status.provider === 'LINKEDIN';
-  const Icon = isLinkedIn ? Linkedin : MessageCircle;
   return (
     <div className="card p-4">
       <div className="flex items-start gap-3">
-        <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white" style={{ background: isLinkedIn ? '#0A66C2' : '#20B26B' }}>
-          <Icon className="w-4 h-4" aria-hidden />
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white" style={{ background: '#0A66C2' }}>
+          <Linkedin className="w-4 h-4" aria-hidden />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-text-primary">{isLinkedIn ? 'LinkedIn via Unipile' : 'WhatsApp via Unipile'}</span>
+            <span className="text-sm font-semibold text-text-primary">LinkedIn via Unipile</span>
             <StatusPill on={status.connected} />
             <span className="text-[10px] uppercase tracking-wider text-text-muted">Unipile</span>
           </div>
@@ -233,7 +233,8 @@ export function Connectors() {
     ])
       .then(([d, up]) => {
         setList(d);
-        setUnipile(up?.accounts ?? []);
+        // Defensive: only LinkedIn accounts render here — WhatsApp is on the wa-bridge now.
+        setUnipile((up?.accounts ?? []).filter((a) => a.provider === 'LINKEDIN'));
         setErr(up?.error ?? null);
       })
       .catch((e) => setErr(e instanceof Error ? e.message : 'Failed to load connections'))
@@ -287,7 +288,7 @@ export function Connectors() {
         <>
           {unipile.length > 0 && (
             <section>
-              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Live Unipile Accounts</h2>
+              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">LinkedIn (Unipile)</h2>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {unipile.map((status) => <UnipileAccountCard key={status.provider} status={status} onConnect={connectUnipile} />)}
               </div>

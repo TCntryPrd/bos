@@ -2129,8 +2129,11 @@ async function getApprovedSlackChannels(): Promise<string[] | null> {
 
 async function checkSlackChannelApproved(channelId: string, channelName?: string): Promise<boolean> {
   const approved = await getApprovedSlackChannels();
-  if (!approved) return true; // No list = all approved
-  if (approved.length === 0) return true; // Empty list = all approved
+  // Strict mode (client boxes): no usable allowlist means DENY, not allow-all.
+  // The default fail-open is fine on the owner's own workspace, but on a client
+  // box a DB hiccup must not silently widen access to every channel.
+  const strict = process.env.SLACK_STRICT_CHANNELS === 'true';
+  if (!approved || approved.length === 0) return !strict;
   // Check by ID or by name (with or without #)
   return approved.some(a =>
     a === channelId ||

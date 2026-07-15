@@ -121,7 +121,7 @@ function shapeMessage(row: ChatMessageRow) {
   };
 }
 
-const DEFAULT_MODEL = 'claude-sonnet-4-5';
+const DEFAULT_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5';
 const SESSION_NAME_MAX = 80;
 
 async function loadSoulSnapshot(

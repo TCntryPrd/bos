@@ -669,7 +669,7 @@ export function Settings() {
   ];
 
   return (
-    <div className="aios-page aios-page-pad mx-auto flex w-full max-w-[1360px] flex-col gap-4">
+    <div className="aios-page aios-page-pad aios-frost-content mx-auto flex w-full max-w-[1360px] flex-col gap-4">
       <div className="aios-command-hero flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-end">
         <div className="min-w-0 flex-1">
           <div className="vs-mono mb-1 text-[10px] uppercase tracking-[0.22em] text-text-muted">Control Center</div>

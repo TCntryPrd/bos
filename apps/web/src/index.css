@@ -67,7 +67,7 @@
     border: 1px solid rgba(226, 232, 240, 0.8);
     border-radius: 8px;
     background:
-      linear-gradient(145deg, rgba(255, 255, 255, 0.8), rgba(241, 245, 249, 0.52)),
+      linear-gradient(145deg, rgba(242, 244, 247, 0.57), rgba(226, 232, 240, 0.53)),
       linear-gradient(90deg, rgba(14, 165, 233, 0.11), rgba(245, 158, 11, 0.07));
     color: #0f172a;
     box-shadow: 0 28px 82px rgba(15, 23, 42, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.82);
@@ -386,32 +386,28 @@
   .dashboard-floating-tile[data-floating-tile='brief'] .dashboard-floating-content > *,
   .dashboard-floating-tile[data-floating-tile='tasks'] .dashboard-floating-content > *,
   .dashboard-floating-tile[data-floating-tile='timeline'] .dashboard-floating-content > * {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(241, 248, 255, 0.1)) !important;
-    border-color: rgba(100, 116, 139, 0.16) !important;
-    box-shadow: 0 10px 28px rgba(24, 34, 53, 0.05) !important;
+    background: linear-gradient(145deg, rgba(242, 244, 247, 0.57), rgba(226, 232, 240, 0.53)) !important;
+    border-color: rgba(11, 45, 87, 0.32) !important;
+    box-shadow: 0 18px 44px rgba(6, 30, 55, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
   }
 
   .dashboard-floating-lobby .aios-command-hero {
-    border: 1px solid transparent;
+    border: 1px solid rgba(11, 45, 87, 0.3);
     border-radius: 8px;
-    background: transparent;
+    background: linear-gradient(145deg, rgba(242, 244, 247, 0.57), rgba(226, 232, 240, 0.53));
     color: #073563;
-    box-shadow: none;
-    backdrop-filter: none;
+    box-shadow: 0 18px 42px rgba(6, 30, 55, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(8px) saturate(1.03);
   }
 
   .dashboard-floating-lobby .aios-command-hero h1 {
     color: #072f5a;
-    text-shadow:
-      0 0 16px rgba(255, 255, 255, 0.9),
-      0 2px 7px rgba(9, 48, 92, 0.34);
+    text-shadow: none;
   }
 
   .dashboard-floating-lobby .dashboard-floating-hero .vs-mono,
   .dashboard-floating-lobby .dashboard-floating-hero [data-testid='dashboard-substat'] {
-    text-shadow:
-      0 0 12px rgba(255, 255, 255, 0.88),
-      0 1px 4px rgba(9, 48, 92, 0.26);
+    text-shadow: none !important;
   }
 
   .dashboard-life-card .vs-mono {
@@ -422,6 +418,10 @@
     display: flex;
     flex-direction: column;
     padding: 10px !important;
+    background: linear-gradient(145deg, rgba(242, 244, 247, 0.55), rgba(226, 232, 240, 0.51)) !important;
+    border: 1px solid rgba(11, 45, 87, 0.28) !important;
+    box-shadow: 0 16px 38px rgba(6, 30, 55, 0.16) !important;
+    backdrop-filter: blur(8px) saturate(1.04);
   }
 
   .dashboard-life-card > .flex {
@@ -450,11 +450,11 @@
     padding: 4px 8px;
     text-align: left;
     background:
-      linear-gradient(145deg, rgba(255, 255, 255, 0.74), rgba(235, 247, 255, 0.48)),
+      linear-gradient(145deg, rgba(248, 250, 252, 0.61), rgba(226, 232, 240, 0.57)),
       linear-gradient(90deg, color-mix(in srgb, var(--life-signal-color) 12%, transparent), transparent);
     color: #0d2f59;
-    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.72);
-    backdrop-filter: blur(8px) saturate(1.06);
+    box-shadow: 0 8px 20px rgba(6, 30, 55, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+    backdrop-filter: blur(6px) saturate(1.02);
     overflow: hidden;
   }
 
@@ -486,10 +486,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 8.5px;
+    font-size: 9.5px;
     font-weight: 700;
-    line-height: 1;
-    letter-spacing: 0.08em;
+    line-height: 1.08;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     color: #315173;
   }
@@ -501,11 +501,33 @@
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     white-space: normal;
-    font-size: 10.75px;
+    font-size: 12px;
     font-weight: 700;
-    line-height: 1.08;
+    line-height: 1.12;
     text-align: left;
     color: #0b2d57;
+  }
+
+  .dashboard-floating-tile[data-floating-tile='brief'] [class~='text-[9.5px]'] {
+    font-size: 10.5px !important;
+  }
+
+  .dashboard-floating-tile[data-floating-tile='brief'] [class~='text-[10px]'],
+  .dashboard-floating-tile[data-floating-tile='tasks'] [class~='text-[10px]'],
+  .dashboard-floating-tile[data-floating-tile='timeline'] [class~='text-[10px]'] {
+    font-size: 11px !important;
+  }
+
+  .dashboard-floating-tile[data-floating-tile='brief'] [class~='text-[11px]'],
+  .dashboard-floating-tile[data-floating-tile='tasks'] [class~='text-[11px]'],
+  .dashboard-floating-tile[data-floating-tile='timeline'] [class~='text-[11px]'] {
+    font-size: 12px !important;
+  }
+
+  .dashboard-floating-tile[data-floating-tile='brief'] [class~='text-[11.5px]'],
+  .dashboard-floating-tile[data-floating-tile='tasks'] [class~='text-[11.5px]'],
+  .dashboard-floating-tile[data-floating-tile='timeline'] [class~='text-[11.5px]'] {
+    font-size: 12.5px !important;
   }
 
   .dashboard-floating-move,
@@ -2810,7 +2832,6 @@
   .aios-room-schedule .text-text-primary,
   .aios-room-broadcast .text-text-primary,
   .aios-room-archive .text-text-primary,
-  .aios-room-control .text-text-primary,
   .aios-room-aiops .text-text-primary {
     color: #0f172a !important;
   }
@@ -2820,7 +2841,6 @@
   .aios-room-schedule .text-text-secondary,
   .aios-room-broadcast .text-text-secondary,
   .aios-room-archive .text-text-secondary,
-  .aios-room-control .text-text-secondary,
   .aios-room-aiops .text-text-secondary {
     color: #334155 !important;
   }
@@ -2830,9 +2850,90 @@
   .aios-room-schedule .text-text-muted,
   .aios-room-broadcast .text-text-muted,
   .aios-room-archive .text-text-muted,
-  .aios-room-control .text-text-muted,
   .aios-room-aiops .text-text-muted {
     color: #64748b !important;
+  }
+
+  /* SETTINGS CLARITY — keep the control-room scene, but make every reading
+     surface independent of the photo behind it. */
+  .aios-room-control .aios-command-hero,
+  .aios-room-control .aios-panel {
+    background: linear-gradient(145deg, #ffffff, #f1f5f9);
+    border-color: #cbd5e1;
+    color: #0f172a;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.94);
+    backdrop-filter: none;
+  }
+
+  .aios-room-control :is(.aios-command-hero, .aios-panel) .text-text-primary {
+    color: #0f172a !important;
+  }
+
+  .aios-room-control :is(.aios-command-hero, .aios-panel) .text-text-secondary {
+    color: #334155 !important;
+  }
+
+  .aios-room-control :is(.aios-command-hero, .aios-panel) .text-text-muted {
+    color: #475569 !important;
+  }
+
+  .aios-room-control .aios-control-bar {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+    box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
+    backdrop-filter: none;
+  }
+
+  .aios-room-control .aios-control-bar [role='tab'] {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+    color: #334155 !important;
+  }
+
+  .aios-room-control .aios-control-bar [role='tab'][aria-selected='true'] {
+    background: #dbeafe !important;
+    border-color: #1d4ed8 !important;
+    color: #0f172a !important;
+    box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.12);
+  }
+
+  .aios-room-control :is(.input, .select, .btn-secondary) {
+    background: #ffffff;
+    border-color: #94a3b8;
+    color: #0f172a !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  }
+
+  .aios-room-control .btn-secondary:hover {
+    background: #e2e8f0;
+  }
+
+  .aios-room-control .btn-primary {
+    background: #1d4ed8;
+    color: #ffffff !important;
+    box-shadow: 0 10px 22px rgba(29, 78, 216, 0.24);
+  }
+
+  .aios-room-control .aios-panel [class~='bg-surface-2/40'] {
+    background: #f1f5f9 !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  .aios-room-control :is(.aios-command-hero, .aios-panel) .text-xs {
+    font-size: 0.8125rem;
+  }
+
+  .aios-room-control .boss-nav-surface .text-text-primary,
+  .aios-room-control .boss-nav-surface h1 {
+    color: #f8fafc !important;
+  }
+
+  .aios-room-control .boss-nav-surface .text-text-secondary {
+    color: #cbd5e1 !important;
+  }
+
+  .aios-room-control .boss-nav-surface .text-text-muted {
+    color: #94a3b8 !important;
   }
 
   .aios-panel,
@@ -3716,3 +3817,142 @@
 [data-brand='plain'] .aios-main,
 [data-brand='plain'] .aios-page,
 [data-brand='plain'] .aios-workbench { background-image: none !important; }
+
+/* EXECUTIVE 45% FROST — shared reading surfaces across every authenticated
+   non-Health page. Dashboard keeps its approved bespoke treatment and Health
+   never receives .aios-non-health. The explicit hooks cover bespoke rooms
+   without touching controls, fields, media, or overlays. */
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) {
+  --aios-frost-light: rgb(242 244 247 / 0.55);
+  --aios-frost-dark: rgb(8 13 28 / 0.55);
+  --aios-frost-light-border: rgb(11 45 87 / 0.3);
+  --aios-frost-dark-border: rgb(226 232 240 / 0.22);
+}
+
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) #main-content :is(
+  .aios-command-hero,
+  .aios-panel,
+  .card,
+  .aios-workbench,
+  .aios-iframe-shell,
+  .aios-stat,
+  .aios-segment,
+  .aios-frost-surface
+),
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) #main-content .aios-frost-content :is(div, section, article, aside, main, header, footer)[class^='bg-surface'],
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) #main-content .aios-frost-content :is(div, section, article, aside, main, header, footer)[class*=' bg-surface'] {
+  border-color: var(--aios-frost-light-border) !important;
+  background: var(--aios-frost-light) !important;
+  color: #0f172a !important;
+  box-shadow: 0 18px 48px rgb(15 23 42 / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.72) !important;
+  backdrop-filter: blur(12px) saturate(0.92) !important;
+}
+
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) #main-content :is(
+  .aios-command-hero,
+  .aios-panel,
+  .card,
+  .aios-workbench,
+  .aios-iframe-shell,
+  .aios-stat,
+  .aios-segment,
+  .aios-frost-surface
+) :is(.text-text-primary, .text-text-secondary, .text-text-muted, .text-muted, [class*='text-foreground'], [class~='text-text-muted/60'], [class~='text-text-muted/70']),
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) #main-content .aios-frost-content :is(div, section, article, aside, main, header, footer)[class^='bg-surface'] :is(.text-text-primary, .text-text-secondary, .text-text-muted, .text-muted, [class*='text-foreground'], [class~='text-text-muted/60'], [class~='text-text-muted/70']),
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) #main-content .aios-frost-content :is(div, section, article, aside, main, header, footer)[class*=' bg-surface'] :is(.text-text-primary, .text-text-secondary, .text-text-muted, .text-muted, [class*='text-foreground'], [class~='text-text-muted/60'], [class~='text-text-muted/70']) {
+  color: #0f172a !important;
+}
+
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) #main-content .aios-frost-surface--dark {
+  border-color: var(--aios-frost-dark-border) !important;
+  background: var(--aios-frost-dark) !important;
+  color: #f8fafc !important;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.12) !important;
+  backdrop-filter: blur(12px) saturate(0.92) !important;
+}
+
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) #main-content .aios-frost-surface--dark :is(.text-text-primary, .text-text-secondary, .text-muted, [class*='text-foreground']) {
+  color: #f8fafc !important;
+}
+
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) #main-content .aios-frost-surface--dark :is(.text-text-muted, [class~='text-text-muted/60'], [class~='text-text-muted/70']) {
+  color: #cbd5e1 !important;
+}
+
+html[data-brand='ir'][data-theme='dark'] .aios-non-health:not(.aios-room-lobby) #main-content .aios-control-bar {
+  border-color: var(--aios-frost-light-border) !important;
+  background: var(--aios-frost-light) !important;
+  color: #0f172a !important;
+  box-shadow: 0 14px 34px rgb(15 23 42 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.72) !important;
+  backdrop-filter: blur(12px) saturate(0.92) !important;
+}
+
+/* Canvas: frost its actual reading panes, not the embedded board controls. */
+html[data-brand='ir'][data-theme='dark'] .aios-non-health.aios-room-planning #main-content :is(
+  .planning-room-header,
+  .planning-whiteboard,
+  .canvas-whiteboard-plane,
+  .canvas-board-caption,
+  .canvas-whiteboard-empty,
+  .canvas-marker-rail,
+  .canvas-room-error
+) {
+  border-color: var(--aios-frost-light-border) !important;
+  background: var(--aios-frost-light) !important;
+  color: #0f172a !important;
+  box-shadow: 0 18px 48px rgb(15 23 42 / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.72) !important;
+  backdrop-filter: blur(12px) saturate(0.92) !important;
+}
+
+html[data-brand='ir'][data-theme='dark'] .aios-non-health.aios-room-planning #main-content .canvas-table-console {
+  border-color: var(--aios-frost-dark-border) !important;
+  background: var(--aios-frost-dark) !important;
+  color: #f8fafc !important;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.12) !important;
+  backdrop-filter: blur(12px) saturate(0.92) !important;
+}
+
+/* CRM: retain the dark phone experience, while giving every working pane the
+   same readable 45% light frost. Buttons and the Keap dock are deliberately excluded. */
+html[data-brand='ir'][data-theme='dark'] .aios-non-health.aios-room-revenue #main-content :is(
+  .crm-monitor,
+  .crm-monitor-topbar,
+  .crm-contact-queue,
+  .crm-contact-file,
+  .crm-tag-results,
+  .crm-contact-card,
+  .crm-result-row,
+  .crm-contact-fields div,
+  .crm-opportunity-row,
+  .crm-action-preview,
+  .crm-monitor-error
+) {
+  border-color: var(--aios-frost-light-border) !important;
+  background: var(--aios-frost-light) !important;
+  color: #0f172a !important;
+  box-shadow: 0 18px 48px rgb(15 23 42 / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.72) !important;
+  backdrop-filter: blur(12px) saturate(0.92) !important;
+}
+
+html[data-brand='ir'][data-theme='dark'] .aios-non-health.aios-room-revenue #main-content :is(
+  .crm-monitor,
+  .crm-contact-queue,
+  .crm-contact-file,
+  .crm-tag-results,
+  .crm-contact-card,
+  .crm-result-row,
+  .crm-contact-fields div,
+  .crm-opportunity-row,
+  .crm-action-preview,
+  .crm-monitor-error
+) :is(h1, h2, h3, p, strong, small, span) {
+  color: #0f172a !important;
+}
+
+html[data-brand='ir'][data-theme='dark'] .aios-non-health.aios-room-revenue #main-content .crm-phone-screen {
+  border-color: var(--aios-frost-dark-border) !important;
+  background: var(--aios-frost-dark) !important;
+  color: #f8fafc !important;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.12) !important;
+  backdrop-filter: blur(12px) saturate(0.92) !important;
+}

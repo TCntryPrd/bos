@@ -174,7 +174,7 @@ export function HermesSetup() {
         </section>
 
         {output && !activated && (
-          <section className="mt-4 overflow-hidden rounded-lg border border-border bg-[#080b10]">
+          <section className="aios-frost-surface--dark mt-4 overflow-hidden rounded-lg border border-border bg-[#080b10]">
             <div className="border-b border-white/10 bg-white/[0.03] px-3 py-2 font-mono text-xs text-slate-300">
               gemini output
             </div>
