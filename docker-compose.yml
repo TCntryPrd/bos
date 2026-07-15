@@ -86,7 +86,6 @@ services:
     environment:
       HOME: /home/boss
       PORT: "8001"
-      HOME: /home/boss
       BOSS_HOME_OVERRIDE: /home/boss
       # auto = Gemini/OpenRouter brain until `claude login`, then Claude CLI (Max).
       BOSS_CHAT_ENGINE: auto
