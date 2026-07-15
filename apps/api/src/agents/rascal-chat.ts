@@ -30,6 +30,7 @@ import {
   tailJsonlUntil,
   BridgeError,
 } from './host-bridge.js';
+import { builderTap, builderStatus } from '../lib/builder-stream.js';
 
 /**
  * Safety-net text recovery. Read the JSONL between `cursor` and EOF and
@@ -527,6 +528,7 @@ export async function runLocalChatTurn(
         const line = buffer.slice(0, nl).trim();
         buffer = buffer.slice(nl + 1);
         if (line) {
+          builderTap(ccSessionId, builderChatLabel, line);
           try { handleFrame(JSON.parse(line) as Record<string, unknown>); }
           catch { /* ignore non-json noise */ }
         }
@@ -535,8 +537,12 @@ export async function runLocalChatTurn(
     };
   })();
 
+  const builderChatLabel = `claude:${input.projectDir.split('/').pop() ?? 'agent'}`;
   let stderr = '';
   proc.stdout.on('data', parseChunk);
+  proc.on('close', (code) => {
+    builderStatus(ccSessionId, builderChatLabel, code === 0 ? 'finished' : 'error', `exit ${code}`);
+  });
   proc.stderr.on('data', (d: Buffer) => {
     stderr += d.toString('utf8');
     if (stderr.length > 4000) stderr = stderr.slice(-4000);

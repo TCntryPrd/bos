@@ -8,6 +8,7 @@ import {
   Linkedin,
   MessageCircle,
   Settings as SettingsIcon,
+  TerminalSquare,
   UserCheck,
   Users,
 } from 'lucide-react';
@@ -57,6 +58,9 @@ export function NavRail({ collapsed, onCollapseToggle, onNavClick, immersive = f
         <NavTab to="/" end icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} onNavClick={onNavClick} />
         <NavTab to="/office" icon={Building2} label="Office" collapsed={collapsed} onNavClick={onNavClick} />
         <NavTab to="/board" icon={Eye} label="Advisory Board" collapsed={collapsed} onNavClick={onNavClick} />
+        {import.meta.env.VITE_BUILDER === '1' && (
+          <NavTab to="/builder" icon={TerminalSquare} label="Builder" collapsed={collapsed} onNavClick={onNavClick} />
+        )}
         <NavTab to="/rascals" icon={Users} label="Client Managers" collapsed={collapsed} onNavClick={onNavClick} />
 
         {!collapsed && (

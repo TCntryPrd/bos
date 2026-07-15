@@ -6,6 +6,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { spawnBridgeCommand } from '../agents/host-bridge.js';
+import { builderTap, builderStatus } from '../lib/builder-stream.js';
 
 const CODEX_BIN      = process.env.BOSS_GIO_BIN ?? 'codex';
 const GIO_WORKSPACE = process.env.BOSS_GIO_WORKSPACE ?? '/home/tcntryprd/outsiders/gio';
@@ -164,14 +165,21 @@ function startCodexTurn(
     // turn.completed and other events are consumed silently; done fires on close.
   };
 
+  const builderId = `office-${Date.now()}`;
   child.stdout?.on('data', (chunk: string) => {
     lineBuffer += chunk;
     const lines = lineBuffer.split('\n');
     lineBuffer = lines.pop() ?? '';
-    for (const line of lines) processLine(line);
+    for (const line of lines) {
+      builderTap(builderId, 'office', line);
+      processLine(line);
+    }
   });
 
   child.stderr?.on('data', (chunk: string) => { stderrBuffer += chunk; });
+  child.on('close', (code) => {
+    builderStatus(builderId, 'office', code === 0 ? 'finished' : 'error', `exit ${code}`);
+  });
 
   const interrupt = (): void => {
     aborted = true;

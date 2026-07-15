@@ -25,6 +25,8 @@ COPY apps/web apps/web
 # Default points to the API container name as resolved inside Docker network.
 ARG VITE_API_URL=http://localhost:8001
 ENV VITE_API_URL=${VITE_API_URL}
+ARG VITE_BUILDER=0
+ENV VITE_BUILDER=${VITE_BUILDER}
 ARG VITE_BRAND=ir
 ENV VITE_BRAND=${VITE_BRAND}
 

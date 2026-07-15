@@ -15,6 +15,7 @@ import { gwAuthRoutes, ensureHermesDashboard } from './routes/gw-auth.js';
 import { servicesRoutes } from './routes/services.js';
 import { voiceRoutes } from './routes/voice.js';
 import { healingRoutes } from './routes/healing.js';
+import { builderRoutes } from './routes/builder.js';
 import { learningRoutes } from './routes/learning.js';
 import { backupRoutes } from './routes/backup.js';
 import { settingsRoutes } from './routes/settings.js';
@@ -299,6 +300,9 @@ export async function buildServer() {
 
   // Self-healing engine
   await server.register(healingRoutes, { prefix: '/api/healing' });
+
+  // Builder-mode live agent console (404s unless BOSS_BUILDER_MODE=1)
+  await server.register(builderRoutes, { prefix: '/api/builder' });
 
   // Learning and preferences
   await server.register(learningRoutes, { prefix: '/api/learning' });
