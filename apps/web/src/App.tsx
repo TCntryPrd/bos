@@ -11,6 +11,7 @@
 
 import React, { Suspense, lazy, useState, useCallback } from 'react';
 import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
+import Builder from './pages/Builder';
 import { Rascals } from './pages/Rascals';
 import { Layout } from './components/Layout';
 import { PageLoader } from './components/LoadingSpinner';
@@ -133,6 +134,7 @@ export default function App() {
           <Route path="/crm" element={<CRM />} />
           <Route path="/whatsapp" element={<WhatsApp />} />
           <Route path="/oc" element={<OC />} />
+          {import.meta.env.VITE_BUILDER === '1' && <Route path="/builder" element={<Builder />} />}
           <Route path="/coo" element={<COO />} />
           <Route path="/rascals" element={<Rascals />} />
           <Route path="/rascals/:handle" element={<RascalWorkspace />} />

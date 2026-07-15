@@ -16,6 +16,7 @@ import {
   Brush,
   Terminal,
   Settings as SettingsIcon,
+  TerminalSquare,
   Plug,
   HeartPulse,
 } from 'lucide-react';
@@ -137,6 +138,9 @@ export function NavRail({ collapsed, onCollapseToggle, onNavClick }: NavRailProp
           )}
           {collapsed && <div className="h-px bg-border mx-2 my-2" aria-hidden />}
 
+          {import.meta.env.VITE_BUILDER === '1' && (
+            <NavTab to="/builder" icon={TerminalSquare} label="Builder" collapsed={collapsed} onNavClick={onNavClick} />
+          )}
           <NavTab to="/tasks" icon={Columns3} label="Task Board" variant="kanban" collapsed={collapsed} onNavClick={onNavClick} />
           <NavTab to="/canvas" icon={Frame} label="Canvas" variant="miro" collapsed={collapsed} onNavClick={onNavClick} />
           <NavTab to="/calendar" icon={Calendar}  label="Calendar" collapsed={collapsed} onNavClick={onNavClick} />
