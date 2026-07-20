@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { SortableTileGrid } from '../components/tiles/SortableTileGrid';
 import {
   BarChart3,
   ExternalLink,
@@ -234,11 +235,26 @@ export default function SocialMedia() {
         </button>
       </header>
 
-      <section className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard platform="linkedin" title="LinkedIn" ready={platformReady.linkedin} value={linkedinStatus?.connected ? 'Connected' : 'Not connected'} detail={`${linkedinPosts.length} BOS posts`} />
-        <MetricCard platform="facebook" title="Facebook" ready={platformReady.facebook} value={fb ? metric(fb.followers) : '-'} detail={fb ? `${metric(fb.totals.reactions)} reactions, ${metric(fb.totals.comments)} comments` : 'No Page data'} />
-        <MetricCard platform="instagram" title="Instagram" ready={platformReady.instagram} value={ig ? metric(ig.followers) : '-'} detail={ig ? `${metric(ig.totals.likes)} likes, ${metric(ig.totals.comments)} comments` : 'No IG data'} />
-        <MetricCard platform="whatsapp" title="WhatsApp" ready={platformReady.whatsapp} value={String(threads.length)} detail={`${contacts.length} contacts, ${unread} unread`} />
+      <section className="mb-4">
+        <SortableTileGrid
+          storageKey="boss_social_metric_order_v1"
+          ids={['linkedin', 'facebook', 'instagram', 'whatsapp']}
+          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+          render={(id) => {
+            switch (id) {
+              case 'linkedin':
+                return <MetricCard platform="linkedin" title="LinkedIn" ready={platformReady.linkedin} value={linkedinStatus?.connected ? 'Connected' : 'Not connected'} detail={`${linkedinPosts.length} BOS posts`} />;
+              case 'facebook':
+                return <MetricCard platform="facebook" title="Facebook" ready={platformReady.facebook} value={fb ? metric(fb.followers) : '-'} detail={fb ? `${metric(fb.totals.reactions)} reactions, ${metric(fb.totals.comments)} comments` : 'No Page data'} />;
+              case 'instagram':
+                return <MetricCard platform="instagram" title="Instagram" ready={platformReady.instagram} value={ig ? metric(ig.followers) : '-'} detail={ig ? `${metric(ig.totals.likes)} likes, ${metric(ig.totals.comments)} comments` : 'No IG data'} />;
+              case 'whatsapp':
+                return <MetricCard platform="whatsapp" title="WhatsApp" ready={platformReady.whatsapp} value={String(threads.length)} detail={`${contacts.length} contacts, ${unread} unread`} />;
+              default:
+                return null;
+            }
+          }}
+        />
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]">

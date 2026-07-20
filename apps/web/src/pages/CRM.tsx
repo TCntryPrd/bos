@@ -7,6 +7,7 @@
  */
 
 import React, { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
+import { useTilesLocked } from '../lib/tileLock';
 import {
   CheckCircle2,
   ContactRound,
@@ -495,7 +496,8 @@ export default function CRM() {
     };
   };
 
-  const resizeHandles = (tile: TileId) => RESIZE_EDGES.map((edge) => (
+  const crmTilesLocked = useTilesLocked();
+  const resizeHandles = (tile: TileId) => crmTilesLocked ? null : RESIZE_EDGES.map((edge) => (
     <button
       key={edge}
       type="button"
@@ -520,6 +522,7 @@ export default function CRM() {
         style={tileStyle('phone')}
         aria-label="CRM phone search"
       >
+        {!crmTilesLocked && (
         <button
           type="button"
           className="crm-tile-move-handle"
@@ -529,6 +532,7 @@ export default function CRM() {
         >
           <Move className="h-4 w-4" />
         </button>
+        )}
         {resizeHandles('phone')}
         <div className="crm-phone-speaker" aria-hidden />
         <div className="crm-phone-screen">
@@ -596,6 +600,7 @@ export default function CRM() {
         style={tileStyle('monitor')}
         aria-label="CRM contact monitor"
       >
+        {!crmTilesLocked && (
         <button
           type="button"
           className="crm-tile-move-handle"
@@ -605,6 +610,7 @@ export default function CRM() {
         >
           <Move className="h-4 w-4" />
         </button>
+        )}
         {resizeHandles('monitor')}
         <div className="crm-monitor">
           <div className="crm-monitor-topbar">
