@@ -7,14 +7,13 @@
  *     config so your tools use your key immediately.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  Plug, RefreshCw, ExternalLink, Trash2, CheckCircle2, Loader2, KeyRound,
+  Plug, RefreshCw, ExternalLink, Trash2, CheckCircle2, Loader2, KeyRound, Linkedin, Copy, Check, Upload,
 } from 'lucide-react';
 import { Card } from '../components/Card';
-import { connectorsApi } from '../lib/api';
-import { OAuthSetupWizard } from '../components/shell/OAuthSetupWizard';
-import { getOAuthGuide } from '../config/oauthProviders';
+import { connectorsApi, unipileApi, type UnipileAccountStatus } from '../lib/api';
+import { SortableTileGrid } from '../components/tiles/SortableTileGrid';
 
 interface Integration {
   id: string;
@@ -37,15 +36,15 @@ const META: Record<string, { hue: string; initials: string; keyLabel: string; he
   telegram:      { hue: '#5CC8FF', initials: 'T', keyLabel: 'Bot token', help: 'Create a bot with @BotFather and paste its token.', helpUrl: 'https://t.me/BotFather', extras: [{ field: 'adminChatId', label: 'Admin chat ID (optional)' }] },
   make:          { hue: '#7C3CFF', initials: 'M', keyLabel: 'API token', help: 'Make → Profile → API → generate a token.', helpUrl: 'https://www.make.com/en/help/apps/connect/connecting-to-the-make-api' },
   stripe:        { hue: '#9D8BFF', initials: 'St', keyLabel: 'Secret key (sk_…)', help: 'Stripe Dashboard → Developers → API keys.', helpUrl: 'https://dashboard.stripe.com/apikeys' },
-  nim:           { hue: '#76B900', initials: 'NIM', keyLabel: 'API key', help: 'Unlocks Email v3 triage + deterministic CFO reasoning. Free key at build.nvidia.com.', helpUrl: 'https://build.nvidia.com' },
-  unipile:       { hue: '#5C6BC0', initials: 'Up', keyLabel: 'API key', help: 'Unlocks LinkedIn + WhatsApp messaging via Unipile. Base URL = your Unipile DSN.', helpUrl: 'https://www.unipile.com/' },
-  'linkedin-gpt':{ hue: '#0A66C2', initials: 'Li', keyLabel: 'Shared secret', help: 'Optional secret for the LinkedIn Custom-GPT action bridge.' },
   homeassistant: { hue: '#20B26B', initials: 'HA', keyLabel: 'Long-lived token', help: 'HA → Profile → Long-lived access tokens. Base URL is your HA instance.', helpUrl: 'https://www.home-assistant.io/docs/authentication/' },
   gemini:        { hue: '#0EA5E9', initials: 'Ge', keyLabel: 'API key', help: 'Get a key from Google AI Studio.', helpUrl: 'https://aistudio.google.com/apikey' },
   github:        { hue: '#E8ECF4', initials: 'GH', keyLabel: 'Personal access token', help: 'GitHub → Settings → Developer settings → tokens.', helpUrl: 'https://github.com/settings/tokens' },
   youtube:       { hue: '#FF5C5C', initials: 'YT', keyLabel: 'API key', help: 'YouTube Data API key (can reuse your Gemini/Google key).', helpUrl: 'https://console.cloud.google.com/apis/credentials' },
   miro:          { hue: '#FFD02F', initials: 'Mi', keyLabel: 'Access token', help: 'Powers the Canvas board surface. Create an access token in your Miro app settings.', helpUrl: 'https://miro.com/app/settings/user-profile/apps' },
+  unipile:       { hue: '#0A66C2', initials: 'Up', keyLabel: 'Unipile API key', help: 'Provider for the live LinkedIn account (LinkedIn only — WhatsApp pairs by QR on the WhatsApp page). Base URL is your DSN, for example https://api50.unipile.com:18056.', helpUrl: 'https://www.unipile.com/' },
 };
+
+const GOOGLE_REDIRECT_URI = window.location.origin + '/api/connectors/oauth/google/callback';
 
 function StatusPill({ on }: { on: boolean }) {
   return (
@@ -129,6 +128,144 @@ function ApiKeyForm({ integ, onSaved }: { integ: Integration; onSaved: () => voi
   );
 }
 
+function OAuthCredentialsForm({ integ, onDone }: { integ: Integration; onDone: () => void }) {
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const json = JSON.parse(ev.target?.result as string);
+        const data = json.installed ?? json.web ?? null;
+        if (!data) { setErr('Unrecognised JSON format — expected {"installed":{...}} or {"web":{...}}'); return; }
+        if (data.client_id) setClientId(data.client_id);
+        if (data.client_secret) setClientSecret(data.client_secret);
+        setErr(null);
+      } catch {
+        setErr('Could not parse file as JSON');
+      }
+    };
+    reader.readAsText(file);
+    // reset so the same file can be re-selected
+    e.target.value = '';
+  }
+
+  async function copyUri() {
+    await navigator.clipboard.writeText(GOOGLE_REDIRECT_URI);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function saveAndConnect() {
+    if (!clientId.trim()) { setErr('Client ID is required.'); return; }
+    if (!clientSecret.trim()) { setErr('Client Secret is required.'); return; }
+    setSaving(true); setErr(null);
+    try {
+      const token = localStorage.getItem('boss_token') ?? '';
+      const res = await fetch('/api/connectors/oauth/configure', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ provider: 'google', clientId: clientId.trim(), clientSecret: clientSecret.trim() }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      const { url } = await connectorsApi.getOAuthUrl('google');
+      window.location.href = url;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Save failed');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border/40 space-y-2.5">
+      <p className="text-[11.5px] text-text-muted">
+        Enter your Google Cloud OAuth credentials, or upload the JSON file you downloaded from the{' '}
+        <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-accent inline-flex items-center gap-0.5">
+          Google Cloud Console <ExternalLink className="w-3 h-3" />
+        </a>
+        .
+      </p>
+
+      {/* Redirect URI */}
+      <div>
+        <label className="block text-[10.5px] text-text-muted mb-1 uppercase tracking-wider">Authorized redirect URI — add this in Google Cloud Console</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            readOnly
+            value={GOOGLE_REDIRECT_URI}
+            className="flex-1 px-3 py-2 rounded-md bg-surface-2/60 border border-border text-[11.5px] text-text-muted font-mono focus:outline-none cursor-default"
+          />
+          <button type="button" onClick={() => void copyUri()} className="btn-ghost text-xs gap-1 flex-shrink-0">
+            {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+      </div>
+
+      {/* Client ID */}
+      <input
+        type="text"
+        value={clientId}
+        onChange={(e) => setClientId(e.target.value)}
+        placeholder="Client ID (e.g. 123...apps.googleusercontent.com)"
+        className="w-full px-3 py-2 rounded-md bg-surface-2/60 border border-border text-[12.5px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60"
+        autoComplete="off"
+      />
+
+      {/* Client Secret */}
+      <input
+        type="password"
+        value={clientSecret}
+        onChange={(e) => setClientSecret(e.target.value)}
+        placeholder="Client Secret"
+        className="w-full px-3 py-2 rounded-md bg-surface-2/60 border border-border text-[12.5px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60"
+        autoComplete="off"
+      />
+
+      {/* OR divider + file upload */}
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-px bg-border/40" />
+        <span className="text-[10.5px] text-text-muted uppercase tracking-wider">or upload JSON</span>
+        <div className="flex-1 h-px bg-border/40" />
+      </div>
+      <div>
+        <input ref={fileRef} type="file" accept=".json,application/json" onChange={handleFileUpload} className="hidden" />
+        <button type="button" onClick={() => fileRef.current?.click()} className="btn-secondary text-xs gap-1.5">
+          <Upload className="w-3.5 h-3.5" /> Choose credentials JSON
+        </button>
+      </div>
+
+      {err && <p className="text-[11.5px] text-danger">{err}</p>}
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void saveAndConnect()}
+          disabled={saving}
+          className="btn-primary text-xs gap-1.5 disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5" />}
+          {saving ? 'Connecting…' : 'Save & Connect with Google'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function IntegrationCard({ integ, onConnectOAuth, onChanged }: {
   integ: Integration;
   onConnectOAuth: (id: string) => void;
@@ -156,12 +293,21 @@ function IntegrationCard({ integ, onConnectOAuth, onChanged }: {
           </div>
 
           {integ.type === 'oauth' ? (
-            <div className="mt-2 flex items-center gap-2">
-              <button type="button" onClick={() => onConnectOAuth(integ.id)} className="btn-secondary text-xs gap-1.5">
-                {integ.configured ? 'Reconnect' : 'Connect'} <ExternalLink className="w-3.5 h-3.5" />
-              </button>
-              <span className="text-[11.5px] text-text-muted">{META[integ.id]?.help}</span>
-            </div>
+            integ.id === 'google' ? (
+              <div className="mt-2">
+                <button type="button" onClick={() => setOpen((v) => !v)} className="btn-secondary text-xs gap-1.5">
+                  {integ.configured ? 'Reconnect' : 'Connect'} <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+                {open && <OAuthCredentialsForm integ={integ} onDone={() => { setOpen(false); onChanged(); }} />}
+              </div>
+            ) : (
+              <div className="mt-2 flex items-center gap-2">
+                <button type="button" onClick={() => onConnectOAuth(integ.id)} className="btn-secondary text-xs gap-1.5">
+                  {integ.configured ? 'Reconnect' : 'Connect'} <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-[11.5px] text-text-muted">{META[integ.id]?.help}</span>
+              </div>
+            )
           ) : (
             <div className="mt-2 flex items-center gap-2">
               <button type="button" onClick={() => setOpen((v) => !v)} className="btn-secondary text-xs gap-1.5">
@@ -184,25 +330,72 @@ function IntegrationCard({ integ, onConnectOAuth, onChanged }: {
   );
 }
 
+// Unipile is LinkedIn-ONLY — WhatsApp runs on the wa-bridge and pairs by QR on the
+// WhatsApp page, not here.
+function UnipileAccountCard({ status, onConnect }: { status: UnipileAccountStatus; onConnect: (provider: UnipileAccountStatus['provider']) => void }) {
+  return (
+    <div className="card p-4">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white" style={{ background: '#0A66C2' }}>
+          <Linkedin className="w-4 h-4" aria-hidden />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-text-primary">LinkedIn via Unipile</span>
+            <StatusPill on={status.connected} />
+            <span className="text-[10px] uppercase tracking-wider text-text-muted">Unipile</span>
+          </div>
+          <p className="mt-1 text-[11.5px] text-text-muted">
+            {status.connected
+              ? `${status.name ?? status.accountId ?? 'Account connected'} · ${status.health}`
+              : status.configured
+                ? 'Shared Unipile key is ready. Connect this account with hosted auth.'
+                : 'Add the shared Unipile key and DSN first.'}
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onConnect(status.provider)}
+              disabled={!status.configured}
+              className="btn-secondary text-xs gap-1.5 disabled:opacity-50"
+            >
+              {status.connected ? 'Reconnect' : 'Connect'} <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+            {status.accountId && <span className="text-[10.5px] text-text-muted font-mono truncate max-w-[220px]">{status.accountId}</span>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Connectors() {
   const [list, setList] = useState<Integration[] | null>(null);
+  const [unipile, setUnipile] = useState<UnipileAccountStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [wizardProvider, setWizardProvider] = useState<string | null>(null);
 
   const load = React.useCallback(() => {
     setLoading(true);
-    connectorsApi.getIntegrations()
-      .then((d) => { setList(d); setErr(null); })
+    Promise.all([
+      connectorsApi.getIntegrations(),
+      unipileApi.getStatus().catch(() => null),
+    ])
+      .then(([d, up]) => {
+        setList(d);
+        // Defensive: only LinkedIn accounts render here — WhatsApp is on the wa-bridge now.
+        setUnipile((up?.accounts ?? []).filter((a) => a.provider === 'LINKEDIN'));
+        setErr(up?.error ?? null);
+      })
       .catch((e) => setErr(e instanceof Error ? e.message : 'Failed to load connections'))
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  async function startOAuth(id: string) {
+  async function connectOAuth(id: string) {
     try {
-      // The OAuth connector id IS the provider (google | linkedin | slack | meta | microsoft).
+      // The OAuth connector id IS the provider (google | linkedin | microsoft).
       const { url } = await connectorsApi.getOAuthUrl(id);
       window.location.href = url;
     } catch (e) {
@@ -210,14 +403,16 @@ export function Connectors() {
     }
   }
 
-  // Connect opens the create-your-own-app setup wizard when a guide exists
-  // (LinkedIn/Meta/Slack/Google); otherwise starts OAuth directly.
-  function connectOAuth(id: string) {
-    if (getOAuthGuide(id)) setWizardProvider(id);
-    else void startOAuth(id);
+  async function connectUnipile(provider: UnipileAccountStatus['provider']) {
+    try {
+      const { url } = await unipileApi.getConnectLink(provider);
+      window.location.href = url;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not start Unipile hosted auth');
+    }
   }
 
-  const oauth = (list ?? []).filter((i) => i.type === 'oauth');
+  const oauth = (list ?? []).filter((i) => i.type === 'oauth' && i.id !== 'linkedin');
   const apikeys = (list ?? []).filter((i) => i.type === 'apikey');
   const connectedCount = (list ?? []).filter((i) => i.configured).length;
 
@@ -241,19 +436,39 @@ export function Connectors() {
         <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 className="w-4 h-4 animate-spin" /> Loading connections…</div>
       ) : list && list.length > 0 ? (
         <>
+          {unipile.length > 0 && (
+            <section>
+              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">LinkedIn (Unipile)</h2>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {unipile.map((status) => <UnipileAccountCard key={status.provider} status={status} onConnect={connectUnipile} />)}
+              </div>
+            </section>
+          )}
           {oauth.length > 0 && (
             <section>
               <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Sign-in (OAuth)</h2>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {oauth.map((i) => <IntegrationCard key={i.id} integ={i} onConnectOAuth={connectOAuth} onChanged={load} />)}
-              </div>
+              <SortableTileGrid
+                storageKey="boss_connectors_oauth_order_v1"
+                ids={oauth.map((i) => i.id)}
+                className="grid grid-cols-1 lg:grid-cols-2 gap-3"
+                render={(id) => {
+                  const i = oauth.find((x) => x.id === id);
+                  return i ? <IntegrationCard integ={i} onConnectOAuth={connectOAuth} onChanged={load} /> : null;
+                }}
+              />
             </section>
           )}
           <section>
             <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">API key</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              {apikeys.map((i) => <IntegrationCard key={i.id} integ={i} onConnectOAuth={connectOAuth} onChanged={load} />)}
-            </div>
+            <SortableTileGrid
+              storageKey="boss_connectors_apikey_order_v1"
+              ids={apikeys.map((i) => i.id)}
+              className="grid grid-cols-1 lg:grid-cols-2 gap-3"
+              render={(id) => {
+                const i = apikeys.find((x) => x.id === id);
+                return i ? <IntegrationCard integ={i} onConnectOAuth={connectOAuth} onChanged={load} /> : null;
+              }}
+            />
           </section>
         </>
       ) : (
@@ -268,13 +483,6 @@ export function Connectors() {
       <p className="text-[11.5px] text-text-muted flex items-center gap-1.5">
         <CheckCircle2 className="w-3.5 h-3.5 text-success" /> Keys are stored in your workspace config and used by your agents immediately. Disconnect any time.
       </p>
-
-      <OAuthSetupWizard
-        providerId={wizardProvider ?? ''}
-        open={!!wizardProvider}
-        onClose={() => setWizardProvider(null)}
-        onAuthorize={(p) => { setWizardProvider(null); void startOAuth(p); }}
-      />
     </div>
   );
 }

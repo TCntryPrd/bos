@@ -1,24 +1,49 @@
 import React from 'react';
 import irBadge from '../../assets/ir-badge.png';
+import { getAiosName, getBrandByline, isBrandBadgeHidden } from '../../lib/theme';
+import { isPlainBrand } from '../../lib/brand';
 
 /**
- * Industry Rockstar badge + "BOS" wordmark. The badge is black artwork, so
- * `.ir-mark` is inverted to white in the dark theme (see index.css).
+ * BOS lockup — Industry Rockstar badge + wordmark:
+ *   BOS — {AIOS Name}
+ *   BUSINESS OPERATING SYSTEM
+ *   From Industry Rockstar
+ * The AIOS name is per-install (see getAiosName); when unset the mark reads "BOS".
+ * The badge is black artwork, so `.ir-mark` is inverted to white in the dark
+ * (Executive) theme (see index.css).
  */
-export function BossMark({ scale = 1, collapsed = false }: { scale?: number; collapsed?: boolean }) {
+export function BossMark({
+  scale = 1,
+  collapsed = false,
+  centered = false,
+}: { scale?: number; collapsed?: boolean; centered?: boolean }) {
   const size = 28 * scale;
+  const name = getAiosName();
+  const byline = isPlainBrand ? '' : getBrandByline('From Industry Rockstar');
+  const showBadge = !isBrandBadgeHidden();
+  const centeredLockup = centered && !collapsed && showBadge;
   return (
-    <div className="flex items-center" style={{ gap: 10 * scale }}>
-      <img
-        src={irBadge}
-        alt="Industry Rockstar"
-        className="ir-mark flex-shrink-0 object-contain"
-        style={{ width: size, height: size }}
-      />
+    <div
+      className={centeredLockup ? 'relative flex w-full items-center justify-center' : 'flex items-center'}
+      style={centeredLockup ? undefined : { gap: 10 * scale }}
+    >
+      {showBadge && (
+        <img
+          src={irBadge}
+          alt=""
+          className={`ir-mark flex-shrink-0 object-contain${centeredLockup ? ' absolute left-0 top-1/2 -translate-y-1/2' : ''}`}
+          style={{ width: size, height: size }}
+        />
+      )}
       {!collapsed && (
-        <div className="leading-none">
-          <div className="font-bold text-text-primary" style={{ fontSize: 15 * scale, letterSpacing: '0.22em' }}>
+        <div className={centeredLockup ? 'leading-none text-center' : 'leading-none'}>
+          <div className="font-bold text-text-primary" style={{ fontSize: 15 * scale, letterSpacing: '0.18em' }}>
             BOS
+            {name ? (
+              <span className="font-semibold text-text-secondary" style={{ letterSpacing: '0.03em' }}>
+                {' '}— {name}
+              </span>
+            ) : null}
           </div>
           <div
             className="vs-mono mt-1 text-text-muted"
@@ -26,6 +51,14 @@ export function BossMark({ scale = 1, collapsed = false }: { scale?: number; col
           >
             BUSINESS OPERATING SYSTEM
           </div>
+          {byline ? (
+            <div
+              className="vs-mono mt-[3px] text-text-muted/70"
+              style={{ fontSize: 7 * scale, letterSpacing: '0.06em', whiteSpace: 'nowrap' }}
+            >
+              {byline}
+            </div>
+          ) : null}
         </div>
       )}
     </div>

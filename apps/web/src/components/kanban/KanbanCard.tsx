@@ -67,7 +67,7 @@ export function KanbanCard({ task, onClick }: Props) {
         role="button"
         tabIndex={0}
         className={[
-          'w-full text-left rounded-md border border-accent/30 bg-accent/5',
+          'aios-frost-surface w-full text-left rounded-md border border-accent/30 bg-accent/5',
           'px-3 py-1.5 mb-2 hover:border-accent/60 transition-colors',
           'border-l-2 border-l-accent',
         ].join(' ')}
@@ -101,7 +101,7 @@ export function KanbanCard({ task, onClick }: Props) {
       role="button"
       tabIndex={0}
       className={[
-        'w-full text-left rounded-md border border-border bg-surface',
+        'aios-frost-surface w-full text-left rounded-md border border-border bg-surface',
         'px-3 py-2 mb-2 hover:border-accent/60 transition-colors',
         blocked ? 'border-l-4 border-l-red-500'
           : isPendingReview ? 'border-l-4 border-l-amber-500'

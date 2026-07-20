@@ -1,52 +1,80 @@
-// Theme preference (Phase 5, LOCKED): Dark · Light · Follow System.
-// Default = Dark when nothing is stored (locked: "default Dark if skipped").
-// "system" honors the OS prefers-color-scheme and stays in sync with changes.
-// The actual paint is driven by <html data-theme="dark|light"> (see token blocks).
+// Display mode (BOS): Executive · Plain.
+// - Executive = the full identity (warm navy depths, violet accents, gradients
+//   + glow). The default boardroom look.
+// - Plain      = a quiet, flat operations look (warm paper, slate ink, a single
+//   restrained accent, hairline borders, no gradients/glow).
+// Paint is driven by <html data-theme="dark|plain"> so the existing token
+// pipeline is reused (Executive -> dark tokens, Plain -> plain tokens).
 
-export type ThemePref = 'dark' | 'light' | 'system';
+export type BossMode = 'executive' | 'plain';
 
-const KEY = 'boss_theme';
+const KEY = 'boss_mode';
+const LEGACY_KEY = 'boss_theme';
 
-export function getStoredPref(): ThemePref {
+export function modeToTheme(mode: BossMode): 'dark' | 'plain' {
+  return mode === 'plain' ? 'plain' : 'dark';
+}
+
+export function getStoredMode(): BossMode {
   try {
     const v = localStorage.getItem(KEY);
-    if (v === 'light' || v === 'dark' || v === 'system') return v;
+    if (v === 'executive' || v === 'plain') return v;
+    // Migrate the old dark/light/system preference (light -> plain).
+    if (localStorage.getItem(LEGACY_KEY) === 'light') return 'plain';
   } catch {
     /* ignore */
   }
-  return 'dark'; // locked default
+  return 'executive';
 }
 
-export function resolveTheme(pref: ThemePref): 'dark' | 'light' {
-  if (pref === 'system') {
-    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  }
-  return pref;
+export function applyMode(mode: BossMode): void {
+  document.documentElement.setAttribute('data-theme', modeToTheme(mode));
 }
 
-export function applyPref(pref: ThemePref): void {
-  document.documentElement.setAttribute('data-theme', resolveTheme(pref));
-}
-
-export function setThemePref(pref: ThemePref): void {
+export function setBossMode(mode: BossMode): void {
   try {
-    localStorage.setItem(KEY, pref);
+    localStorage.setItem(KEY, mode);
   } catch {
     /* ignore */
   }
-  applyPref(pref);
+  applyMode(mode);
 }
 
-// Keep a "system" preference following the OS. Registers once.
-let synced = false;
-export function initThemeSync(onChange?: (resolved: 'dark' | 'light') => void): void {
-  if (synced) return;
-  synced = true;
-  const mql = window.matchMedia('(prefers-color-scheme: light)');
-  mql.addEventListener('change', () => {
-    if (getStoredPref() === 'system') {
-      applyPref('system');
-      onChange?.(resolveTheme('system'));
-    }
-  });
+// The per-install AIOS name (e.g. "Vasari", "Kane"). Injected by the installer
+// into <meta name="aios-name">. Empty when unset -> the lockup shows just "BOS".
+export function getAiosName(): string {
+  try {
+    const el = document.querySelector('meta[name="aios-name"]');
+    const v = (el?.getAttribute('content') || '').trim();
+    if (!v || v.startsWith('__')) return '';
+    return v;
+  } catch {
+    return '';
+  }
+}
+
+// Per-install lockup byline. When the meta tag is ABSENT the brand default
+// applies ("From Industry Rockstar" on the ir brand); when present its content
+// is used verbatim — content="" hides the byline entirely.
+export function getBrandByline(brandDefault: string): string {
+  try {
+    const el = document.querySelector('meta[name="aios-byline"]');
+    if (!el) return brandDefault;
+    const v = (el.getAttribute('content') || '').trim();
+    if (v.startsWith('__')) return brandDefault;
+    return v;
+  } catch {
+    return brandDefault;
+  }
+}
+
+// Per-install badge visibility: <meta name="aios-badge" content="off"> hides
+// the brand badge image in the lockup. Absent -> shown (brand default).
+export function isBrandBadgeHidden(): boolean {
+  try {
+    const el = document.querySelector('meta[name="aios-badge"]');
+    return (el?.getAttribute('content') || '').trim().toLowerCase() === 'off';
+  } catch {
+    return false;
+  }
 }

@@ -31,19 +31,51 @@ export interface WorkoutSession {
   max_hr: number | null;
 }
 
+export interface HeartRateSample {
+  bpm: number;
+  ts: string;
+  record_start_ts: string;
+  day: string;
+  source_app: string | null;
+}
+
+export interface HeartRateSummary {
+  current: HeartRateSample | null;
+  day: string | null;
+  day_low_bpm: number | null;
+  day_high_bpm: number | null;
+  sleeping_bpm: number | null;
+  resting_awake_bpm: number | null;
+  peak_bpm: number | null;
+  peak_ts: string | null;
+  peak_source: 'exercise' | 'daily' | null;
+  peak_label: string | null;
+  peak_activity_type: string | null;
+  peak_activity_title: string | null;
+}
+
 export interface HealthOverview {
   paired: boolean;
   last_sync_at: string | null;
   today: Record<string, number>;
   spark: { steps: number[]; sleep_minutes: number[]; resting_hr: number[]; active_kcal: number[] };
+  heart_rate: HeartRateSummary | null;
   sleep_detail: SleepDetail | null;
 }
 
 export interface DeviceSyncState {
   record_type: string;
   last_record_ts: string | null;
-  records_total: number;
-  updated_at: string;
+  records_total: number | null;
+  updated_at: string | null;
+  /**
+   * Diagnostics snapshot from the bridge's Health Connect probe (spec:
+   * 2026-07-06-health-diagnostics-design). Both null when the device has
+   * never reported diagnostics for this type (pre-upgrade bridge, or a type
+   * that has only synced records and no diagnostics row yet).
+   */
+  granted: boolean | null;
+  has_local_data: boolean | null;
 }
 
 export interface HealthDevice {
@@ -54,6 +86,52 @@ export interface HealthDevice {
   last_seen_at: string | null;
   revoked_at: string | null;
   sync_state: DeviceSyncState[];
+}
+
+export interface HealthAnomaly {
+  id: string;
+  day: string;
+  metric: string;
+  severity: 'info' | 'watch' | 'warning' | 'critical';
+  value: number | null;
+  baseline: number | null;
+  threshold: number | null;
+  direction: string | null;
+  summary: string;
+  detail: Record<string, unknown>;
+  status: 'open' | 'reviewed' | 'resolved' | 'dismissed';
+  detected_at: string;
+  updated_at: string;
+}
+
+export interface HealthJournalEntry {
+  id: string;
+  entry_date: string;
+  occurred_at: string | null;
+  title: string | null;
+  body: string;
+  mood: string | null;
+  energy: number | null;
+  soreness: number | null;
+  sleep_quality: number | null;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HealthMedicalRecord {
+  id: string;
+  record_date: string;
+  category: string;
+  title: string;
+  provider: string | null;
+  facility: string | null;
+  source: string | null;
+  archive_only: boolean;
+  notes: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 export const HEALTH_COLORS = {
@@ -71,7 +149,7 @@ async function hfetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  const res = await fetch(`api/health${path}`, { ...init, headers });
+  const res = await fetch(`/api/health${path}`, { ...init, headers });
   if (res.status === 401) {
     try { window.dispatchEvent(new Event('boss-auth-expired')); } catch { /* noop */ }
   }
@@ -95,6 +173,20 @@ export const healthDataApi = {
       '/devices', { method: 'POST', body: JSON.stringify({ name, platform }) }),
   revokeDevice: (id: string) =>
     hfetch<{ ok: boolean }>(`/devices/${id}`, { method: 'DELETE' }),
+  anomalies: (from: string, to: string, status = 'open', limit = 100) =>
+    hfetch<{ anomalies: HealthAnomaly[] }>(
+      `/anomalies?from=${from}&to=${to}&status=${status}&limit=${limit}`),
+  scanAnomalies: (days = 7) =>
+    hfetch<{ anomalies: HealthAnomaly[]; scanned_days: number }>(
+      '/anomalies/scan', { method: 'POST', body: JSON.stringify({ days }) }),
+  journal: (from: string, to: string, limit = 100) =>
+    hfetch<{ entries: HealthJournalEntry[] }>(`/journal?from=${from}&to=${to}&limit=${limit}`),
+  createJournal: (body: Partial<HealthJournalEntry> & { body: string; entry_date?: string }) =>
+    hfetch<{ entry: HealthJournalEntry }>('/journal', { method: 'POST', body: JSON.stringify(body) }),
+  medicalRecords: (from: string, to: string, limit = 100) =>
+    hfetch<{ records: HealthMedicalRecord[] }>(`/medical-records?from=${from}&to=${to}&limit=${limit}`),
+  createMedicalRecord: (body: Partial<HealthMedicalRecord> & { title: string; record_date?: string }) =>
+    hfetch<{ record: HealthMedicalRecord }>('/medical-records', { method: 'POST', body: JSON.stringify(body) }),
 };
 
 export function fmtHm(minutes: number): string {
@@ -103,6 +195,32 @@ export function fmtHm(minutes: number): string {
 
 export function fmtInt(n: number): string {
   return Math.round(n).toLocaleString('en-US');
+}
+
+export function kgToLb(kg: number): number {
+  return kg * 2.2046226218;
+}
+
+export function cmToFeetIn(cm: number): { feet: number; inches: number } {
+  const totalInches = Math.round(cm / 2.54);
+  return { feet: Math.floor(totalInches / 12), inches: totalInches % 12 };
+}
+
+export function cToF(celsius: number): number {
+  return (celsius * 9) / 5 + 32;
+}
+
+export function fmtLb(kg: number): string {
+  return kgToLb(kg).toFixed(1);
+}
+
+export function fmtFeetIn(cm: number): string {
+  const { feet, inches } = cmToFeetIn(cm);
+  return `${feet}'${inches}"`;
+}
+
+export function fmtF(celsius: number): string {
+  return `${Math.round(cToF(celsius))}`;
 }
 
 export function rangeToDays(range: RangeKey): number {

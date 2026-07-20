@@ -3,7 +3,37 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Smartphone, Trash2, X } from 'lucide-react';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { healthDataApi } from '../../lib/healthData';
-import type { HealthDevice } from '../../lib/healthData';
+import type { DeviceSyncState, HealthDevice } from '../../lib/healthData';
+
+/**
+ * Per-type diagnostics status (spec: 2026-07-06-health-diagnostics-design).
+ * Precedence mirrors the design doc's four states: a type with no
+ * diagnostics row at all reads as "not yet reported" even if it happens to
+ * have historical sync_state (pre-upgrade bridge that has since stopped
+ * reporting), since we can't vouch for its *current* permission state.
+ */
+type DiagnosticsStatus = 'synced' | 'no-data' | 'denied' | 'unreported';
+
+function diagnosticsStatus(s: DeviceSyncState): DiagnosticsStatus {
+  if (s.granted === null || s.has_local_data === null) return 'unreported';
+  if (!s.granted) return 'denied';
+  if (!s.has_local_data) return 'no-data';
+  return 'synced';
+}
+
+const STATUS_LABEL: Record<DiagnosticsStatus, string> = {
+  synced: 'Synced',
+  'no-data': 'No data on phone',
+  denied: 'Permission denied',
+  unreported: 'Not yet reported',
+};
+
+const STATUS_CLASS: Record<DiagnosticsStatus, string> = {
+  synced: 'text-success',
+  'no-data': 'text-warning',
+  denied: 'text-danger',
+  unreported: 'text-text-muted',
+};
 
 function freshness(d: HealthDevice): string {
   if (d.revoked_at) return 'revoked';
@@ -84,7 +114,7 @@ export function DevicesModal({ open, onClose }: { open: boolean; onClose: () => 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
       role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="bg-surface-2 border border-border rounded-xl shadow-2xl w-full max-w-md p-5 animate-slide-in"
+      <div className="aios-panel w-full max-w-md p-5 shadow-2xl animate-slide-in"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-4">
           <Smartphone size={16} className="text-text-secondary" />
@@ -109,17 +139,25 @@ export function DevicesModal({ open, onClose }: { open: boolean; onClose: () => 
             </div>
             {d.sync_state.length > 0 && (
               <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5">
-                {d.sync_state.map((s) => (
-                  <div key={s.record_type} className="flex justify-between text-[10.5px]">
-                    <span className="text-text-muted">{s.record_type}</span>
-                    <span className="text-text-secondary">
-                      {s.last_record_ts
-                        ? new Date(s.last_record_ts).toLocaleDateString('en-US',
-                            { month: 'short', day: 'numeric' })
-                        : '—'} · {s.records_total}
-                    </span>
-                  </div>
-                ))}
+                {d.sync_state.map((s) => {
+                  const status = diagnosticsStatus(s);
+                  return (
+                    <div key={s.record_type} className="flex justify-between text-[10.5px]">
+                      <span className="text-text-muted">{s.record_type}</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-text-secondary">
+                          {s.last_record_ts
+                            ? new Date(s.last_record_ts).toLocaleDateString('en-US',
+                                { month: 'short', day: 'numeric' })
+                            : '—'} · {s.records_total ?? 0}
+                        </span>
+                        <span className={`font-medium ${STATUS_CLASS[status]}`}>
+                          {STATUS_LABEL[status]}
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -141,7 +179,7 @@ export function DevicesModal({ open, onClose }: { open: boolean; onClose: () => 
                 </div>
                 <div className="font-mono text-xl tracking-[0.3em] text-text-primary">{pairing.code}</div>
                 <p className="text-[11px] text-text-muted mt-2">
-                  Scan the QR or enter this code in the BOS Health app.
+                  Scan the QR or enter this code in the Vasari Health app.
                   The code works once and expires in{' '}
                   <span className="font-mono">{mm}:{String(ss).padStart(2, '0')}</span>.
                 </p>

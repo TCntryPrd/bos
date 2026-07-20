@@ -32,7 +32,7 @@ interface CardBodyProps {
 
 function CardRoot({ children, className, noPadding }: CardProps) {
   return (
-    <div className={cn('bg-surface-2 border border-border rounded-xl', !noPadding && '', className)}>
+    <div className={cn('aios-panel', !noPadding && '', className)}>
       {children}
     </div>
   );

@@ -127,9 +127,9 @@ export function ClaudeAuth() {
   const ready = Boolean(status?.claudeDirReady && status?.claudeJsonReady && status?.workspaceReady);
 
   return (
-    <div className="h-full bg-[var(--v-base-bg,var(--v-base))]">
-      <div className="mx-auto flex h-full max-w-6xl flex-col px-4 py-5 sm:px-6 lg:px-8">
-        <header className="mb-5 flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="aios-page h-full">
+      <div className="aios-page-pad mx-auto flex h-full max-w-6xl flex-col">
+        <header className="aios-command-hero mb-5 flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="vs-mono text-[11px] uppercase tracking-[0.22em] text-accent">First-use setup</p>
             <h1 className="mt-1 text-2xl font-semibold text-text-primary">Claude Auth</h1>
@@ -160,15 +160,15 @@ export function ClaudeAuth() {
         )}
 
         <section className="mb-4 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg border border-border bg-surface-2 px-3 py-3">
+          <div className="aios-stat px-3 py-3">
             <div className="text-xs text-text-muted">Claude home</div>
             <div className="mt-1 truncate font-mono text-sm text-text-primary">{status?.home || '-'}</div>
           </div>
-          <div className="rounded-lg border border-border bg-surface-2 px-3 py-3">
+          <div className="aios-stat px-3 py-3">
             <div className="text-xs text-text-muted">Workspace</div>
             <div className="mt-1 truncate font-mono text-sm text-text-primary">{status?.workspace || '-'}</div>
           </div>
-          <div className="rounded-lg border border-border bg-surface-2 px-3 py-3">
+          <div className="aios-stat px-3 py-3">
             <div className="text-xs text-text-muted">Mounts</div>
             <div className={`mt-1 text-sm font-medium ${ready ? 'text-success' : 'text-warning'}`}>
               {ready ? 'Ready' : 'Missing path'}
@@ -176,7 +176,7 @@ export function ClaudeAuth() {
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-[#080b10]">
+        <section className="aios-frost-surface--dark aios-workbench flex min-h-0 flex-1 flex-col bg-[#080b10]">
           <div className="flex items-center gap-2 border-b border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
             <Terminal className="h-4 w-4" aria-hidden />
             <span className="font-mono">claude</span>

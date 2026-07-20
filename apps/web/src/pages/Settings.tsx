@@ -117,6 +117,8 @@ interface CustomMcpConnection {
   command?: string;
   args?: string;
   loginUrl?: string;
+  authenticated?: boolean;
+  loginMethod?: 'oauth';
   tokenEnv?: string;
   configPath?: string;
   description?: string;
@@ -267,13 +269,13 @@ function handleSignOut() {
   localStorage.removeItem('boss_token');
   localStorage.removeItem('boss_refresh_token');
   localStorage.removeItem('boss_user');
-  localStorage.removeItem('boss_token');
-  localStorage.removeItem('boss_user');
+  localStorage.removeItem('vasari_token');
+  localStorage.removeItem('vasari_user');
   window.location.assign('/login');
 }
 
 function authHeaders(json = false): Record<string, string> {
-  const token = localStorage.getItem('boss_token') ?? localStorage.getItem('boss_token') ?? '';
+  const token = localStorage.getItem('boss_token') ?? localStorage.getItem('vasari_token') ?? '';
   return {
     ...(json ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -292,7 +294,7 @@ async function fetchJson<T>(path: string): Promise<T | null> {
 
 function getUser(): { displayName?: string; name?: string; role?: string; email?: string } {
   try {
-    return JSON.parse(localStorage.getItem('boss_user') ?? localStorage.getItem('boss_user') ?? '{}') as {
+    return JSON.parse(localStorage.getItem('boss_user') ?? localStorage.getItem('vasari_user') ?? '{}') as {
       displayName?: string;
       name?: string;
       role?: string;
@@ -346,7 +348,7 @@ function Panel({
   action?: React.ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-border bg-surface-1/80 overflow-hidden">
+    <section className="aios-panel overflow-hidden">
       <div className="flex items-start gap-3 border-b border-border px-4 py-3">
         <Icon className="mt-0.5 h-4 w-4 flex-shrink-0 text-accent" aria-hidden />
         <div className="min-w-0 flex-1">
@@ -393,7 +395,7 @@ function ActionButton({ icon: Icon, label, onClick, disabled = false }: { icon: 
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-surface-2/60 px-3 py-2 text-sm text-text-primary hover:border-accent/60 disabled:cursor-not-allowed disabled:opacity-45"
+      className="btn-secondary justify-center text-sm disabled:cursor-not-allowed disabled:opacity-45"
     >
       <Icon className="h-4 w-4 text-accent" aria-hidden />
       {label}
@@ -459,7 +461,7 @@ export function Settings() {
   useEffect(() => { refresh(); }, [refresh]);
 
   useEffect(() => {
-    const token = localStorage.getItem('boss_token') ?? localStorage.getItem('boss_token');
+    const token = localStorage.getItem('boss_token') ?? localStorage.getItem('vasari_token');
     if (!token) return;
     fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => (res.ok ? res.json() : null))
@@ -525,7 +527,7 @@ export function Settings() {
 
   const copyAgentInstructions = () => {
     const text = [
-      'Global MCP discovery for BOS agents:',
+      'Global MCP discovery for Vasari-BOS agents:',
       `Status API: ${mcp?.discovery?.statusUrl ?? '/api/mcp/global'}`,
       `Registry path: ${mcp?.registryPath ?? mcp?.discovery?.registryPath ?? 'not set'}`,
       `Host registry path: ${mcp?.hostRegistryPath ?? mcp?.discovery?.hostRegistryPath ?? 'not set'}`,
@@ -619,11 +621,26 @@ export function Settings() {
     }
   };
 
-  const openCustomMcpLogin = (connection: CustomMcpConnection) => {
-    const target = connection.loginUrl ?? connection.serverUrl;
-    if (!target) return;
-    const opened = window.open(target, '_blank', 'noopener,noreferrer');
-    if (!opened) window.location.assign(target);
+  const openCustomMcpLogin = async (connection: CustomMcpConnection) => {
+    // OAuth MCP servers (e.g. Mygentic Connect) cannot be logged in by opening a
+    // URL — the server endpoint returns 401 to a browser. Ask the API to run the
+    // PKCE flow and hand back the real provider authorize URL to open.
+    setError(null);
+    try {
+      const res = await fetch(`api/mcp/global/connections/${connection.id}/login`, {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.authorizeUrl) {
+        const opened = window.open(data.authorizeUrl, '_blank', 'noopener,noreferrer');
+        if (!opened) window.location.assign(data.authorizeUrl);
+        return;
+      }
+      setError(data?.error ?? `Could not start login for ${connection.name} (HTTP ${res.status}).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not start login for ${connection.name}.`);
+    }
   };
 
   const connectorCount = connectors.length;
@@ -654,7 +671,7 @@ export function Settings() {
       id: 'hermes',
       name: 'Hermes',
       status: gatewayStatus,
-      detail: 'Hermes-owned runtime. BOS can access it where wired, but it is not a BOS-owned page.',
+      detail: 'Hermes-owned runtime. Vasari-BOS can access it where wired, but it is not a BOS-owned page.',
       path: mcp?.consumers?.find((item) => item.id === 'hermes')?.configPath ?? mcp?.hermesHome,
     },
   ];
@@ -669,8 +686,8 @@ export function Settings() {
   ];
 
   return (
-    <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-end">
+    <div className="aios-page aios-page-pad aios-frost-content mx-auto flex w-full max-w-[1360px] flex-col gap-4">
+      <div className="aios-command-hero flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-end">
         <div className="min-w-0 flex-1">
           <div className="vs-mono mb-1 text-[10px] uppercase tracking-[0.22em] text-text-muted">Control Center</div>
           <h1 className="text-2xl font-semibold text-text-primary">Settings</h1>
@@ -685,7 +702,7 @@ export function Settings() {
             type="button"
             onClick={saveSettings}
             disabled={saving}
-            className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-medium text-[#0a0c12] disabled:cursor-not-allowed disabled:opacity-45"
+            className="btn-primary text-sm disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Save className="h-4 w-4" aria-hidden />
             {saving ? 'Saving' : 'Save'}
@@ -693,7 +710,7 @@ export function Settings() {
         </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto border-b border-border pb-2" role="tablist" aria-label="Settings sections">
+      <div className="aios-control-bar flex gap-2 overflow-x-auto px-2 py-2" role="tablist" aria-label="Settings sections">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
@@ -740,7 +757,7 @@ export function Settings() {
                     else if (tile.label === 'Admin Role') setActiveTab('admin');
                     else setActiveTab('runtimes');
                   }}
-                  className="rounded-lg border border-border bg-surface-1/80 p-4 text-left hover:border-accent/50"
+                  className="aios-panel p-4 text-left hover:border-accent/50"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <Icon className="h-4 w-4 text-accent" aria-hidden />
@@ -796,7 +813,7 @@ export function Settings() {
           </Panel>
           <Panel
             title="Hermes Gateway Access"
-            subtitle="Hermes-owned gateway. BOS is wired to access it, not to own it."
+            subtitle="Hermes-owned gateway. Vasari-BOS is wired to access it, not to own it."
             icon={Bot}
             action={<StatusBadge label={gatewayStatus} status={gatewayStatus} />}
           >
@@ -962,6 +979,7 @@ export function Settings() {
                             <div className="text-sm font-medium text-text-primary">{connection.name}</div>
                             <StatusBadge label={connection.transport} status="external" />
                             <StatusBadge label={connection.enabled ? 'enabled' : 'disabled'} status={connection.enabled ? 'ready' : 'partial'} />
+                            <StatusBadge label={connection.authenticated ? 'authenticated' : 'login required'} status={connection.authenticated ? 'ready' : 'partial'} />
                           </div>
                           {connection.description && (
                             <p className="mt-1 text-xs text-text-muted">{connection.description}</p>
@@ -970,9 +988,9 @@ export function Settings() {
                         <div className="flex flex-wrap gap-2">
                           <ActionButton
                             icon={ExternalLink}
-                            label="Open Login"
-                            onClick={() => openCustomMcpLogin(connection)}
-                            disabled={!connection.loginUrl && !connection.serverUrl}
+                            label={connection.authenticated ? 'Re-authenticate' : 'Open Login'}
+                            onClick={() => { void openCustomMcpLogin(connection); }}
+                            disabled={!connection.serverUrl}
                           />
                           <button
                             type="button"

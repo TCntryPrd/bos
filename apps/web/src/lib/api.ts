@@ -119,19 +119,12 @@ export const connectorsApi = {
   getAccounts: () => request<ConnectedAccount[]>('/connectors/accounts'),
   // Backend route is POST /connectors/oauth/:provider/start → { url, state }.
   getOAuthUrl: (
-    provider: string,
+    provider: 'microsoft' | 'google' | 'linkedin',
     services: readonly string[] = DEFAULT_OAUTH_SERVICES,
   ) =>
     request<{ url: string }>(`/connectors/oauth/${provider}/start`, {
       method: 'POST',
       body: JSON.stringify({ provider, services }),
-    }),
-  // WS2: save the tester's OWN OAuth app credentials (client id/secret) before
-  // authorizing. Backend route is POST /connectors/oauth/configure.
-  configureOAuthApp: (provider: string, clientId: string, clientSecret: string) =>
-    request<{ provider: string; configured: boolean }>('/connectors/oauth/configure', {
-      method: 'POST',
-      body: JSON.stringify({ provider, clientId, clientSecret }),
     }),
   // Backend route is DELETE /connectors/accounts/:provider/:email.
   disconnect: (provider: 'microsoft' | 'google' | 'linkedin', email: string) =>
@@ -168,6 +161,330 @@ export const connectorsApi = {
       `/connectors/configure/${integration}`,
       { method: 'DELETE' },
     ),
+};
+
+// Unipile is LinkedIn-ONLY. WhatsApp runs on the wa-bridge (see whatsappApi below).
+export interface UnipileAccountStatus {
+  provider: 'LINKEDIN';
+  configured: boolean;
+  connected: boolean;
+  accountId: string | null;
+  name: string | null;
+  accountType: string | null;
+  health: string;
+  checkedAt: string;
+}
+
+export const unipileApi = {
+  getStatus: () =>
+    request<{ configured: boolean; accounts: UnipileAccountStatus[]; checkedAt: string; error?: string }>('/unipile/status'),
+  getConnectLink: (provider: 'LINKEDIN') =>
+    request<{ provider: 'LINKEDIN'; url: string }>('/unipile/connect-link', {
+      method: 'POST',
+      body: JSON.stringify({ provider }),
+    }),
+};
+
+// ─── LinkedIn ────────────────────────────────────────────────────────────────
+export interface LinkedInStatus {
+  connected: boolean;
+  email?: string | null;
+  expiresAt?: string | null;
+  source?: string | null;
+  accountId?: string | null;
+}
+
+export interface LinkedInPost {
+  id: string;
+  text: string;
+  link?: string | null;
+  post_id?: string | null;
+  media_kind?: string | null;
+  viewUrl?: string | null;
+  posted_at: string;
+}
+
+export interface LinkedInPostMedia {
+  type: 'image' | 'video' | 'document';
+  dataBase64: string;
+  filename: string;
+}
+
+export const linkedinApi = {
+  getStatus: () => request<LinkedInStatus>('/linkedin/status'),
+  listPosts: (limit = 20) =>
+    request<{ posts: LinkedInPost[] }>(`/linkedin/posts?limit=${encodeURIComponent(String(limit))}`),
+  publishPost: (body: { text: string; link?: string; media?: LinkedInPostMedia }) =>
+    request<{ ok: boolean; id?: string; postId?: string | null }>('/linkedin/post', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+};
+
+// ─── LinkedIn System ─────────────────────────────────────────────────────────
+export interface LinkedInSystemAccount {
+  id?: number;
+  unipile_account_id?: string;
+  display_name?: string | null;
+  public_identifier?: string | null;
+  status?: string | null;
+  last_status_at?: string | null;
+  connections_count?: number | null;
+}
+
+export interface LinkedInSystemMedia {
+  id?: string | null;
+  type: 'image' | 'video' | 'file' | string;
+  raw_type?: string | null;
+  url?: string | null;
+  preview_url?: string | null;
+  mimetype?: string | null;
+  file_name?: string | null;
+  size?: unknown;
+  url_expires_at?: string | null;
+  source_post_id?: string | null;
+}
+
+export interface LinkedInSystemPost {
+  id: string;
+  source: 'boss' | 'unipile' | string;
+  text: string | null;
+  link?: string | null;
+  post_id?: string | null;
+  share_url?: string | null;
+  media_kind?: string | null;
+  posted_at?: string | null;
+  reaction_counter?: number | null;
+  comment_counter?: number | null;
+  repost_counter?: number | null;
+  impressions_counter?: number | null;
+  media?: LinkedInSystemMedia[];
+}
+
+export interface LinkedInSystemProfile {
+  id: number;
+  provider_id: string;
+  full_name?: string | null;
+  headline?: string | null;
+  current_company?: string | null;
+  profile_url?: string | null;
+  public_profile_url?: string | null;
+  picture_url?: string | null;
+  network_distance?: string | null;
+  first_seen_at?: string | null;
+  connected_at?: string | null;
+  stage?: string | null;
+  next_action?: string | null;
+  next_action_at?: string | null;
+}
+
+export interface LinkedInSystemInvitation {
+  id: number;
+  provider_id: string;
+  direction: string;
+  status: string;
+  has_note?: boolean | null;
+  sent_at?: string | null;
+  responded_at?: string | null;
+  created_at?: string | null;
+  full_name?: string | null;
+  profile_url?: string | null;
+}
+
+export interface LinkedInSystemWebhook {
+  source: string;
+  event_type: string;
+  count: number;
+  pending: number;
+  last_received_at?: string | null;
+  last_processed_at?: string | null;
+}
+
+export interface LinkedInSystemAction {
+  id: number;
+  action_type: string;
+  status: string;
+  payload?: {
+    draft_title?: string;
+    profile_full_name?: string;
+    profile_provider_id?: string;
+    text?: string;
+    source?: string;
+    media?: LinkedInSystemMedia[];
+    approval_note?: string;
+    external_link?: string;
+    link?: string;
+    source_posts?: Array<{
+      social_id?: string;
+      share_url?: string;
+      text?: string;
+      parsed_datetime?: string | null;
+      media?: LinkedInSystemMedia[];
+    }>;
+    email_context?: {
+      source?: string;
+      query?: string;
+      themes?: string[];
+      messages?: Array<{
+        id?: string;
+        subject?: string;
+        from?: string;
+        date?: string;
+        angle?: string;
+        context?: string;
+      }>;
+    } | null;
+    content_series?: {
+      name?: string;
+      promise?: string;
+      trust_message?: string;
+      messy_middle?: boolean;
+    } | null;
+  } | null;
+  priority?: number;
+  not_before?: string | null;
+  attempts?: number;
+  last_error?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  executed_at?: string | null;
+}
+
+export interface LinkedInSystemBudget {
+  action_type: string;
+  day: string;
+  count: number;
+  cap: number;
+  updated_at?: string | null;
+}
+
+export interface LinkedInSystemOverview {
+  configured: boolean;
+  sync_error?: string | null;
+  checked_at?: string | null;
+  account?: LinkedInSystemAccount | null;
+  agent: {
+    running: boolean;
+    last_heartbeat_at?: string | null;
+    status: string;
+  };
+  proof?: {
+    owner_public_identifier?: string | null;
+    account_display_name?: string | null;
+    posts_loaded: number;
+    posts_visible: number;
+    posts_with_media: number;
+    latest_post_at?: string | null;
+    last_posts_sync_at?: string | null;
+    latest_media_url?: string | null;
+    pending_draft_id?: number | null;
+  };
+  stats: {
+    posts: number;
+    connections_found: number;
+    connections_connected: number;
+    requests_sent: number;
+    requests_pending: number;
+    requests_accepted: number;
+    messages: number;
+    queued_actions: number;
+    review_actions: number;
+    failed_actions: number;
+    webhooks_last_24h: number;
+  };
+  post_accept_message: {
+    campaign_id?: number | null;
+    message: string;
+    auto_send: boolean;
+    status: string;
+  };
+  posts: LinkedInSystemPost[];
+  pending_draft?: LinkedInSystemAction | null;
+  connections: {
+    stage_counts: Record<string, number>;
+    recent: LinkedInSystemProfile[];
+  };
+  invitations: {
+    recent: LinkedInSystemInvitation[];
+  };
+  webhooks: LinkedInSystemWebhook[];
+  queue: {
+    status_counts: Record<string, number>;
+    ready: number;
+    budgets: LinkedInSystemBudget[];
+    recent: LinkedInSystemAction[];
+  };
+}
+
+export const linkedinSystemApi = {
+  getOverview: () => request<LinkedInSystemOverview>('/linkedin-system/overview'),
+  sync: () => request<{ ok: boolean; upserted?: number; draft?: LinkedInSystemAction | null; owner?: unknown }>('/linkedin-system/sync', { method: 'POST' }),
+  updatePostAcceptMessage: (body: { message: string; auto_send: boolean }) =>
+    request<{ ok: boolean; post_accept_message: LinkedInSystemOverview['post_accept_message'] }>(
+      '/linkedin-system/post-accept-message',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  approveAction: (id: number) =>
+    request<{ ok: boolean; action: LinkedInSystemAction }>(`/linkedin-system/actions/${encodeURIComponent(String(id))}/approve`, { method: 'POST' }),
+  cancelAction: (id: number) =>
+    request<{ ok: boolean; action: LinkedInSystemAction }>(`/linkedin-system/actions/${encodeURIComponent(String(id))}/cancel`, { method: 'POST' }),
+};
+
+// ─── Social Media ────────────────────────────────────────────────────────────
+export interface SocialFacebookPost {
+  id: string;
+  message?: string;
+  story?: string;
+  type?: string;
+  created_time?: string;
+  permalink_url?: string;
+  reactions: number;
+  comments_count: number;
+  shares: number;
+  comments: Array<{ from: string; message: string; created_time?: string }>;
+}
+
+export interface SocialInstagramMedia {
+  id: string;
+  caption?: string;
+  media_type?: string;
+  permalink?: string;
+  timestamp?: string;
+  like_count: number;
+  comments_count: number;
+  comments: Array<{ username: string; text: string }>;
+}
+
+export interface SocialData {
+  facebook: null | {
+    pageName: string | null;
+    followers: number;
+    postCount: number;
+    unreadMessages: number;
+    totals: { reactions: number; comments: number };
+    posts: SocialFacebookPost[];
+  };
+  instagram: null | {
+    username: string | null;
+    followers: number;
+    mediaCount: number;
+    totals: { likes: number; comments: number };
+    media: SocialInstagramMedia[];
+  };
+}
+
+export const socialApi = {
+  getActivity: () => request<SocialData>('/meta/social'),
+  publishFacebook: (body: { message: string; link?: string }) =>
+    request<{ ok: boolean; id?: string }>('/meta/fb/post', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  publishInstagram: (body: { imageUrl: string; caption?: string }) =>
+    request<{ ok: boolean; id?: string }>('/meta/ig/post', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 };
 
 // ─── Learning ─────────────────────────────────────────────────────────────────
@@ -207,7 +524,55 @@ export const settingsApi = {
     }),
 };
 
-// ─── WhatsApp ─────────────────────────────────────────────────────────────────
+// ─── WhatsApp (wa-bridge / Baileys) ───────────────────────────────────────────
+// WhatsApp runs on a self-hosted Baileys (@whiskeysockets/baileys) session — an
+// unofficial multi-device linked device. Pairing happens on the WhatsApp page
+// (disclaimer → QR scan), NOT in Settings/Connections.
+export interface WhatsappSessionStatus {
+  // 'not_configured' = env missing on this box; 'unreachable' = env set but the
+  // wa-bridge container did not answer (transient). Both are sent by the API.
+  status: 'ready' | 'scan_qr' | 'starting' | 'error' | 'not_configured' | 'unreachable';
+  phone?: string | null;
+}
+
+/** No `qr` means no code to show yet — `reason` says why (never an error). */
+export type WhatsappQrReason = 'pending' | 'already_paired';
+
+export interface WhatsappQr {
+  qr: string | null;
+  reason: WhatsappQrReason | null;
+}
+
+export interface WhatsappStatus {
+  provider: 'baileys';
+  configured: boolean;
+  paired: boolean;
+  session: WhatsappSessionStatus;
+  disclaimerAcceptedAt: string | null;
+  /** True once a history import has completed — the page stops offering it. */
+  historyImported: boolean;
+  historyImportedAt: string | null;
+}
+
+export interface WhatsappImportSummary {
+  chats: number;
+  threadsUpserted: number;
+  messagesInserted: number;
+  messagesSkipped: number;
+  mediaFetched: number;
+  errors: string[];
+}
+
+/** Progress of the background history import (in-process on the API — resets on restart). */
+export interface WhatsappImportStatus {
+  running: boolean;
+  startedAt: string | null;
+  finishedAt: string | null;
+  progress: { chatsDone: number; chatsTotal: number; messagesInserted: number };
+  lastError: string | null;
+  summary: WhatsappImportSummary | null;
+}
+
 export interface WhatsappThread {
   chat_id: string;
   display_name: string | null;
@@ -231,6 +596,7 @@ export interface WhatsappMessage {
   body: string | null;
   message_type: string;
   media_url: string | null;
+  reply_to_wa_message_id: string | null;
   ack_status: string | null;
   sent_at: string;
 }
@@ -249,6 +615,20 @@ export interface WhatsappContact {
 }
 
 export const whatsappApi = {
+  getStatus: () =>
+    request<WhatsappStatus>('/whatsapp/status'),
+  getQr: () =>
+    request<WhatsappQr>('/whatsapp/qr'),
+  ackDisclaimer: () =>
+    request<{ ok: boolean; disclaimerAcceptedAt: string }>(
+      '/whatsapp/disclaimer-ack',
+      { method: 'POST' },
+    ),
+  logout: () =>
+    request<{ ok: boolean }>(
+      '/whatsapp/logout',
+      { method: 'POST' },
+    ),
   listThreads: () =>
     request<{ threads: WhatsappThread[] }>('/whatsapp/threads'),
   listContacts: () =>
@@ -272,6 +652,23 @@ export const whatsappApi = {
       `/whatsapp/threads/${encodeURIComponent(chatId)}/mark-read`,
       { method: 'POST' },
     ),
+  startConversation: (phone: string, message: string) =>
+    request<{ ok: boolean; chatId: string | null; messageId: string | null }>(
+      '/whatsapp/start-conversation',
+      { method: 'POST', body: JSON.stringify({ phone, message }) },
+    ),
+  /**
+   * Kick off the bulk import of the history WhatsApp pushed to the bridge at
+   * pairing time. Returns as soon as the background job starts (409 if one is
+   * already running) — poll getImportStatus() for progress.
+   */
+  importHistory: (opts?: { chatLimit?: number; perChatLimit?: number; media?: boolean }) =>
+    request<{ started: boolean }>(
+      '/whatsapp/import-history',
+      { method: 'POST', body: JSON.stringify(opts ?? {}) },
+    ),
+  getImportStatus: () =>
+    request<WhatsappImportStatus>('/whatsapp/import-history/status'),
 };
 
 // ─── Employee Agents (headless persistent agents — observability) ───────────────
