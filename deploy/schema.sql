@@ -2,6 +2,7 @@
 -- PostgreSQL database dump
 --
 
+\restrict EJp2pm4LR22y0NVAnMFgxazcdiPxGIAtHUXnyvSlRitpx6jExnibEX6y9NaCh0O
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 16.14
@@ -46,20 +47,6 @@ COMMENT ON EXTENSION "uuid-ossp" IS 'generate universally unique identifiers (UU
 
 
 --
--- Name: boss_set_updated_at(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.boss_set_updated_at() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$;
-
-
---
 -- Name: create_tenant_schema(character varying); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -99,7 +86,7 @@ BEGIN
     EXECUTE format($tbl$
         CREATE TRIGGER trg_users_updated_at
             BEFORE UPDATE ON %I.users
-            FOR EACH ROW EXECUTE FUNCTION boss_set_updated_at()
+            FOR EACH ROW EXECUTE FUNCTION ircaios_set_updated_at()
     $tbl$, schema_name);
 
     -- -------------------------------------------------------------------------
@@ -149,7 +136,7 @@ BEGIN
     EXECUTE format($tbl$
         CREATE TRIGGER trg_preferences_updated_at
             BEFORE UPDATE ON %I.preferences
-            FOR EACH ROW EXECUTE FUNCTION boss_set_updated_at()
+            FOR EACH ROW EXECUTE FUNCTION ircaios_set_updated_at()
     $tbl$, schema_name);
 
     -- -------------------------------------------------------------------------
@@ -179,7 +166,7 @@ BEGIN
     EXECUTE format($tbl$
         CREATE TRIGGER trg_behavioral_patterns_updated_at
             BEFORE UPDATE ON %I.behavioral_patterns
-            FOR EACH ROW EXECUTE FUNCTION boss_set_updated_at()
+            FOR EACH ROW EXECUTE FUNCTION ircaios_set_updated_at()
     $tbl$, schema_name);
 
     -- -------------------------------------------------------------------------
@@ -204,7 +191,7 @@ BEGIN
     EXECUTE format($tbl$
         CREATE TRIGGER trg_learning_profiles_updated_at
             BEFORE UPDATE ON %I.learning_profiles
-            FOR EACH ROW EXECUTE FUNCTION boss_set_updated_at()
+            FOR EACH ROW EXECUTE FUNCTION ircaios_set_updated_at()
     $tbl$, schema_name);
 
     -- -------------------------------------------------------------------------
@@ -255,7 +242,7 @@ BEGIN
     EXECUTE format($tbl$
         CREATE TRIGGER trg_voice_devices_updated_at
             BEFORE UPDATE ON %I.voice_devices
-            FOR EACH ROW EXECUTE FUNCTION boss_set_updated_at()
+            FOR EACH ROW EXECUTE FUNCTION ircaios_set_updated_at()
     $tbl$, schema_name);
 
     -- -------------------------------------------------------------------------
@@ -305,7 +292,7 @@ BEGIN
     EXECUTE format($tbl$
         CREATE TRIGGER trg_event_rules_updated_at
             BEFORE UPDATE ON %I.event_rules
-            FOR EACH ROW EXECUTE FUNCTION boss_set_updated_at()
+            FOR EACH ROW EXECUTE FUNCTION ircaios_set_updated_at()
     $tbl$, schema_name);
 
     RAISE NOTICE 'Tenant schema % created successfully', schema_name;
@@ -345,6 +332,20 @@ $_$;
 --
 
 COMMENT ON FUNCTION public.drop_tenant_schema(p_tenant_slug character varying) IS 'Permanently drops the tenant schema and all data within it. Irreversible. Does not delete the row in public.tenants — caller must do that separately if desired.';
+
+
+--
+-- Name: ircaios_set_updated_at(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ircaios_set_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
 
 
 --
@@ -467,94 +468,6 @@ COMMENT ON COLUMN public.behavioral_patterns.confidence IS 'Value 0-1. Starts at
 
 
 --
--- Name: boss_action_items; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_action_items (
-    id bigint NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    source text NOT NULL,
-    meeting text,
-    text text NOT NULL,
-    owner_rascal text DEFAULT 'unassigned'::text NOT NULL,
-    status text DEFAULT 'open'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_agent_runs; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_agent_runs (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    agent_id text NOT NULL,
-    agent_name text,
-    started_at timestamp with time zone,
-    finished_at timestamp with time zone DEFAULT now(),
-    status text,
-    model text,
-    provider text,
-    tokens_in integer DEFAULT 0,
-    tokens_out integer DEFAULT 0,
-    cost_usd numeric(12,6) DEFAULT 0,
-    duration_ms integer,
-    summary text
-);
-
-
---
--- Name: boss_audit; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_audit (
-    id bigint NOT NULL,
-    actor text,
-    action text,
-    target text,
-    detail text,
-    ok boolean,
-    latency_ms integer,
-    created_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: boss_budget; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_budget (
-    id integer NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    category text NOT NULL,
-    period text NOT NULL,
-    planned_cents bigint DEFAULT 0 NOT NULL,
-    actual_cents bigint DEFAULT 0 NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_budget_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.boss_budget_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: boss_budget_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.boss_budget_id_seq OWNED BY public.boss_budget.id;
-
-
---
 -- Name: boss_chat_messages; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -566,8 +479,7 @@ CREATE TABLE public.boss_chat_messages (
     tokens_in integer,
     tokens_out integer,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    tool_trace text,
-    CONSTRAINT vasari_chat_messages_role_check CHECK ((role = ANY (ARRAY['user'::text, 'assistant'::text, 'system'::text])))
+    CONSTRAINT ircaios_chat_messages_role_check CHECK ((role = ANY (ARRAY['user'::text, 'assistant'::text, 'system'::text])))
 );
 
 
@@ -580,7 +492,7 @@ CREATE TABLE public.boss_chat_sessions (
     tenant_id text NOT NULL,
     rascal_handle text NOT NULL,
     name text NOT NULL,
-    model text DEFAULT 'claude-sonnet-4-6'::text NOT NULL,
+    model text DEFAULT 'claude-sonnet-4-5'::text NOT NULL,
     system_prompt text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -588,7 +500,7 @@ CREATE TABLE public.boss_chat_sessions (
     cc_session_id text,
     agent_kind text DEFAULT 'rascal'::text NOT NULL,
     workspace_dir text,
-    CONSTRAINT boss_chat_sessions_agent_kind_ck CHECK ((agent_kind = ANY (ARRAY['rascal'::text, 'outsider'::text, 'coo'::text, 'gio'::text, 'hermes'::text])))
+    CONSTRAINT ircaios_chat_sessions_agent_kind_ck CHECK ((agent_kind = ANY (ARRAY['rascal'::text, 'outsider'::text, 'coo'::text, 'gio'::text])))
 );
 
 
@@ -605,82 +517,11 @@ CREATE TABLE public.boss_conversations (
 
 
 --
--- Name: boss_crm_contacts; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_crm_contacts (
-    id text NOT NULL,
-    tenant_id text DEFAULT 'default'::text,
-    name text,
-    email text,
-    phone text,
-    company text,
-    tags jsonb,
-    source text,
-    date_added timestamp with time zone,
-    raw jsonb,
-    synced_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: boss_crm_opportunities; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_crm_opportunities (
-    id text NOT NULL,
-    tenant_id text DEFAULT 'default'::text,
-    name text,
-    pipeline_id text,
-    stage_id text,
-    stage_name text,
-    contact_id text,
-    monetary_value numeric,
-    status text,
-    date_added timestamp with time zone,
-    updated_at timestamp with time zone,
-    raw jsonb,
-    synced_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: boss_crm_snapshot; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_crm_snapshot (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id text DEFAULT 'default'::text,
-    snapshot jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: boss_email_drafts; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_email_drafts (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    account text NOT NULL,
-    to_addr text,
-    subject text,
-    reply_subject text,
-    body text NOT NULL,
-    rating integer,
-    rating_note text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    rated_at timestamp with time zone
-);
-
-
---
 -- Name: boss_email_log; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.boss_email_log (
-    id text DEFAULT gen_random_uuid() NOT NULL,
+    id text NOT NULL,
     message_id text NOT NULL,
     account_email text NOT NULL,
     sender text NOT NULL,
@@ -693,238 +534,12 @@ CREATE TABLE public.boss_email_log (
     golden_nugget text,
     invoice_amount numeric,
     invoice_due_date date,
-    boss_notes text,
+    ircaios_notes text,
     processed_at timestamp with time zone DEFAULT now() NOT NULL,
     resolved_at timestamp with time zone,
-    resolved_by text
-);
-
-
---
--- Name: boss_expenses; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_expenses (
-    id integer NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    vendor text,
-    amount_cents bigint,
-    currency text DEFAULT 'usd'::text,
-    category text,
-    due_date date,
-    paid_date date,
-    status text DEFAULT 'pending'::text NOT NULL,
-    source text,
-    source_ref text,
-    notes text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_expenses_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.boss_expenses_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: boss_expenses_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.boss_expenses_id_seq OWNED BY public.boss_expenses.id;
-
-
---
--- Name: boss_faq; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_faq (
-    id integer NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    question text NOT NULL,
-    answer text,
-    client text,
-    source_email_id text,
-    status text DEFAULT 'answered'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_faq_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.boss_faq_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: boss_faq_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.boss_faq_id_seq OWNED BY public.boss_faq.id;
-
-
---
--- Name: boss_fb_messages; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_fb_messages (
-    id bigint NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    conversation_id text,
-    mid text,
-    platform text DEFAULT 'messenger'::text NOT NULL,
-    direction text NOT NULL,
-    sender_id text,
-    sender_name text,
-    body text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_fb_messages_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.boss_fb_messages_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: boss_fb_messages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.boss_fb_messages_id_seq OWNED BY public.boss_fb_messages.id;
-
-
---
--- Name: boss_fb_threads; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_fb_threads (
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    conversation_id text NOT NULL,
-    platform text DEFAULT 'messenger'::text NOT NULL,
-    participant_id text,
-    participant_name text,
-    last_message_at timestamp with time zone,
-    last_message_preview text,
-    last_message_from_page boolean DEFAULT false,
-    unread_count integer DEFAULT 0 NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_finance_snapshot; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_finance_snapshot (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id text DEFAULT 'default'::text,
-    snapshot jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: boss_google_registry; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_google_registry (
-    api text NOT NULL,
-    auth_type text NOT NULL,
-    credential text,
-    project_id text,
-    enabled boolean DEFAULT true,
-    cost_model text,
-    notes text,
-    updated_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: boss_google_usage; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_google_usage (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    api text NOT NULL,
-    units integer DEFAULT 1,
-    est_cost_usd numeric(12,6) DEFAULT 0,
-    source text,
-    created_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: boss_incidents; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_incidents (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    kind text NOT NULL,
-    source text,
-    severity text DEFAULT 'medium'::text,
-    status text DEFAULT 'detected'::text,
-    title text NOT NULL,
-    detail text,
-    observed numeric,
-    baseline numeric,
-    owner text DEFAULT 'cto'::text,
-    playbook_id uuid,
-    timeline jsonb DEFAULT '[]'::jsonb,
-    opened_at timestamp with time zone DEFAULT now(),
-    resolved_at timestamp with time zone
-);
-
-
---
--- Name: boss_knowledge; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_knowledge (
-    id bigint NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    domain text NOT NULL,
-    k text NOT NULL,
-    summary text NOT NULL,
-    detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    source_manager text NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_linkedin_posts; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_linkedin_posts (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    text text NOT NULL,
-    link text,
-    post_id text,
-    author text,
-    posted_at timestamp with time zone DEFAULT now() NOT NULL,
-    media_kind text
+    resolved_by text,
+    CONSTRAINT ircaios_email_log_action_taken_check CHECK ((action_taken = ANY (ARRAY['archived'::text, 'draft_created'::text, 'auto_responded'::text, 'forwarded_to_brain'::text, 'compiled'::text]))),
+    CONSTRAINT ircaios_email_log_category_check CHECK ((category = ANY (ARRAY['newsletter'::text, 'invoice'::text, 'personal'::text, 'client'::text, 'marketing'::text, 'other'::text])))
 );
 
 
@@ -965,75 +580,6 @@ ALTER SEQUENCE public.boss_memory_id_seq OWNED BY public.boss_memory.id;
 
 
 --
--- Name: boss_meta_credentials; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_meta_credentials (
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    app_id text,
-    app_secret_enc text,
-    webhook_verify_token text,
-    system_user_token_enc text,
-    fb_page_id text,
-    fb_page_name text,
-    fb_page_token_enc text,
-    ig_business_id text,
-    ig_token_enc text,
-    threads_user_id text,
-    threads_token_enc text,
-    wa_waba_id text,
-    wa_phone_number_id text,
-    wa_display_phone text,
-    wa_token_enc text,
-    ads_account_id text,
-    ads_token_enc text,
-    status text DEFAULT 'disconnected'::text NOT NULL,
-    connected_at timestamp with time zone,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    fb_messaging_app_id text,
-    fb_messaging_app_secret_enc text,
-    fb_messaging_token_enc text,
-    wa_app_id text,
-    wa_app_secret_enc text
-);
-
-
---
--- Name: boss_meta_events; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_meta_events (
-    id bigint NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    object text,
-    event_type text,
-    external_id text,
-    summary text,
-    payload jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_meta_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.boss_meta_events_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: boss_meta_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.boss_meta_events_id_seq OWNED BY public.boss_meta_events.id;
-
-
---
 -- Name: boss_oauth_state; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1061,34 +607,8 @@ CREATE TABLE public.boss_oauth_tokens (
     scopes text[] DEFAULT '{}'::text[] NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT boss_oauth_tokens_provider_check CHECK ((provider = ANY (ARRAY['google'::text, 'microsoft'::text, 'linkedin'::text])))
+    CONSTRAINT ircaios_oauth_tokens_provider_check CHECK ((provider = ANY (ARRAY['google'::text, 'microsoft'::text])))
 );
-
-
---
--- Name: boss_onboarding; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_onboarding (
-    tenant_id text NOT NULL,
-    step text DEFAULT 'welcome'::text NOT NULL,
-    completed_steps jsonb DEFAULT '[]'::jsonb,
-    skipped_steps jsonb DEFAULT '[]'::jsonb,
-    connector_progress jsonb DEFAULT '{}'::jsonb,
-    agent_progress jsonb DEFAULT '{}'::jsonb,
-    data jsonb DEFAULT '{}'::jsonb,
-    started_at timestamp with time zone DEFAULT now() NOT NULL,
-    completed_at timestamp with time zone,
-    last_activity_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT vasari_onboarding_step_check CHECK ((step = ANY (ARRAY['welcome'::text, 'connectors'::text, 'agents'::text, 'preferences'::text, 'complete'::text])))
-);
-
-
---
--- Name: TABLE boss_onboarding; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.boss_onboarding IS 'Onboarding wizard progress tracking per tenant';
 
 
 --
@@ -1106,39 +626,22 @@ CREATE TABLE public.boss_outsiders (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     model text DEFAULT 'claude-sonnet-4-6'::text NOT NULL,
-    CONSTRAINT vasari_outsiders_cli_ck CHECK ((cli = ANY (ARRAY['claude'::text, 'ollama'::text]))),
-    CONSTRAINT vasari_outsiders_handle_ck CHECK ((handle ~ '^[a-z]{2,24}$'::text))
+    CONSTRAINT boss_outsiders_cli_ck CHECK ((cli = ANY (ARRAY['claude'::text, 'ollama'::text]))),
+    CONSTRAINT boss_outsiders_handle_ck CHECK ((handle ~ '^[a-z]{2,24}$'::text))
 );
 
 
 --
--- Name: boss_persistent_agents; Type: TABLE; Schema: public; Owner: -
+-- Name: boss_pending_passkeys; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.boss_persistent_agents (
-    id text DEFAULT ('agent-'::text || substr((gen_random_uuid())::text, 1, 8)) NOT NULL,
-    name text NOT NULL,
-    instructions text NOT NULL,
-    cron_expression text DEFAULT '0 */4 * * *'::text NOT NULL,
-    status text DEFAULT 'active'::text NOT NULL,
-    model text DEFAULT 'claude-sonnet-4-6'::text,
-    tools text[] DEFAULT '{}'::text[],
-    last_run_at timestamp with time zone,
-    last_result text,
-    run_count integer DEFAULT 0,
-    error_count integer DEFAULT 0,
-    created_by text DEFAULT 'admin'::text NOT NULL,
+CREATE TABLE public.boss_pending_passkeys (
+    email character varying(320) NOT NULL,
+    passkey_hash character varying(64) NOT NULL,
+    created_by text DEFAULT 'ircaios-internal'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT vasari_persistent_agents_status_check CHECK ((status = ANY (ARRAY['active'::text, 'paused'::text, 'stopped'::text])))
+    expires_at timestamp with time zone DEFAULT (now() + make_interval(days => 7)) NOT NULL
 );
-
-
---
--- Name: TABLE boss_persistent_agents; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.boss_persistent_agents IS 'Dynamically created persistent agents with cron schedules. Vasari clones with specific instructions that run on heartbeats.';
 
 
 --
@@ -1157,25 +660,6 @@ CREATE TABLE public.boss_pipelines (
 
 
 --
--- Name: boss_playbooks; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_playbooks (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    kind text NOT NULL,
-    match_key text,
-    title text NOT NULL,
-    symptom text,
-    diagnosis text,
-    resolution text,
-    severity text DEFAULT 'medium'::text,
-    times_used integer DEFAULT 0,
-    created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone DEFAULT now()
-);
-
-
---
 -- Name: boss_rascals; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1190,105 +674,9 @@ CREATE TABLE public.boss_rascals (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     model text DEFAULT 'claude-sonnet-4-6'::text NOT NULL,
-    CONSTRAINT vasari_rascals_cli_ck CHECK ((cli = ANY (ARRAY['claude'::text, 'ollama'::text]))),
-    CONSTRAINT vasari_rascals_handle_ck CHECK ((handle ~ '^[a-z]{2,24}$'::text))
+    CONSTRAINT boss_rascals_cli_ck CHECK ((cli = ANY (ARRAY['claude'::text, 'ollama'::text]))),
+    CONSTRAINT boss_rascals_handle_ck CHECK ((handle ~ '^[a-z]{2,24}$'::text))
 );
-
-
---
--- Name: boss_reviews_snapshot; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_reviews_snapshot (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    overall_rating numeric(3,2),
-    total_reviews integer DEFAULT 0,
-    sources jsonb DEFAULT '[]'::jsonb,
-    summary text,
-    created_at timestamp with time zone DEFAULT now()
-);
-
-
---
--- Name: boss_self_state; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_self_state (
-    id integer DEFAULT 1 NOT NULL,
-    name text DEFAULT 'Vasari'::text NOT NULL,
-    role text DEFAULT 'Executive Engineer & COO'::text NOT NULL,
-    persona_doc text DEFAULT ''::text NOT NULL,
-    current_model text DEFAULT 'claude-opus-4-6'::text NOT NULL,
-    trust_level text DEFAULT 'admin'::text NOT NULL,
-    host text DEFAULT 'localhost'::text NOT NULL,
-    reflections jsonb DEFAULT '[]'::jsonb NOT NULL,
-    active_goals jsonb DEFAULT '[]'::jsonb NOT NULL,
-    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT vasari_self_state_id_check CHECK ((id = 1))
-);
-
-
---
--- Name: boss_sessions; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_sessions (
-    id integer NOT NULL,
-    conversation_id text NOT NULL,
-    user_id text DEFAULT 'anonymous'::text NOT NULL,
-    summary text,
-    tools_used text[] DEFAULT '{}'::text[],
-    decisions text[] DEFAULT '{}'::text[],
-    learnings text[] DEFAULT '{}'::text[],
-    message_count integer DEFAULT 0,
-    model_used text,
-    started_at timestamp with time zone DEFAULT now() NOT NULL,
-    ended_at timestamp with time zone,
-    duration_ms integer
-);
-
-
---
--- Name: boss_slack_messages; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_slack_messages (
-    id bigint NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    channel_id text NOT NULL,
-    channel_name text,
-    ts text NOT NULL,
-    user_id text,
-    user_name text,
-    text text,
-    thread_ts text,
-    is_sale boolean DEFAULT false NOT NULL,
-    sale_amount numeric,
-    permalink text,
-    posted_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_slack_messages_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.boss_slack_messages_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: boss_slack_messages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.boss_slack_messages_id_seq OWNED BY public.boss_slack_messages.id;
 
 
 --
@@ -1307,7 +695,7 @@ CREATE TABLE public.boss_stage_log (
     output_files text[] DEFAULT ARRAY[]::text[] NOT NULL,
     notes text,
     status text DEFAULT 'active'::text NOT NULL,
-    CONSTRAINT vasari_stage_log_status_ck CHECK ((status = ANY (ARRAY['active'::text, 'completed'::text, 'skipped'::text, 'failed'::text, 'blocked'::text])))
+    CONSTRAINT boss_stage_log_status_ck CHECK ((status = ANY (ARRAY['active'::text, 'completed'::text, 'skipped'::text, 'failed'::text, 'blocked'::text])))
 );
 
 
@@ -1347,134 +735,11 @@ CREATE TABLE public.boss_tasks (
     gate_at timestamp with time zone,
     picked_at timestamp with time zone,
     kind text DEFAULT 'task'::text NOT NULL,
-    CONSTRAINT vasari_tasks_bucket_ck CHECK (((bucket IS NULL) OR (bucket = ANY (ARRAY['today'::text, 'tomorrow'::text, 'this_week'::text, 'next_week'::text])))),
-    CONSTRAINT vasari_tasks_kind_ck CHECK ((kind = ANY (ARRAY['task'::text, 'response'::text]))),
-    CONSTRAINT vasari_tasks_priority_ck CHECK (((priority >= 1) AND (priority <= 10))),
-    CONSTRAINT vasari_tasks_status_ck CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'blocked'::text, 'done'::text, 'failed'::text]))),
-    CONSTRAINT vasari_tasks_view_column_ck CHECK ((view_column = ANY (ARRAY['inbox'::text, 'today'::text, 'in_progress'::text, 'to_close'::text, 'done'::text])))
-);
-
-
---
--- Name: boss_telegram_pairs; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_telegram_pairs (
-    chat_id bigint NOT NULL,
-    user_id text NOT NULL,
-    username text,
-    first_name text,
-    paired_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_tenants; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_tenants (
-    id text NOT NULL,
-    name text NOT NULL,
-    business_name text,
-    primary_email text NOT NULL,
-    status text DEFAULT 'active'::text NOT NULL,
-    openrouter_api_key text,
-    plan text DEFAULT 'free'::text,
-    onboarding_completed boolean DEFAULT false,
-    onboarding_step text DEFAULT 'welcome'::text,
-    metadata jsonb DEFAULT '{}'::jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT vasari_tenants_onboarding_step_check CHECK ((onboarding_step = ANY (ARRAY['welcome'::text, 'connectors'::text, 'agents'::text, 'preferences'::text, 'complete'::text]))),
-    CONSTRAINT vasari_tenants_plan_check CHECK ((plan = ANY (ARRAY['free'::text, 'pro'::text, 'enterprise'::text, 'custom'::text]))),
-    CONSTRAINT vasari_tenants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'trial'::text, 'suspended'::text, 'cancelled'::text])))
-);
-
-
---
--- Name: TABLE boss_tenants; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.boss_tenants IS 'Root entity for multi-tenancy - each install creates a tenant';
-
-
---
--- Name: boss_users; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_users (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id text NOT NULL,
-    email text NOT NULL,
-    password_hash text NOT NULL,
-    display_name text NOT NULL,
-    role text DEFAULT 'admin'::text NOT NULL,
-    active boolean DEFAULT true NOT NULL,
-    last_login_at timestamp with time zone,
-    preferences jsonb DEFAULT '{}'::jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT vasari_users_role_check CHECK ((role = ANY (ARRAY['admin'::text, 'user'::text, 'agent'::text])))
-);
-
-
---
--- Name: TABLE boss_users; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON TABLE public.boss_users IS 'Per-tenant users with authentication credentials';
-
-
---
--- Name: boss_vault; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_vault (
-    id integer NOT NULL,
-    category text NOT NULL,
-    service text NOT NULL,
-    label text NOT NULL,
-    secret text NOT NULL,
-    notes text DEFAULT ''::text,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: boss_vault_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.boss_vault_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: boss_vault_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.boss_vault_id_seq OWNED BY public.boss_vault.id;
-
-
---
--- Name: boss_voice_transcripts; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.boss_voice_transcripts (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    conversation_id text NOT NULL,
-    user_id text DEFAULT 'anonymous'::text NOT NULL,
-    user_speech text NOT NULL,
-    vasari_response text,
-    current_page text,
-    tools_used text[] DEFAULT '{}'::text[],
-    model_used text,
-    corrected_speech text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    CONSTRAINT boss_tasks_bucket_ck CHECK (((bucket IS NULL) OR (bucket = ANY (ARRAY['today'::text, 'tomorrow'::text, 'this_week'::text, 'next_week'::text])))),
+    CONSTRAINT boss_tasks_kind_ck CHECK ((kind = ANY (ARRAY['task'::text, 'response'::text]))),
+    CONSTRAINT boss_tasks_priority_ck CHECK (((priority >= 1) AND (priority <= 10))),
+    CONSTRAINT boss_tasks_status_ck CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'blocked'::text, 'done'::text, 'failed'::text]))),
+    CONSTRAINT boss_tasks_view_column_ck CHECK ((view_column = ANY (ARRAY['inbox'::text, 'today'::text, 'in_progress'::text, 'to_close'::text, 'done'::text])))
 );
 
 
@@ -1517,7 +782,7 @@ CREATE TABLE public.boss_whatsapp_drafts (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     sent_at timestamp with time zone,
     sent_wa_message_id text,
-    CONSTRAINT vasari_whatsapp_drafts_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'sent'::text, 'discarded'::text])))
+    CONSTRAINT boss_whatsapp_drafts_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'sent'::text, 'discarded'::text])))
 );
 
 
@@ -1541,7 +806,7 @@ CREATE TABLE public.boss_whatsapp_messages (
     sent_at timestamp with time zone NOT NULL,
     ingested_at timestamp with time zone DEFAULT now() NOT NULL,
     sender_name text,
-    CONSTRAINT vasari_whatsapp_messages_direction_check CHECK ((direction = ANY (ARRAY['inbound'::text, 'outbound'::text])))
+    CONSTRAINT boss_whatsapp_messages_direction_check CHECK ((direction = ANY (ARRAY['inbound'::text, 'outbound'::text])))
 );
 
 
@@ -1584,7 +849,7 @@ CREATE TABLE public.boss_whatsapp_scheduled (
     context jsonb DEFAULT '{}'::jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT vasari_whatsapp_scheduled_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'sent'::text, 'failed'::text, 'cancelled'::text])))
+    CONSTRAINT boss_whatsapp_scheduled_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'sent'::text, 'failed'::text, 'cancelled'::text])))
 );
 
 
@@ -2186,46 +1451,6 @@ COMMENT ON COLUMN public.learning_profiles.profile_version IS 'Monotonically inc
 
 
 --
--- Name: newsroom_tips; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.newsroom_tips (
-    id integer NOT NULL,
-    source text NOT NULL,
-    sender text,
-    subject text,
-    headline text NOT NULL,
-    summary text,
-    url text,
-    category text,
-    raw_snippet text,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    used_at timestamp without time zone,
-    used_in_episode text
-);
-
-
---
--- Name: newsroom_tips_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.newsroom_tips_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: newsroom_tips_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.newsroom_tips_id_seq OWNED BY public.newsroom_tips.id;
-
-
---
 -- Name: oauth_tokens; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2311,23 +1536,6 @@ COMMENT ON COLUMN public.onboarding_progress.platform IS 'Which platform this ro
 --
 
 COMMENT ON COLUMN public.onboarding_progress.metadata IS 'Platform-specific ingest stats. Example for gmail: { emailsAnalyzed: 2847, labelsFound: 12, topSenders: [...] }';
-
-
---
--- Name: platform_manager; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.platform_manager (
-    handle text NOT NULL,
-    platform text NOT NULL,
-    display_name text NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    poll_seconds integer DEFAULT 900 NOT NULL,
-    status text DEFAULT 'registered'::text NOT NULL,
-    last_run_at timestamp with time zone,
-    last_result text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
 
 --
@@ -2445,16 +1653,6 @@ CREATE TABLE public.runtime_config (
 
 
 --
--- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.schema_migrations (
-    filename text NOT NULL,
-    applied_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
 -- Name: sessions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2475,19 +1673,6 @@ CREATE TABLE public.sessions (
 --
 
 COMMENT ON TABLE public.sessions IS 'Active auth sessions. Token is an opaque value stored as a hash in production. Expired rows should be purged by the background worker on a regular schedule.';
-
-
---
--- Name: slack_agent_grants; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.slack_agent_grants (
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    agent_handle text NOT NULL,
-    scopes jsonb DEFAULT '["post", "react", "read", "threads", "users"]'::jsonb NOT NULL,
-    granted_at timestamp with time zone DEFAULT now() NOT NULL,
-    granted_by text
-);
 
 
 --
@@ -2604,58 +1789,6 @@ COMMENT ON COLUMN public.tenants.suite_type IS 'Which business suite the tenant 
 
 
 --
--- Name: token_budget; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.token_budget (
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    agent_kind text NOT NULL,
-    agent_handle text DEFAULT '*'::text NOT NULL,
-    daily_usd_cap numeric(10,2),
-    hard_stop boolean DEFAULT false NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: token_ledger; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.token_ledger (
-    id bigint NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    ts timestamp with time zone DEFAULT now() NOT NULL,
-    agent_kind text NOT NULL,
-    agent_handle text,
-    session_id uuid,
-    task_class text,
-    provider text NOT NULL,
-    model text NOT NULL,
-    tokens_in integer DEFAULT 0 NOT NULL,
-    tokens_out integer DEFAULT 0 NOT NULL,
-    cached_in integer DEFAULT 0 NOT NULL,
-    cost_usd numeric(12,6) DEFAULT 0 NOT NULL,
-    latency_ms integer,
-    escalated boolean DEFAULT false NOT NULL,
-    meta jsonb DEFAULT '{}'::jsonb NOT NULL
-);
-
-
---
--- Name: token_ledger_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-ALTER TABLE public.token_ledger ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.token_ledger_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
-);
-
-
---
 -- Name: users; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2672,10 +1805,10 @@ CREATE TABLE public.users (
     last_active_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    passkey_hash character varying(64),
+    onboarding_wizard_complete boolean DEFAULT false NOT NULL,
     totp_secret text,
     totp_enabled boolean DEFAULT false NOT NULL,
-    passkey_hash character varying(64),
-    onboarding_wizard_complete boolean DEFAULT true NOT NULL,
     CONSTRAINT users_role_check CHECK (((role)::text = ANY ((ARRAY['owner'::character varying, 'admin'::character varying, 'user'::character varying, 'viewer'::character varying])::text[])))
 );
 
@@ -2695,73 +1828,6 @@ COMMENT ON COLUMN public.users.role IS 'owner = full control; admin = manage use
 
 
 --
--- Name: vasari_action_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-ALTER TABLE public.boss_action_items ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.vasari_action_items_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
-);
-
-
---
--- Name: vasari_audit_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.vasari_audit_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: vasari_audit_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.vasari_audit_id_seq OWNED BY public.boss_audit.id;
-
-
---
--- Name: vasari_knowledge_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-ALTER TABLE public.boss_knowledge ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.vasari_knowledge_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
-);
-
-
---
--- Name: vasari_sessions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.vasari_sessions_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: vasari_sessions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.vasari_sessions_id_seq OWNED BY public.boss_sessions.id;
-
-
---
 -- Name: voice_devices; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2773,7 +1839,7 @@ CREATE TABLE public.voice_devices (
     room character varying(100) NOT NULL,
     device_type character varying(50) DEFAULT 'custom'::character varying NOT NULL,
     status character varying(20) DEFAULT 'online'::character varying NOT NULL,
-    wake_word character varying(100) DEFAULT 'hey boss'::character varying NOT NULL,
+    wake_word character varying(100) DEFAULT 'hey ircaios'::character varying NOT NULL,
     stt_provider character varying(50) DEFAULT 'whisper'::character varying NOT NULL,
     tts_provider character varying(50) DEFAULT 'elevenlabs'::character varying NOT NULL,
     last_seen_at timestamp with time zone,
@@ -2818,80 +1884,10 @@ COMMENT ON COLUMN public.voice_devices.config IS 'Device-level config JSON. Keys
 
 
 --
--- Name: boss_audit id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_audit ALTER COLUMN id SET DEFAULT nextval('public.vasari_audit_id_seq'::regclass);
-
-
---
--- Name: boss_budget id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_budget ALTER COLUMN id SET DEFAULT nextval('public.boss_budget_id_seq'::regclass);
-
-
---
--- Name: boss_expenses id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_expenses ALTER COLUMN id SET DEFAULT nextval('public.boss_expenses_id_seq'::regclass);
-
-
---
--- Name: boss_faq id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_faq ALTER COLUMN id SET DEFAULT nextval('public.boss_faq_id_seq'::regclass);
-
-
---
--- Name: boss_fb_messages id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_fb_messages ALTER COLUMN id SET DEFAULT nextval('public.boss_fb_messages_id_seq'::regclass);
-
-
---
 -- Name: boss_memory id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.boss_memory ALTER COLUMN id SET DEFAULT nextval('public.boss_memory_id_seq'::regclass);
-
-
---
--- Name: boss_meta_events id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_meta_events ALTER COLUMN id SET DEFAULT nextval('public.boss_meta_events_id_seq'::regclass);
-
-
---
--- Name: boss_sessions id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_sessions ALTER COLUMN id SET DEFAULT nextval('public.vasari_sessions_id_seq'::regclass);
-
-
---
--- Name: boss_slack_messages id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_slack_messages ALTER COLUMN id SET DEFAULT nextval('public.boss_slack_messages_id_seq'::regclass);
-
-
---
--- Name: boss_vault id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_vault ALTER COLUMN id SET DEFAULT nextval('public.boss_vault_id_seq'::regclass);
-
-
---
--- Name: newsroom_tips id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.newsroom_tips ALTER COLUMN id SET DEFAULT nextval('public.newsroom_tips_id_seq'::regclass);
 
 
 --
@@ -2911,147 +1907,11 @@ ALTER TABLE ONLY public.behavioral_patterns
 
 
 --
--- Name: boss_agent_runs boss_agent_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: boss_conversations boss_conversations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.boss_agent_runs
-    ADD CONSTRAINT boss_agent_runs_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_budget boss_budget_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_budget
-    ADD CONSTRAINT boss_budget_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_budget boss_budget_tenant_id_category_period_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_budget
-    ADD CONSTRAINT boss_budget_tenant_id_category_period_key UNIQUE (tenant_id, category, period);
-
-
---
--- Name: boss_crm_contacts boss_crm_contacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_crm_contacts
-    ADD CONSTRAINT boss_crm_contacts_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_crm_opportunities boss_crm_opportunities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_crm_opportunities
-    ADD CONSTRAINT boss_crm_opportunities_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_crm_snapshot boss_crm_snapshot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_crm_snapshot
-    ADD CONSTRAINT boss_crm_snapshot_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_email_drafts boss_email_drafts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_email_drafts
-    ADD CONSTRAINT boss_email_drafts_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_email_log boss_email_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_email_log
-    ADD CONSTRAINT boss_email_log_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_expenses boss_expenses_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_expenses
-    ADD CONSTRAINT boss_expenses_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_faq boss_faq_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_faq
-    ADD CONSTRAINT boss_faq_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_fb_messages boss_fb_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_fb_messages
-    ADD CONSTRAINT boss_fb_messages_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_fb_messages boss_fb_messages_tenant_id_mid_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_fb_messages
-    ADD CONSTRAINT boss_fb_messages_tenant_id_mid_key UNIQUE (tenant_id, mid);
-
-
---
--- Name: boss_fb_threads boss_fb_threads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_fb_threads
-    ADD CONSTRAINT boss_fb_threads_pkey PRIMARY KEY (tenant_id, conversation_id);
-
-
---
--- Name: boss_finance_snapshot boss_finance_snapshot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_finance_snapshot
-    ADD CONSTRAINT boss_finance_snapshot_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_google_registry boss_google_registry_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_google_registry
-    ADD CONSTRAINT boss_google_registry_pkey PRIMARY KEY (api);
-
-
---
--- Name: boss_google_usage boss_google_usage_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_google_usage
-    ADD CONSTRAINT boss_google_usage_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_incidents boss_incidents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_incidents
-    ADD CONSTRAINT boss_incidents_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_linkedin_posts boss_linkedin_posts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_linkedin_posts
-    ADD CONSTRAINT boss_linkedin_posts_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.boss_conversations
+    ADD CONSTRAINT boss_conversations_pkey PRIMARY KEY (conversation_id);
 
 
 --
@@ -3063,91 +1923,99 @@ ALTER TABLE ONLY public.boss_memory
 
 
 --
--- Name: boss_meta_credentials boss_meta_credentials_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: boss_outsiders boss_outsiders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.boss_meta_credentials
-    ADD CONSTRAINT boss_meta_credentials_pkey PRIMARY KEY (tenant_id);
-
-
---
--- Name: boss_meta_events boss_meta_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_meta_events
-    ADD CONSTRAINT boss_meta_events_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.boss_outsiders
+    ADD CONSTRAINT boss_outsiders_pkey PRIMARY KEY (tenant_id, handle);
 
 
 --
--- Name: boss_oauth_state boss_oauth_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: boss_pipelines boss_pipelines_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.boss_oauth_state
-    ADD CONSTRAINT boss_oauth_state_pkey PRIMARY KEY (state);
-
-
---
--- Name: boss_oauth_tokens boss_oauth_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_oauth_tokens
-    ADD CONSTRAINT boss_oauth_tokens_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.boss_pipelines
+    ADD CONSTRAINT boss_pipelines_pkey PRIMARY KEY (id);
 
 
 --
--- Name: boss_oauth_tokens boss_oauth_tokens_provider_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: boss_rascals boss_rascals_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.boss_oauth_tokens
-    ADD CONSTRAINT boss_oauth_tokens_provider_email_key UNIQUE (provider, email);
-
-
---
--- Name: boss_playbooks boss_playbooks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_playbooks
-    ADD CONSTRAINT boss_playbooks_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.boss_rascals
+    ADD CONSTRAINT boss_rascals_pkey PRIMARY KEY (tenant_id, handle);
 
 
 --
--- Name: boss_reviews_snapshot boss_reviews_snapshot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: boss_stage_log boss_stage_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.boss_reviews_snapshot
-    ADD CONSTRAINT boss_reviews_snapshot_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_slack_messages boss_slack_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_slack_messages
-    ADD CONSTRAINT boss_slack_messages_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.boss_stage_log
+    ADD CONSTRAINT boss_stage_log_pkey PRIMARY KEY (id);
 
 
 --
--- Name: boss_slack_messages boss_slack_messages_tenant_id_channel_id_ts_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: boss_task_frequency boss_task_frequency_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.boss_slack_messages
-    ADD CONSTRAINT boss_slack_messages_tenant_id_channel_id_ts_key UNIQUE (tenant_id, channel_id, ts);
-
-
---
--- Name: boss_vault boss_vault_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_vault
-    ADD CONSTRAINT boss_vault_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.boss_task_frequency
+    ADD CONSTRAINT boss_task_frequency_pkey PRIMARY KEY (domain);
 
 
 --
--- Name: boss_vault boss_vault_service_label_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: boss_tasks boss_tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.boss_vault
-    ADD CONSTRAINT boss_vault_service_label_key UNIQUE (service, label);
+ALTER TABLE ONLY public.boss_tasks
+    ADD CONSTRAINT boss_tasks_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: boss_whatsapp_contacts boss_whatsapp_contacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_whatsapp_contacts
+    ADD CONSTRAINT boss_whatsapp_contacts_pkey PRIMARY KEY (tenant_id, contact_id);
+
+
+--
+-- Name: boss_whatsapp_drafts boss_whatsapp_drafts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_whatsapp_drafts
+    ADD CONSTRAINT boss_whatsapp_drafts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: boss_whatsapp_messages boss_whatsapp_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_whatsapp_messages
+    ADD CONSTRAINT boss_whatsapp_messages_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: boss_whatsapp_monitors boss_whatsapp_monitors_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_whatsapp_monitors
+    ADD CONSTRAINT boss_whatsapp_monitors_pkey PRIMARY KEY (tenant_id, chat_id, agent_handle);
+
+
+--
+-- Name: boss_whatsapp_scheduled boss_whatsapp_scheduled_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_whatsapp_scheduled
+    ADD CONSTRAINT boss_whatsapp_scheduled_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: boss_whatsapp_threads boss_whatsapp_threads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_whatsapp_threads
+    ADD CONSTRAINT boss_whatsapp_threads_pkey PRIMARY KEY (tenant_id, chat_id);
 
 
 --
@@ -3319,6 +2187,62 @@ ALTER TABLE ONLY public.invites
 
 
 --
+-- Name: boss_chat_messages ircaios_chat_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_chat_messages
+    ADD CONSTRAINT ircaios_chat_messages_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: boss_chat_sessions ircaios_chat_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_chat_sessions
+    ADD CONSTRAINT ircaios_chat_sessions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: boss_email_log ircaios_email_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_email_log
+    ADD CONSTRAINT ircaios_email_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: boss_oauth_state ircaios_oauth_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_oauth_state
+    ADD CONSTRAINT ircaios_oauth_state_pkey PRIMARY KEY (state);
+
+
+--
+-- Name: boss_oauth_tokens ircaios_oauth_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_oauth_tokens
+    ADD CONSTRAINT ircaios_oauth_tokens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: boss_oauth_tokens ircaios_oauth_tokens_provider_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_oauth_tokens
+    ADD CONSTRAINT ircaios_oauth_tokens_provider_email_key UNIQUE (provider, email);
+
+
+--
+-- Name: boss_pending_passkeys ircaios_pending_passkeys_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_pending_passkeys
+    ADD CONSTRAINT ircaios_pending_passkeys_pkey PRIMARY KEY (email);
+
+
+--
 -- Name: learning_profiles learning_profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3332,14 +2256,6 @@ ALTER TABLE ONLY public.learning_profiles
 
 ALTER TABLE ONLY public.learning_profiles
     ADD CONSTRAINT learning_profiles_tenant_id_user_id_key UNIQUE (tenant_id, user_id);
-
-
---
--- Name: newsroom_tips newsroom_tips_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.newsroom_tips
-    ADD CONSTRAINT newsroom_tips_pkey PRIMARY KEY (id);
 
 
 --
@@ -3375,14 +2291,6 @@ ALTER TABLE ONLY public.onboarding_progress
 
 
 --
--- Name: platform_manager platform_manager_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.platform_manager
-    ADD CONSTRAINT platform_manager_pkey PRIMARY KEY (handle);
-
-
---
 -- Name: playbooks playbooks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3407,14 +2315,6 @@ ALTER TABLE ONLY public.runtime_config
 
 
 --
--- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.schema_migrations
-    ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (filename);
-
-
---
 -- Name: sessions sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3428,14 +2328,6 @@ ALTER TABLE ONLY public.sessions
 
 ALTER TABLE ONLY public.sessions
     ADD CONSTRAINT sessions_token_key UNIQUE (token);
-
-
---
--- Name: slack_agent_grants slack_agent_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.slack_agent_grants
-    ADD CONSTRAINT slack_agent_grants_pkey PRIMARY KEY (tenant_id, agent_handle);
 
 
 --
@@ -3487,22 +2379,6 @@ ALTER TABLE ONLY public.tenants
 
 
 --
--- Name: token_budget token_budget_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.token_budget
-    ADD CONSTRAINT token_budget_pkey PRIMARY KEY (tenant_id, agent_kind, agent_handle);
-
-
---
--- Name: token_ledger token_ledger_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.token_ledger
-    ADD CONSTRAINT token_ledger_pkey PRIMARY KEY (id);
-
-
---
 -- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3527,238 +2403,6 @@ ALTER TABLE ONLY public.users
 
 
 --
--- Name: boss_action_items vasari_action_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_action_items
-    ADD CONSTRAINT vasari_action_items_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_audit vasari_audit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_audit
-    ADD CONSTRAINT vasari_audit_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_chat_messages vasari_chat_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_chat_messages
-    ADD CONSTRAINT vasari_chat_messages_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_chat_sessions vasari_chat_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_chat_sessions
-    ADD CONSTRAINT vasari_chat_sessions_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_conversations vasari_conversations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_conversations
-    ADD CONSTRAINT vasari_conversations_pkey PRIMARY KEY (conversation_id);
-
-
---
--- Name: boss_knowledge vasari_knowledge_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_knowledge
-    ADD CONSTRAINT vasari_knowledge_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_knowledge vasari_knowledge_tenant_id_domain_k_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_knowledge
-    ADD CONSTRAINT vasari_knowledge_tenant_id_domain_k_key UNIQUE (tenant_id, domain, k);
-
-
---
--- Name: boss_onboarding vasari_onboarding_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_onboarding
-    ADD CONSTRAINT vasari_onboarding_pkey PRIMARY KEY (tenant_id);
-
-
---
--- Name: boss_outsiders vasari_outsiders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_outsiders
-    ADD CONSTRAINT vasari_outsiders_pkey PRIMARY KEY (tenant_id, handle);
-
-
---
--- Name: boss_persistent_agents vasari_persistent_agents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_persistent_agents
-    ADD CONSTRAINT vasari_persistent_agents_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_pipelines vasari_pipelines_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_pipelines
-    ADD CONSTRAINT vasari_pipelines_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_rascals vasari_rascals_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_rascals
-    ADD CONSTRAINT vasari_rascals_pkey PRIMARY KEY (tenant_id, handle);
-
-
---
--- Name: boss_self_state vasari_self_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_self_state
-    ADD CONSTRAINT vasari_self_state_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_sessions vasari_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_sessions
-    ADD CONSTRAINT vasari_sessions_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_stage_log vasari_stage_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_stage_log
-    ADD CONSTRAINT vasari_stage_log_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_task_frequency vasari_task_frequency_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_task_frequency
-    ADD CONSTRAINT vasari_task_frequency_pkey PRIMARY KEY (domain);
-
-
---
--- Name: boss_tasks vasari_tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_tasks
-    ADD CONSTRAINT vasari_tasks_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_telegram_pairs vasari_telegram_pairs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_telegram_pairs
-    ADD CONSTRAINT vasari_telegram_pairs_pkey PRIMARY KEY (chat_id);
-
-
---
--- Name: boss_tenants vasari_tenants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_tenants
-    ADD CONSTRAINT vasari_tenants_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_tenants vasari_tenants_primary_email_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_tenants
-    ADD CONSTRAINT vasari_tenants_primary_email_key UNIQUE (primary_email);
-
-
---
--- Name: boss_users vasari_users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_users
-    ADD CONSTRAINT vasari_users_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_users vasari_users_tenant_id_email_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_users
-    ADD CONSTRAINT vasari_users_tenant_id_email_key UNIQUE (tenant_id, email);
-
-
---
--- Name: boss_voice_transcripts vasari_voice_transcripts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_voice_transcripts
-    ADD CONSTRAINT vasari_voice_transcripts_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_whatsapp_contacts vasari_whatsapp_contacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_whatsapp_contacts
-    ADD CONSTRAINT vasari_whatsapp_contacts_pkey PRIMARY KEY (tenant_id, contact_id);
-
-
---
--- Name: boss_whatsapp_drafts vasari_whatsapp_drafts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_whatsapp_drafts
-    ADD CONSTRAINT vasari_whatsapp_drafts_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_whatsapp_messages vasari_whatsapp_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_whatsapp_messages
-    ADD CONSTRAINT vasari_whatsapp_messages_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_whatsapp_monitors vasari_whatsapp_monitors_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_whatsapp_monitors
-    ADD CONSTRAINT vasari_whatsapp_monitors_pkey PRIMARY KEY (tenant_id, chat_id, agent_handle);
-
-
---
--- Name: boss_whatsapp_scheduled vasari_whatsapp_scheduled_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_whatsapp_scheduled
-    ADD CONSTRAINT vasari_whatsapp_scheduled_pkey PRIMARY KEY (id);
-
-
---
--- Name: boss_whatsapp_threads vasari_whatsapp_threads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.boss_whatsapp_threads
-    ADD CONSTRAINT vasari_whatsapp_threads_pkey PRIMARY KEY (tenant_id, chat_id);
-
-
---
 -- Name: voice_devices voice_devices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3772,13 +2416,6 @@ ALTER TABLE ONLY public.voice_devices
 
 ALTER TABLE ONLY public.voice_devices
     ADD CONSTRAINT voice_devices_tenant_id_device_id_key UNIQUE (tenant_id, device_id);
-
-
---
--- Name: idx_action_items_owner; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_action_items_owner ON public.boss_action_items USING btree (owner_rascal, status, created_at DESC);
 
 
 --
@@ -3838,41 +2475,6 @@ CREATE INDEX idx_behavioral_patterns_user_id ON public.behavioral_patterns USING
 
 
 --
--- Name: idx_boss_agent_runs_agent; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_boss_agent_runs_agent ON public.boss_agent_runs USING btree (agent_id, finished_at DESC);
-
-
---
--- Name: idx_boss_crm_snapshot_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_boss_crm_snapshot_created ON public.boss_crm_snapshot USING btree (created_at DESC);
-
-
---
--- Name: idx_boss_finance_snapshot_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_boss_finance_snapshot_created ON public.boss_finance_snapshot USING btree (created_at DESC);
-
-
---
--- Name: idx_boss_google_usage_api; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_boss_google_usage_api ON public.boss_google_usage USING btree (api, created_at DESC);
-
-
---
--- Name: idx_boss_incidents_status; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_boss_incidents_status ON public.boss_incidents USING btree (status, opened_at DESC);
-
-
---
 -- Name: idx_boss_memory_conf; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3880,10 +2482,101 @@ CREATE INDEX idx_boss_memory_conf ON public.boss_memory USING btree (confidence 
 
 
 --
--- Name: idx_boss_playbooks_match; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_boss_outsiders_enabled; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_boss_playbooks_match ON public.boss_playbooks USING btree (kind, match_key);
+CREATE INDEX idx_boss_outsiders_enabled ON public.boss_outsiders USING btree (tenant_id, enabled) WHERE (enabled = true);
+
+
+--
+-- Name: idx_boss_pipelines_tenant; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_pipelines_tenant ON public.boss_pipelines USING btree (tenant_id);
+
+
+--
+-- Name: idx_boss_rascals_enabled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_rascals_enabled ON public.boss_rascals USING btree (tenant_id, enabled) WHERE (enabled = true);
+
+
+--
+-- Name: idx_boss_stage_log_agent; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_stage_log_agent ON public.boss_stage_log USING btree (tenant_id, agent, started_at DESC);
+
+
+--
+-- Name: idx_boss_stage_log_task; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_stage_log_task ON public.boss_stage_log USING btree (task_id, started_at DESC);
+
+
+--
+-- Name: idx_boss_tasks_agent; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_tasks_agent ON public.boss_tasks USING btree (tenant_id, assigned_agent) WHERE (status = ANY (ARRAY['pending'::text, 'active'::text, 'blocked'::text]));
+
+
+--
+-- Name: idx_boss_tasks_archived; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_tasks_archived ON public.boss_tasks USING btree (tenant_id, archived_at) WHERE (archived_at IS NULL);
+
+
+--
+-- Name: idx_boss_tasks_client; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_tasks_client ON public.boss_tasks USING btree (tenant_id, assigned_client);
+
+
+--
+-- Name: idx_boss_tasks_pending_review; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_tasks_pending_review ON public.boss_tasks USING btree (tenant_id, updated_at) WHERE ((view_column = 'to_close'::text) AND (archived_at IS NULL) AND (kind = 'task'::text));
+
+
+--
+-- Name: idx_boss_tasks_response; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_tasks_response ON public.boss_tasks USING btree (tenant_id, assigned_agent, created_at) WHERE ((kind = 'response'::text) AND (view_column = 'inbox'::text) AND (archived_at IS NULL));
+
+
+--
+-- Name: idx_boss_tasks_stage; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_tasks_stage ON public.boss_tasks USING btree (tenant_id, current_stage);
+
+
+--
+-- Name: idx_boss_tasks_tenant_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_tasks_tenant_status ON public.boss_tasks USING btree (tenant_id, status);
+
+
+--
+-- Name: idx_boss_tasks_view_column; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_tasks_view_column ON public.boss_tasks USING btree (tenant_id, view_column);
+
+
+--
+-- Name: idx_boss_tasks_wo_heartbeat; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_boss_tasks_wo_heartbeat ON public.boss_tasks USING btree (tenant_id, assigned_agent, gate_at) WHERE ((status = 'pending'::text) AND (bucket IS NOT NULL) AND (picked_at IS NULL));
 
 
 --
@@ -4132,13 +2825,6 @@ CREATE INDEX idx_connected_accounts_tenant_id ON public.connected_accounts USING
 
 
 --
--- Name: idx_email_drafts_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_email_drafts_created ON public.boss_email_drafts USING btree (created_at DESC);
-
-
---
 -- Name: idx_email_log_attention; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4307,10 +2993,10 @@ CREATE INDEX idx_invites_status ON public.invites USING btree (status);
 
 
 --
--- Name: idx_knowledge_domain; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_ircaios_pending_passkeys_hash; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_knowledge_domain ON public.boss_knowledge USING btree (domain, updated_at DESC);
+CREATE INDEX idx_ircaios_pending_passkeys_hash ON public.boss_pending_passkeys USING btree (passkey_hash);
 
 
 --
@@ -4325,27 +3011,6 @@ CREATE INDEX idx_learning_profiles_tenant_id ON public.learning_profiles USING b
 --
 
 CREATE INDEX idx_learning_profiles_user_id ON public.learning_profiles USING btree (user_id);
-
-
---
--- Name: idx_meta_events_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_meta_events_created ON public.boss_meta_events USING btree (created_at DESC);
-
-
---
--- Name: idx_newsroom_tips_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_newsroom_tips_created ON public.newsroom_tips USING btree (created_at DESC);
-
-
---
--- Name: idx_newsroom_tips_unused; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_newsroom_tips_unused ON public.newsroom_tips USING btree (used_at) WHERE (used_at IS NULL);
 
 
 --
@@ -4388,13 +3053,6 @@ CREATE INDEX idx_oauth_tokens_tenant_id ON public.oauth_tokens USING btree (tena
 --
 
 CREATE INDEX idx_oauth_tokens_user_id ON public.oauth_tokens USING btree (user_id) WHERE (user_id IS NOT NULL);
-
-
---
--- Name: idx_onboarding_incomplete; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_onboarding_incomplete ON public.boss_onboarding USING btree (tenant_id, last_activity_at) WHERE (completed_at IS NULL);
 
 
 --
@@ -4496,13 +3154,6 @@ CREATE INDEX idx_sessions_token ON public.sessions USING btree (token);
 
 
 --
--- Name: idx_sessions_user; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_sessions_user ON public.boss_sessions USING btree (user_id, started_at DESC);
-
-
---
 -- Name: idx_sessions_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4514,20 +3165,6 @@ CREATE INDEX idx_sessions_user_id ON public.sessions USING btree (user_id);
 --
 
 CREATE INDEX idx_slack_attention_open ON public.slack_attention USING btree (tenant_id, created_at DESC) WHERE (status = 'open'::text);
-
-
---
--- Name: idx_slack_messages_channel; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_slack_messages_channel ON public.boss_slack_messages USING btree (channel_id, posted_at DESC);
-
-
---
--- Name: idx_slack_messages_sale; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_slack_messages_sale ON public.boss_slack_messages USING btree (is_sale, posted_at DESC);
 
 
 --
@@ -4545,13 +3182,6 @@ CREATE INDEX idx_sync_state_tenant ON public.sync_state USING btree (tenant_id);
 
 
 --
--- Name: idx_tenants_email; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_tenants_email ON public.boss_tenants USING btree (primary_email);
-
-
---
 -- Name: idx_tenants_slug; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4566,34 +3196,6 @@ CREATE INDEX idx_tenants_status ON public.tenants USING btree (status);
 
 
 --
--- Name: idx_token_ledger_agent; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_token_ledger_agent ON public.token_ledger USING btree (agent_kind, agent_handle, ts DESC);
-
-
---
--- Name: idx_token_ledger_provider; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_token_ledger_provider ON public.token_ledger USING btree (provider, model, ts DESC);
-
-
---
--- Name: idx_token_ledger_ts; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_token_ledger_ts ON public.token_ledger USING btree (ts DESC);
-
-
---
--- Name: idx_users_active; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_users_active ON public.boss_users USING btree (tenant_id, active) WHERE (active = true);
-
-
---
 -- Name: idx_users_email; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4601,10 +3203,10 @@ CREATE INDEX idx_users_email ON public.users USING btree (email);
 
 
 --
--- Name: idx_users_tenant; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_users_passkey_hash; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_users_tenant ON public.boss_users USING btree (tenant_id, email);
+CREATE INDEX idx_users_passkey_hash ON public.users USING btree (passkey_hash) WHERE (passkey_hash IS NOT NULL);
 
 
 --
@@ -4619,104 +3221,6 @@ CREATE INDEX idx_users_tenant_id ON public.users USING btree (tenant_id);
 --
 
 CREATE INDEX idx_users_tenant_role ON public.users USING btree (tenant_id, role);
-
-
---
--- Name: idx_vasari_outsiders_enabled; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_outsiders_enabled ON public.boss_outsiders USING btree (tenant_id, enabled) WHERE (enabled = true);
-
-
---
--- Name: idx_vasari_pipelines_tenant; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_pipelines_tenant ON public.boss_pipelines USING btree (tenant_id);
-
-
---
--- Name: idx_vasari_rascals_enabled; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_rascals_enabled ON public.boss_rascals USING btree (tenant_id, enabled) WHERE (enabled = true);
-
-
---
--- Name: idx_vasari_stage_log_agent; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_stage_log_agent ON public.boss_stage_log USING btree (tenant_id, agent, started_at DESC);
-
-
---
--- Name: idx_vasari_stage_log_task; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_stage_log_task ON public.boss_stage_log USING btree (task_id, started_at DESC);
-
-
---
--- Name: idx_vasari_tasks_agent; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_tasks_agent ON public.boss_tasks USING btree (tenant_id, assigned_agent) WHERE (status = ANY (ARRAY['pending'::text, 'active'::text, 'blocked'::text]));
-
-
---
--- Name: idx_vasari_tasks_archived; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_tasks_archived ON public.boss_tasks USING btree (tenant_id, archived_at) WHERE (archived_at IS NULL);
-
-
---
--- Name: idx_vasari_tasks_client; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_tasks_client ON public.boss_tasks USING btree (tenant_id, assigned_client);
-
-
---
--- Name: idx_vasari_tasks_pending_review; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_tasks_pending_review ON public.boss_tasks USING btree (tenant_id, updated_at) WHERE ((view_column = 'to_close'::text) AND (archived_at IS NULL) AND (kind = 'task'::text));
-
-
---
--- Name: idx_vasari_tasks_response; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_tasks_response ON public.boss_tasks USING btree (tenant_id, assigned_agent, created_at) WHERE ((kind = 'response'::text) AND (view_column = 'inbox'::text) AND (archived_at IS NULL));
-
-
---
--- Name: idx_vasari_tasks_stage; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_tasks_stage ON public.boss_tasks USING btree (tenant_id, current_stage);
-
-
---
--- Name: idx_vasari_tasks_tenant_status; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_tasks_tenant_status ON public.boss_tasks USING btree (tenant_id, status);
-
-
---
--- Name: idx_vasari_tasks_view_column; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_tasks_view_column ON public.boss_tasks USING btree (tenant_id, view_column);
-
-
---
--- Name: idx_vasari_tasks_wo_heartbeat; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_vasari_tasks_wo_heartbeat ON public.boss_tasks USING btree (tenant_id, assigned_agent, gate_at) WHERE ((status = 'pending'::text) AND (bucket IS NOT NULL) AND (picked_at IS NULL));
 
 
 --
@@ -4738,20 +3242,6 @@ CREATE INDEX idx_voice_devices_status ON public.voice_devices USING btree (tenan
 --
 
 CREATE INDEX idx_voice_devices_tenant_id ON public.voice_devices USING btree (tenant_id);
-
-
---
--- Name: idx_voice_transcripts_created; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_voice_transcripts_created ON public.boss_voice_transcripts USING btree (created_at DESC);
-
-
---
--- Name: idx_voice_transcripts_user; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_voice_transcripts_user ON public.boss_voice_transcripts USING btree (user_id, created_at DESC);
 
 
 --
@@ -4825,108 +3315,108 @@ CREATE INDEX idx_whatsapp_monitors_agent ON public.boss_whatsapp_monitors USING 
 
 
 --
--- Name: uq_open_incident; Type: INDEX; Schema: public; Owner: -
+-- Name: boss_chat_sessions ircaios_chat_sessions_set_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_open_incident ON public.boss_incidents USING btree (kind, source) WHERE (status <> ALL (ARRAY['resolved'::text, 'escalated'::text]));
+CREATE TRIGGER ircaios_chat_sessions_set_updated_at BEFORE UPDATE ON public.boss_chat_sessions FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: behavioral_patterns trg_behavioral_patterns_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_behavioral_patterns_updated_at BEFORE UPDATE ON public.behavioral_patterns FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_behavioral_patterns_updated_at BEFORE UPDATE ON public.behavioral_patterns FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: brain_config trg_brain_config_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_brain_config_updated_at BEFORE UPDATE ON public.brain_config FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_brain_config_updated_at BEFORE UPDATE ON public.brain_config FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: cleanup_proposals trg_cleanup_proposals_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_cleanup_proposals_updated_at BEFORE UPDATE ON public.cleanup_proposals FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_cleanup_proposals_updated_at BEFORE UPDATE ON public.cleanup_proposals FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: event_rules trg_event_rules_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_event_rules_updated_at BEFORE UPDATE ON public.event_rules FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_event_rules_updated_at BEFORE UPDATE ON public.event_rules FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: file_rules trg_file_rules_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_file_rules_updated_at BEFORE UPDATE ON public.file_rules FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_file_rules_updated_at BEFORE UPDATE ON public.file_rules FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: incidents trg_incidents_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_incidents_updated_at BEFORE UPDATE ON public.incidents FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_incidents_updated_at BEFORE UPDATE ON public.incidents FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: learning_profiles trg_learning_profiles_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_learning_profiles_updated_at BEFORE UPDATE ON public.learning_profiles FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_learning_profiles_updated_at BEFORE UPDATE ON public.learning_profiles FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: oauth_tokens trg_oauth_tokens_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_oauth_tokens_updated_at BEFORE UPDATE ON public.oauth_tokens FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_oauth_tokens_updated_at BEFORE UPDATE ON public.oauth_tokens FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: playbooks trg_playbooks_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_playbooks_updated_at BEFORE UPDATE ON public.playbooks FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_playbooks_updated_at BEFORE UPDATE ON public.playbooks FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: preferences trg_preferences_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_preferences_updated_at BEFORE UPDATE ON public.preferences FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_preferences_updated_at BEFORE UPDATE ON public.preferences FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: sync_state trg_sync_state_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_sync_state_updated_at BEFORE UPDATE ON public.sync_state FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_sync_state_updated_at BEFORE UPDATE ON public.sync_state FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: tenants trg_tenants_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_tenants_updated_at BEFORE UPDATE ON public.tenants FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_tenants_updated_at BEFORE UPDATE ON public.tenants FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: users trg_users_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON public.users FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON public.users FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
 -- Name: voice_devices trg_voice_devices_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_voice_devices_updated_at BEFORE UPDATE ON public.voice_devices FOR EACH ROW EXECUTE FUNCTION public.boss_set_updated_at();
+CREATE TRIGGER trg_voice_devices_updated_at BEFORE UPDATE ON public.voice_devices FOR EACH ROW EXECUTE FUNCTION public.ircaios_set_updated_at();
 
 
 --
@@ -4951,6 +3441,54 @@ ALTER TABLE ONLY public.behavioral_patterns
 
 ALTER TABLE ONLY public.behavioral_patterns
     ADD CONSTRAINT behavioral_patterns_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: boss_stage_log boss_stage_log_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_stage_log
+    ADD CONSTRAINT boss_stage_log_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.boss_tasks(id) ON DELETE CASCADE;
+
+
+--
+-- Name: boss_tasks boss_tasks_pipeline_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_tasks
+    ADD CONSTRAINT boss_tasks_pipeline_id_fkey FOREIGN KEY (pipeline_id) REFERENCES public.boss_pipelines(id) ON DELETE SET NULL;
+
+
+--
+-- Name: boss_whatsapp_drafts boss_whatsapp_drafts_tenant_id_chat_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_whatsapp_drafts
+    ADD CONSTRAINT boss_whatsapp_drafts_tenant_id_chat_id_fkey FOREIGN KEY (tenant_id, chat_id) REFERENCES public.boss_whatsapp_threads(tenant_id, chat_id) ON DELETE CASCADE;
+
+
+--
+-- Name: boss_whatsapp_messages boss_whatsapp_messages_tenant_id_chat_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_whatsapp_messages
+    ADD CONSTRAINT boss_whatsapp_messages_tenant_id_chat_id_fkey FOREIGN KEY (tenant_id, chat_id) REFERENCES public.boss_whatsapp_threads(tenant_id, chat_id) ON DELETE CASCADE;
+
+
+--
+-- Name: boss_whatsapp_monitors boss_whatsapp_monitors_tenant_id_chat_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_whatsapp_monitors
+    ADD CONSTRAINT boss_whatsapp_monitors_tenant_id_chat_id_fkey FOREIGN KEY (tenant_id, chat_id) REFERENCES public.boss_whatsapp_threads(tenant_id, chat_id) ON DELETE CASCADE;
+
+
+--
+-- Name: boss_whatsapp_scheduled boss_whatsapp_scheduled_tenant_id_chat_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_whatsapp_scheduled
+    ADD CONSTRAINT boss_whatsapp_scheduled_tenant_id_chat_id_fkey FOREIGN KEY (tenant_id, chat_id) REFERENCES public.boss_whatsapp_threads(tenant_id, chat_id) ON DELETE CASCADE;
 
 
 --
@@ -5106,6 +3644,14 @@ ALTER TABLE ONLY public.incidents
 
 
 --
+-- Name: boss_chat_messages ircaios_chat_messages_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.boss_chat_messages
+    ADD CONSTRAINT ircaios_chat_messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.boss_chat_sessions(id) ON DELETE CASCADE;
+
+
+--
 -- Name: learning_profiles learning_profiles_tenant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5218,7 +3764,75 @@ ALTER TABLE ONLY public.voice_devices
 
 
 --
+-- Permanent agent shell turns. Claude processes are fresh per turn; the tmux
+-- shell persists independently and this table is the durable turn ledger.
+--
+
+CREATE TABLE IF NOT EXISTS public.boss_agent_turns (
+    id uuid PRIMARY KEY,
+    tenant_id text NOT NULL,
+    agent_kind text NOT NULL,
+    handle text NOT NULL,
+    chat_session_id uuid NOT NULL REFERENCES public.boss_chat_sessions(id) ON DELETE CASCADE,
+    assistant_message_id uuid NOT NULL REFERENCES public.boss_chat_messages(id) ON DELETE CASCADE,
+    cli_session_id text,
+    raw_prompt text NOT NULL,
+    enriched_prompt text NOT NULL,
+    context_json jsonb DEFAULT '{}'::jsonb NOT NULL,
+    response text DEFAULT ''::text NOT NULL,
+    recap text DEFAULT ''::text NOT NULL,
+    status text DEFAULT 'queued'::text NOT NULL,
+    error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    started_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    CONSTRAINT boss_agent_turns_kind_ck CHECK (agent_kind = ANY (ARRAY['rascal'::text, 'outsider'::text])),
+    CONSTRAINT boss_agent_turns_status_ck CHECK (status = ANY (ARRAY['queued'::text, 'starting'::text, 'running'::text, 'interrupting'::text, 'completed'::text, 'interrupted'::text, 'failed'::text]))
+);
+
+CREATE INDEX IF NOT EXISTS idx_boss_agent_turns_handle
+    ON public.boss_agent_turns (tenant_id, agent_kind, handle, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_boss_agent_turns_chat_session
+    ON public.boss_agent_turns (chat_session_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_boss_agent_turns_recovery
+    ON public.boss_agent_turns (status, started_at)
+    WHERE status = ANY (ARRAY['queued'::text, 'starting'::text, 'running'::text, 'interrupting'::text]);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_boss_agent_turns_one_active
+    ON public.boss_agent_turns (tenant_id, agent_kind, handle)
+    WHERE status = ANY (ARRAY['queued'::text, 'starting'::text, 'running'::text, 'interrupting'::text]);
+
+
+--
+-- Durable source ledger for guarded, BOS-local Weaviate memory. All object
+-- writes still pass through /api/aios/memory so they are redacted, embedded,
+-- and deduplicated before this ledger is committed.
+--
+
+CREATE TABLE IF NOT EXISTS public.aios_memory_ledger (
+    content_hash text PRIMARY KEY,
+    weaviate_id uuid NOT NULL,
+    device_id text NOT NULL,
+    source text NOT NULL,
+    kind text NOT NULL,
+    title text NOT NULL,
+    content text NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    accepted_at timestamp with time zone DEFAULT now() NOT NULL,
+    redacted boolean DEFAULT false NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_aios_memory_ledger_accepted
+    ON public.aios_memory_ledger (accepted_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_aios_memory_ledger_device
+    ON public.aios_memory_ledger (device_id, accepted_at DESC);
+
+
+--
 -- PostgreSQL database dump complete
 --
 
-
+\unrestrict EJp2pm4LR22y0NVAnMFgxazcdiPxGIAtHUXnyvSlRitpx6jExnibEX6y9NaCh0O

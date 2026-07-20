@@ -1,0 +1,26 @@
+# Added only when the customer compose does not already define `weaviate`.
+# It has no host port; the authenticated service is reachable only on the
+# customer's compose network.
+services:
+  weaviate:
+    image: semitechnologies/weaviate:1.28.2
+    restart: unless-stopped
+    environment:
+      QUERY_DEFAULTS_LIMIT: "25"
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "false"
+      AUTHENTICATION_APIKEY_ENABLED: "true"
+      AUTHENTICATION_APIKEY_ALLOWED_KEYS: ${WEAVIATE_API_KEY:?WEAVIATE_API_KEY is required}
+      AUTHENTICATION_APIKEY_USERS: boss-api
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: node1
+    volumes:
+      - boss_agent_weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/v1/.well-known/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  boss_agent_weaviate_data: {}

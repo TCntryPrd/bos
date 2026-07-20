@@ -1,0 +1,11 @@
+# Added only when the customer compose does not already define `embeddings`.
+services:
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    restart: unless-stopped
+    command: --model-id BAAI/bge-small-en-v1.5 --port 8080
+    volumes:
+      - boss_agent_embeddings_cache:/data
+
+volumes:
+  boss_agent_embeddings_cache: {}

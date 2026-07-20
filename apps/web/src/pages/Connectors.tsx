@@ -7,9 +7,9 @@
  *     config so your tools use your key immediately.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  Plug, RefreshCw, ExternalLink, Trash2, CheckCircle2, Loader2, KeyRound, Linkedin,
+  Plug, RefreshCw, ExternalLink, Trash2, CheckCircle2, Loader2, KeyRound, Linkedin, Copy, Check, Upload,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { connectorsApi, unipileApi, type UnipileAccountStatus } from '../lib/api';
@@ -43,6 +43,8 @@ const META: Record<string, { hue: string; initials: string; keyLabel: string; he
   miro:          { hue: '#FFD02F', initials: 'Mi', keyLabel: 'Access token', help: 'Powers the Canvas board surface. Create an access token in your Miro app settings.', helpUrl: 'https://miro.com/app/settings/user-profile/apps' },
   unipile:       { hue: '#0A66C2', initials: 'Up', keyLabel: 'Unipile API key', help: 'Provider for the live LinkedIn account (LinkedIn only — WhatsApp pairs by QR on the WhatsApp page). Base URL is your DSN, for example https://api50.unipile.com:18056.', helpUrl: 'https://www.unipile.com/' },
 };
+
+const GOOGLE_REDIRECT_URI = 'https://ircustomdashboards.tech/api/connectors/oauth/google/callback';
 
 function StatusPill({ on }: { on: boolean }) {
   return (
@@ -126,6 +128,144 @@ function ApiKeyForm({ integ, onSaved }: { integ: Integration; onSaved: () => voi
   );
 }
 
+function OAuthCredentialsForm({ integ, onDone }: { integ: Integration; onDone: () => void }) {
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const json = JSON.parse(ev.target?.result as string);
+        const data = json.installed ?? json.web ?? null;
+        if (!data) { setErr('Unrecognised JSON format — expected {"installed":{...}} or {"web":{...}}'); return; }
+        if (data.client_id) setClientId(data.client_id);
+        if (data.client_secret) setClientSecret(data.client_secret);
+        setErr(null);
+      } catch {
+        setErr('Could not parse file as JSON');
+      }
+    };
+    reader.readAsText(file);
+    // reset so the same file can be re-selected
+    e.target.value = '';
+  }
+
+  async function copyUri() {
+    await navigator.clipboard.writeText(GOOGLE_REDIRECT_URI);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function saveAndConnect() {
+    if (!clientId.trim()) { setErr('Client ID is required.'); return; }
+    if (!clientSecret.trim()) { setErr('Client Secret is required.'); return; }
+    setSaving(true); setErr(null);
+    try {
+      const token = localStorage.getItem('boss_token') ?? '';
+      const res = await fetch('/api/connectors/oauth/configure', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ provider: 'google', clientId: clientId.trim(), clientSecret: clientSecret.trim() }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      const { url } = await connectorsApi.getOAuthUrl('google');
+      window.location.href = url;
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Save failed');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border/40 space-y-2.5">
+      <p className="text-[11.5px] text-text-muted">
+        Enter your Google Cloud OAuth credentials, or upload the JSON file you downloaded from the{' '}
+        <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-accent inline-flex items-center gap-0.5">
+          Google Cloud Console <ExternalLink className="w-3 h-3" />
+        </a>
+        .
+      </p>
+
+      {/* Redirect URI */}
+      <div>
+        <label className="block text-[10.5px] text-text-muted mb-1 uppercase tracking-wider">Authorized redirect URI — add this in Google Cloud Console</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            readOnly
+            value={GOOGLE_REDIRECT_URI}
+            className="flex-1 px-3 py-2 rounded-md bg-surface-2/60 border border-border text-[11.5px] text-text-muted font-mono focus:outline-none cursor-default"
+          />
+          <button type="button" onClick={() => void copyUri()} className="btn-ghost text-xs gap-1 flex-shrink-0">
+            {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+      </div>
+
+      {/* Client ID */}
+      <input
+        type="text"
+        value={clientId}
+        onChange={(e) => setClientId(e.target.value)}
+        placeholder="Client ID (e.g. 123...apps.googleusercontent.com)"
+        className="w-full px-3 py-2 rounded-md bg-surface-2/60 border border-border text-[12.5px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60"
+        autoComplete="off"
+      />
+
+      {/* Client Secret */}
+      <input
+        type="password"
+        value={clientSecret}
+        onChange={(e) => setClientSecret(e.target.value)}
+        placeholder="Client Secret"
+        className="w-full px-3 py-2 rounded-md bg-surface-2/60 border border-border text-[12.5px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60"
+        autoComplete="off"
+      />
+
+      {/* OR divider + file upload */}
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-px bg-border/40" />
+        <span className="text-[10.5px] text-text-muted uppercase tracking-wider">or upload JSON</span>
+        <div className="flex-1 h-px bg-border/40" />
+      </div>
+      <div>
+        <input ref={fileRef} type="file" accept=".json,application/json" onChange={handleFileUpload} className="hidden" />
+        <button type="button" onClick={() => fileRef.current?.click()} className="btn-secondary text-xs gap-1.5">
+          <Upload className="w-3.5 h-3.5" /> Choose credentials JSON
+        </button>
+      </div>
+
+      {err && <p className="text-[11.5px] text-danger">{err}</p>}
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void saveAndConnect()}
+          disabled={saving}
+          className="btn-primary text-xs gap-1.5 disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5" />}
+          {saving ? 'Connecting…' : 'Save & Connect with Google'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function IntegrationCard({ integ, onConnectOAuth, onChanged }: {
   integ: Integration;
   onConnectOAuth: (id: string) => void;
@@ -153,12 +293,21 @@ function IntegrationCard({ integ, onConnectOAuth, onChanged }: {
           </div>
 
           {integ.type === 'oauth' ? (
-            <div className="mt-2 flex items-center gap-2">
-              <button type="button" onClick={() => onConnectOAuth(integ.id)} className="btn-secondary text-xs gap-1.5">
-                {integ.configured ? 'Reconnect' : 'Connect'} <ExternalLink className="w-3.5 h-3.5" />
-              </button>
-              <span className="text-[11.5px] text-text-muted">{META[integ.id]?.help}</span>
-            </div>
+            integ.id === 'google' ? (
+              <div className="mt-2">
+                <button type="button" onClick={() => setOpen((v) => !v)} className="btn-secondary text-xs gap-1.5">
+                  {integ.configured ? 'Reconnect' : 'Connect'} <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+                {open && <OAuthCredentialsForm integ={integ} onDone={() => { setOpen(false); onChanged(); }} />}
+              </div>
+            ) : (
+              <div className="mt-2 flex items-center gap-2">
+                <button type="button" onClick={() => onConnectOAuth(integ.id)} className="btn-secondary text-xs gap-1.5">
+                  {integ.configured ? 'Reconnect' : 'Connect'} <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-[11.5px] text-text-muted">{META[integ.id]?.help}</span>
+              </div>
+            )
           ) : (
             <div className="mt-2 flex items-center gap-2">
               <button type="button" onClick={() => setOpen((v) => !v)} className="btn-secondary text-xs gap-1.5">
