@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { connectorsApi, unipileApi, type UnipileAccountStatus } from '../lib/api';
+import { SortableTileGrid } from '../components/tiles/SortableTileGrid';
 
 interface Integration {
   id: string;
@@ -297,16 +298,28 @@ export function Connectors() {
           {oauth.length > 0 && (
             <section>
               <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Sign-in (OAuth)</h2>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {oauth.map((i) => <IntegrationCard key={i.id} integ={i} onConnectOAuth={connectOAuth} onChanged={load} />)}
-              </div>
+              <SortableTileGrid
+                storageKey="boss_connectors_oauth_order_v1"
+                ids={oauth.map((i) => i.id)}
+                className="grid grid-cols-1 lg:grid-cols-2 gap-3"
+                render={(id) => {
+                  const i = oauth.find((x) => x.id === id);
+                  return i ? <IntegrationCard integ={i} onConnectOAuth={connectOAuth} onChanged={load} /> : null;
+                }}
+              />
             </section>
           )}
           <section>
             <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">API key</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              {apikeys.map((i) => <IntegrationCard key={i.id} integ={i} onConnectOAuth={connectOAuth} onChanged={load} />)}
-            </div>
+            <SortableTileGrid
+              storageKey="boss_connectors_apikey_order_v1"
+              ids={apikeys.map((i) => i.id)}
+              className="grid grid-cols-1 lg:grid-cols-2 gap-3"
+              render={(id) => {
+                const i = apikeys.find((x) => x.id === id);
+                return i ? <IntegrationCard integ={i} onConnectOAuth={connectOAuth} onChanged={load} /> : null;
+              }}
+            />
           </section>
         </>
       ) : (

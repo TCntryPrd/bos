@@ -45,6 +45,7 @@ import {
   Square,
 } from 'lucide-react';
 import { AgentAvatar } from '../components/AgentAvatar';
+import { useTilesLocked } from '../lib/tileLock';
 import { healthDataApi, fmtHm, fmtInt, sparkPoints, HEALTH_COLORS } from '../lib/healthData';
 import type { HealthOverview } from '../lib/healthData';
 
@@ -3742,24 +3743,24 @@ type FloatingLayout = Partial<Record<FloatingTileId, FloatingRect>>;
 
 const FLOAT_LAYOUT_KEY = 'boss_dash_float_layout_v1';
 const FLOAT_LAYOUT_PRESET_KEY = 'boss_dash_float_layout_preset_v1';
-const FLOAT_LAYOUT_PRESET_VERSION = 'executive-float-v5-locked';
+const FLOAT_LAYOUT_PRESET_VERSION = 'executive-float-v8-aligned';
 
 const FIXED_FLOATING_IDS: FixedDashboardTileId[] = ['hero'];
 
 const BASE_FLOATING_LAYOUT: FloatingLayout = {
   hero: { x: 2, y: 2, w: 50, h: 14, z: 20 },
-  stat_agents: { x: 54, y: 2, w: 10, h: 12, z: 21 },
-  stat_tasks: { x: 65, y: 2, w: 10, h: 12, z: 22 },
-  stat_inbox: { x: 76, y: 2, w: 10, h: 12, z: 23 },
-  stat_calendar: { x: 87, y: 2, w: 11, h: 12, z: 24 },
-  launch_linkedin: { x: 2, y: 16, w: 31, h: 16, z: 25 },
-  launch_whatsapp: { x: 35, y: 16, w: 28, h: 16, z: 26 },
-  life: { x: 2.36144578313253, y: 16.168199737187905, w: 25.301204819277107, h: 83.04336399474376, z: 48 },
-  brief: { x: 37.71084337349397, y: 20.202365308804207, w: 24.939759036144576, h: 43.49540078843627, z: 53 },
+  stat_agents: { x: 54, y: 2, w: 10.75, h: 14, z: 21 },
+  stat_tasks: { x: 65.75, y: 2, w: 10.75, h: 14, z: 22 },
+  stat_inbox: { x: 76.5, y: 2, w: 10.75, h: 14, z: 23 },
+  stat_calendar: { x: 87.25, y: 2, w: 10.75, h: 14, z: 24 },
+  launch_linkedin: { x: 2, y: 18, w: 31, h: 16, z: 25 },
+  launch_whatsapp: { x: 35, y: 18, w: 28, h: 16, z: 26 },
+  life: { x: 2, y: 18, w: 25, h: 80, z: 48 },
+  brief: { x: 29, y: 18, w: 36, h: 46, z: 53 },
   finance: { x: 2, y: 62, w: 36, h: 26, z: 29 },
   crm: { x: 40, y: 62, w: 27, h: 26, z: 30 },
-  tasks: { x: 66.83132530120481, y: 0, w: 26.83132530120482, h: 65.72010512483574, z: 42 },
-  timeline: { x: 27.746987951807228, y: 67.4113009198423, w: 66.22891566265059, h: 30.486202365308806, z: 50 },
+  tasks: { x: 67, y: 18, w: 31, h: 46, z: 42 },
+  timeline: { x: 29, y: 66, w: 69, h: 32, z: 50 },
   health_data: { x: 69, y: 52, w: 29, h: 36, z: 32 },
 };
 
@@ -3925,7 +3926,9 @@ function FloatingDashboardTile({
   getFrontZ: () => number;
   children: React.ReactNode;
 }) {
-  const adjustable = false;
+  // Governed by the global tile lock (padlock in the TopBar): unlocked ->
+  // every tile grows a move grip and a resize handle.
+  const adjustable = !useTilesLocked();
 
   const beginMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     const stageEl = stageRef.current;
@@ -5053,7 +5056,9 @@ export default function Dashboard() {
   const {
     layout: floatingLayout,
     setRect: setFloatingRect,
+    resetLayout: resetFloatingLayout,
   } = useFloatingLayout(floatingTileIds);
+  const tilesLocked = useTilesLocked();
   const getFrontFloatingZ = useCallback(
     () => Math.max(1, ...Object.values(floatingLayout).map((rect) => rect?.z ?? 1)) + 1,
     [floatingLayout],
@@ -5185,6 +5190,16 @@ export default function Dashboard() {
               </FloatingDashboardTile>
             );
           })}
+          {!tilesLocked && (
+            <button
+              type="button"
+              onClick={resetFloatingLayout}
+              className="dashboard-layout-reset vs-mono"
+              title="Reset all tiles to the default arrangement"
+            >
+              Reset layout
+            </button>
+          )}
         </div>
       </div>
 

@@ -3956,3 +3956,23 @@ html[data-brand='ir'][data-theme='dark'] .aios-non-health.aios-room-revenue #mai
   box-shadow: 0 18px 48px rgb(0 0 0 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.12) !important;
   backdrop-filter: blur(12px) saturate(0.92) !important;
 }
+
+
+/* Reset-layout pill — bottom-right of the dashboard stage when the global
+   tile lock is open. */
+.dashboard-layout-reset {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  z-index: 400;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border, rgba(148, 163, 184, 0.35));
+  background: rgba(10, 14, 22, 0.72);
+  color: var(--text-muted, #9aa8c2);
+  backdrop-filter: blur(6px);
+}
+.dashboard-layout-reset:hover { color: var(--text-primary, #e6edf3); border-color: var(--accent, #8b5cf6); }

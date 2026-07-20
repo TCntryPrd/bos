@@ -24,6 +24,7 @@ import {
 import type {
   DailyRow, DeviceSyncState, HealthAnomaly, HealthDevice, HealthOverview, HeartRateSummary, RangeKey,
 } from '../lib/healthData';
+import { useTilesLocked } from '../lib/tileLock';
 import { HealthCharts } from '../components/health/HealthCharts';
 import { Hypnogram } from '../components/health/Hypnogram';
 import { WorkoutList } from '../components/health/WorkoutList';
@@ -246,12 +247,15 @@ export default function Health() {
     saveLayout(next);
     setLayout(next);
   }, []);
-  const layoutLocked = desktopLocked || tabletLocked;
+  // Governed by the global tile lock (padlock in the TopBar). The viewport
+  // classes below keep the pinned look while locked; unlocking frees drag
+  // at any width.
+  const layoutLocked = useTilesLocked();
   const activeLayout = layout;
   const healthFrameLeft = activeLayout.sleepReport?.x ?? DEFAULT_HEALTH_LAYOUT.sleepReport.x;
 
   return (
-    <div className={`aios-page health-suite-page min-h-full overflow-hidden p-3 lg:p-4 ${desktopLocked ? 'health-desktop-locked' : ''} ${tabletLocked ? 'health-tablet-locked' : ''}`}>
+    <div className={`aios-page health-suite-page min-h-full overflow-hidden p-3 lg:p-4 ${layoutLocked && desktopLocked ? 'health-desktop-locked' : ''} ${layoutLocked && tabletLocked ? 'health-tablet-locked' : ''}`}>
       <div
         className="health-suite-stage mx-auto"
         style={{ '--health-frame-left': `${healthFrameLeft}%` } as CSSProperties}

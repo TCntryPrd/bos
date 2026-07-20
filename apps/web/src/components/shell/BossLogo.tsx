@@ -1,6 +1,6 @@
 import React from 'react';
 import irBadge from '../../assets/ir-badge.png';
-import { getAiosName } from '../../lib/theme';
+import { getAiosName, getBrandByline, isBrandBadgeHidden } from '../../lib/theme';
 import { isPlainBrand } from '../../lib/brand';
 
 /**
@@ -19,18 +19,22 @@ export function BossMark({
 }: { scale?: number; collapsed?: boolean; centered?: boolean }) {
   const size = 28 * scale;
   const name = getAiosName();
-  const centeredLockup = centered && !collapsed;
+  const byline = isPlainBrand ? '' : getBrandByline('From Industry Rockstar');
+  const showBadge = !isBrandBadgeHidden();
+  const centeredLockup = centered && !collapsed && showBadge;
   return (
     <div
       className={centeredLockup ? 'relative flex w-full items-center justify-center' : 'flex items-center'}
       style={centeredLockup ? undefined : { gap: 10 * scale }}
     >
-      <img
-        src={irBadge}
-        alt="Industry Rockstar"
-        className={`ir-mark flex-shrink-0 object-contain${centeredLockup ? ' absolute left-0 top-1/2 -translate-y-1/2' : ''}`}
-        style={{ width: size, height: size }}
-      />
+      {showBadge && (
+        <img
+          src={irBadge}
+          alt=""
+          className={`ir-mark flex-shrink-0 object-contain${centeredLockup ? ' absolute left-0 top-1/2 -translate-y-1/2' : ''}`}
+          style={{ width: size, height: size }}
+        />
+      )}
       {!collapsed && (
         <div className={centeredLockup ? 'leading-none text-center' : 'leading-none'}>
           <div className="font-bold text-text-primary" style={{ fontSize: 15 * scale, letterSpacing: '0.18em' }}>
@@ -47,14 +51,14 @@ export function BossMark({
           >
             BUSINESS OPERATING SYSTEM
           </div>
-          {!isPlainBrand && (
+          {byline ? (
             <div
               className="vs-mono mt-[3px] text-text-muted/70"
               style={{ fontSize: 7 * scale, letterSpacing: '0.06em', whiteSpace: 'nowrap' }}
             >
-              From Industry Rockstar
+              {byline}
             </div>
-          )}
+          ) : null}
         </div>
       )}
     </div>

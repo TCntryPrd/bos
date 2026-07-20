@@ -1,7 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu } from 'lucide-react';
+import { Lock, LockOpen, Menu } from 'lucide-react';
 import { getAiosName } from '../../lib/theme';
+import { useTilesLocked, setTilesLocked } from '../../lib/tileLock';
 
 function getUser(): { name: string; role: string } {
   try {
@@ -25,6 +26,7 @@ export function TopBar({ pageTitle, onMobileMenu, immersive = false }: TopBarPro
   const isAdmin = role === 'admin' || role === 'owner';
   const navigate = useNavigate();
   const aiosName = getAiosName();
+  const locked = useTilesLocked();
 
   return (
     <header
@@ -50,6 +52,24 @@ export function TopBar({ pageTitle, onMobileMenu, immersive = false }: TopBarPro
       <h1 className="text-sm font-medium text-text-primary leading-none">
         {pageTitle}
       </h1>
+      {/* Tile lock — governs move/resize of tiles on every page. */}
+      <button
+        type="button"
+        onClick={() => setTilesLocked(!locked)}
+        className={`ml-auto flex items-center gap-1.5 rounded-md border px-2 py-1 transition-colors ${
+          locked
+            ? 'border-border text-text-muted hover:text-text-primary hover:bg-surface-2/60'
+            : 'border-accent/50 text-accent bg-accent/10 hover:bg-accent/15'
+        }`}
+        aria-pressed={!locked}
+        aria-label={locked ? 'Unlock tiles to arrange the layout' : 'Lock tile layout'}
+        title={locked ? 'Unlock tiles — move & resize any tile, on any page' : 'Layout unlocked — drag or resize tiles, then lock'}
+      >
+        {locked ? <Lock className="w-3 h-3" aria-hidden /> : <LockOpen className="w-3 h-3" aria-hidden />}
+        <span className="vs-mono hidden md:block text-[9px] tracking-[0.14em] uppercase">
+          {locked ? 'Layout' : 'Editing'}
+        </span>
+      </button>
       {/* User pill — far right of the header (moved here from the nav rail). */}
       <button
         type="button"

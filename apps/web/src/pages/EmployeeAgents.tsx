@@ -11,6 +11,7 @@ import {
   Briefcase, Wallet, Mail, Sparkles, AlertTriangle, CheckCircle2, Clock, RefreshCw,
 } from 'lucide-react';
 import { employeeAgentsApi, type EmployeeAgentRow } from '../lib/api';
+import { SortableTileGrid } from '../components/tiles/SortableTileGrid';
 
 function num(v: string | number | null | undefined): number {
   return typeof v === 'number' ? v : Number(v ?? 0);
@@ -140,9 +141,15 @@ export function EmployeeAgents() {
       ) : agents.length === 0 ? (
         <div className="text-[12px] text-text-muted">No Employee Agents registered yet.</div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {agents.map((a) => <AgentCard key={a.id} a={a} />)}
-        </div>
+        <SortableTileGrid
+          storageKey="boss_agents_tile_order_v1"
+          ids={agents.map((a) => a.id)}
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+          render={(id) => {
+            const a = agents.find((x) => x.id === id);
+            return a ? <AgentCard a={a} /> : null;
+          }}
+        />
       )}
     </div>
   );

@@ -16,6 +16,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { useTilesLocked } from '../lib/tileLock';
 import {
   Activity,
   AlertTriangle,
@@ -157,6 +158,7 @@ function useStoredOrder<T extends string>(key: string, defaults: readonly T[]) {
 }
 
 function SortableTile({ id, children, className = '' }: { id: string; children: ReactNode; className?: string }) {
+  const locked = useTilesLocked();
   const {
     attributes,
     listeners,
@@ -164,7 +166,7 @@ function SortableTile({ id, children, className = '' }: { id: string; children: 
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, disabled: locked });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -176,6 +178,7 @@ function SortableTile({ id, children, className = '' }: { id: string; children: 
       style={style}
       className={`group relative ${className} ${isDragging ? 'z-20 opacity-70' : ''}`}
     >
+      {!locked && (
       <button
         type="button"
         {...attributes}
@@ -186,6 +189,7 @@ function SortableTile({ id, children, className = '' }: { id: string; children: 
       >
         <GripVertical className="h-4 w-4" />
       </button>
+      )}
       {children}
     </div>
   );

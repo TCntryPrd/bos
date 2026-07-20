@@ -52,3 +52,29 @@ export function getAiosName(): string {
     return '';
   }
 }
+
+// Per-install lockup byline. When the meta tag is ABSENT the brand default
+// applies ("From Industry Rockstar" on the ir brand); when present its content
+// is used verbatim — content="" hides the byline entirely.
+export function getBrandByline(brandDefault: string): string {
+  try {
+    const el = document.querySelector('meta[name="aios-byline"]');
+    if (!el) return brandDefault;
+    const v = (el.getAttribute('content') || '').trim();
+    if (v.startsWith('__')) return brandDefault;
+    return v;
+  } catch {
+    return brandDefault;
+  }
+}
+
+// Per-install badge visibility: <meta name="aios-badge" content="off"> hides
+// the brand badge image in the lockup. Absent -> shown (brand default).
+export function isBrandBadgeHidden(): boolean {
+  try {
+    const el = document.querySelector('meta[name="aios-badge"]');
+    return (el?.getAttribute('content') || '').trim().toLowerCase() === 'off';
+  } catch {
+    return false;
+  }
+}
