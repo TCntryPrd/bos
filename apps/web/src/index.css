@@ -3976,3 +3976,33 @@ html[data-brand='ir'][data-theme='dark'] .aios-non-health.aios-room-revenue #mai
   backdrop-filter: blur(6px);
 }
 .dashboard-layout-reset:hover { color: var(--text-primary, #e6edf3); border-color: var(--accent, #8b5cf6); }
+
+
+/* Dashboard-of-Life pick-and-choose (editing mode) */
+.dashboard-life-signal { position: relative; }
+.dashboard-life-hide {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  z-index: 5;
+  width: 16px;
+  height: 16px;
+  line-height: 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(10, 14, 22, 0.65);
+  color: #9aa8c2;
+  font-size: 11px;
+  text-align: center;
+  padding: 0;
+}
+.dashboard-life-hide:hover { color: #ff8fa3; border-color: rgba(255, 143, 163, 0.6); }
+.dashboard-life-restore {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px dashed rgba(148, 163, 184, 0.45);
+  background: transparent;
+  color: #9aa8c2;
+}
+.dashboard-life-restore:hover { color: #e6edf3; border-color: rgba(139, 92, 246, 0.6); }

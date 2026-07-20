@@ -4472,10 +4472,37 @@ function LifeSignalDialog({ tile, onClose }: { tile: LifeSignalTile; onClose: ()
   );
 }
 
+// Per-user pick-and-choose for Dashboard-of-Life signals. Keys hidden here are
+// dropped from the grid; editable while the global tile lock is open.
+const LIFE_HIDDEN_KEY = 'boss_life_hidden_signals_v1';
+
+function readHiddenSignals(): Set<string> {
+  try {
+    const raw = localStorage.getItem(LIFE_HIDDEN_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
 function LifeOverviewWidget({ highlights }: { highlights: LifeSignalTile[] }) {
   const { data, error, loaded } = usePolledJson<{ domains: LifeDomain[] }>('api/life/overview');
   const navigate = useNavigate();
   const [detailTile, setDetailTile] = useState<LifeSignalTile | null>(null);
+  const lifeTilesLocked = useTilesLocked();
+  const [hiddenSignals, setHiddenSignals] = useState<Set<string>>(readHiddenSignals);
+  const toggleSignal = useCallback((key: string) => {
+    setHiddenSignals((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      try {
+        localStorage.setItem(LIFE_HIDDEN_KEY, JSON.stringify([...next]));
+      } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
   const domains = data?.domains ?? [];
   const tiles: LifeSignalTile[] = [
     ...domains.map((d) => ({
@@ -4495,6 +4522,8 @@ function LifeOverviewWidget({ highlights }: { highlights: LifeSignalTile[] }) {
     ...highlights,
   ];
 
+  const visibleTiles = tiles.filter((tile) => !hiddenSignals.has(tile.key));
+  const hiddenTiles = tiles.filter((tile) => hiddenSignals.has(tile.key));
   const openTile = (tile: LifeSignalTile) => setDetailTile(tile);
   const openTileRoute = (tile: LifeSignalTile) => {
     const route = dashboardRoute(tile.route);
@@ -4506,7 +4535,12 @@ function LifeOverviewWidget({ highlights }: { highlights: LifeSignalTile[] }) {
       title="Dashboard of Life"
       transparent
       className="dashboard-life-card"
-      meta={<span className="text-[10px]" style={{ color: '#183c68' }}>{tiles.length ? `${tiles.length} signals` : ''}</span>}
+      meta={
+        <span className="text-[10px]" style={{ color: '#183c68' }}>
+          {visibleTiles.length ? `${visibleTiles.length} signals` : ''}
+          {hiddenTiles.length ? ` · ${hiddenTiles.length} hidden` : ''}
+        </span>
+      }
     >
       {error && tiles.length === 0 ? (
         <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Unavailable</div>
@@ -4514,7 +4548,7 @@ function LifeOverviewWidget({ highlights }: { highlights: LifeSignalTile[] }) {
         <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Loading…</div>
       ) : (
         <div className="dashboard-life-grid">
-          {tiles.map((tile) => {
+          {visibleTiles.map((tile) => {
             const route = dashboardRoute(tile.route);
             return (
               <div
@@ -4555,9 +4589,38 @@ function LifeOverviewWidget({ highlights }: { highlights: LifeSignalTile[] }) {
                   )}
                 </div>
                 <div className="dashboard-life-value">{tile.display}</div>
+                {!lifeTilesLocked && (
+                  <button
+                    type="button"
+                    className="dashboard-life-hide"
+                    onClick={(event) => { event.stopPropagation(); toggleSignal(tile.key); }}
+                    title={`Hide ${tile.label}`}
+                    aria-label={`Hide ${tile.label}`}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             );
           })}
+        </div>
+      )}
+      {!lifeTilesLocked && hiddenTiles.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="vs-mono text-[9px] uppercase tracking-[0.14em]" style={{ color: '#74849A' }}>
+            Hidden:
+          </span>
+          {hiddenTiles.map((tile) => (
+            <button
+              key={tile.key}
+              type="button"
+              className="dashboard-life-restore"
+              onClick={() => toggleSignal(tile.key)}
+              title={`Show ${tile.label} again`}
+            >
+              + {tile.label}
+            </button>
+          ))}
         </div>
       )}
       {detailTile && <LifeSignalDialog tile={detailTile} onClose={() => setDetailTile(null)} />}
