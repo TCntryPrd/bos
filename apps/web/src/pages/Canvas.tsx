@@ -1,15 +1,24 @@
 /**
- * Canvas — Miro embedded surface (v1.7.15)
+ * Canvas - immersive Miro room surface.
  *
- * Embeds Miro boards via live-embed iframe. Server-side proxy at
- * /api/miro/* keeps the access token off the browser.
- *
- * Agents read/write boards via MCP/CLI — this surface is for visual work
- * by Kevin.
+ * The page uses the planning-room background as the physical room and pins the
+ * Miro embed over the wall whiteboard. Board switching and collaboration
+ * actions sit on the conference table so Canvas stays click/talk first.
  */
 
 import React, { useEffect, useState } from 'react';
-import { Frame, RefreshCw, Plus, AlertTriangle, ExternalLink } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  Eye,
+  Frame,
+  Layers3,
+  Mic2,
+  RefreshCw,
+  Users,
+} from 'lucide-react';
 
 interface MiroBoard {
   id: string;
@@ -46,8 +55,7 @@ export default function Canvas() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const loadBoards = async () => {
     setLoading(true);
@@ -55,9 +63,11 @@ export default function Canvas() {
     try {
       const r = await api<{ boards: MiroBoard[]; total: number }>('api/miro/boards?limit=50');
       setBoards(r.boards);
-      if (r.boards.length > 0 && !activeId) {
-        setActiveId(r.boards[0].id);
-      }
+      setActiveId((current) => (
+        current && r.boards.some((board) => board.id === current)
+          ? current
+          : r.boards[0]?.id ?? null
+      ));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -66,185 +76,172 @@ export default function Canvas() {
   };
 
   useEffect(() => {
-    loadBoards();
+    void loadBoards();
   }, []);
 
-  const onCreate = async (name: string, description: string) => {
-    setCreating(true);
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = window.setTimeout(() => setCopied(false), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
+
+  const active = boards.find((board) => board.id === activeId) ?? null;
+
+  const copyInvite = async () => {
+    if (!active?.viewLink) return;
     try {
-      const r = await api<{ id: string }>('api/miro/boards', {
-        method: 'POST',
-        body: JSON.stringify({ name, description }),
-      });
-      setShowCreate(false);
-      await loadBoards();
-      setActiveId(r.id);
+      await navigator.clipboard.writeText(active.viewLink);
+      setCopied(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCreating(false);
+      setError(e instanceof Error ? e.message : 'Could not copy invite link');
     }
   };
 
-  const active = boards.find((b) => b.id === activeId) ?? null;
+  const openBoard = () => {
+    if (!active?.viewLink) return;
+    window.open(active.viewLink, '_blank', 'noopener,noreferrer');
+  };
 
   return (
-    <div className="h-full p-5 lg:p-6 flex flex-col min-h-0 overflow-hidden">
-      <header className="flex items-end justify-between gap-4 mb-4">
-        <div>
-          <div className="vs-mono text-[10px] text-text-muted tracking-[0.28em]">SURFACE / CANVAS</div>
-          <h1 className="text-2xl font-semibold text-text-primary mt-1 leading-tight flex items-center gap-2">
-            <Frame className="w-6 h-6 text-info" />
-            Canvas <span className="text-info">· Miro</span>
-          </h1>
-          <p className="text-[12.5px] text-text-secondary mt-1">
-            Embedded Miro boards for visual brainstorming and process mapping. Agents read/write via MCP.
-          </p>
+    <div className="canvas-room-page planning-room-page" aria-label="Canvas Miro board room">
+      <h1 className="sr-only">Canvas</h1>
+
+      <section className="canvas-whiteboard-window" aria-label="Active Miro board">
+        <div className="canvas-whiteboard-plane">
+          <div className="canvas-electrical-tape canvas-tape-top-left" aria-hidden />
+          <div className="canvas-electrical-tape canvas-tape-top-right" aria-hidden />
+          <div className="canvas-board-caption">
+            <Frame className="h-3.5 w-3.5" />
+            {active?.name ?? (loading ? 'Loading Miro boards' : 'No board selected')}
+          </div>
+          {active ? (
+            <iframe
+              key={active.id}
+              src={`https://miro.com/app/live-embed/${active.id}/?embedMode=view_only_without_ui&autoplay=false`}
+              title={active.name}
+              allow="fullscreen; clipboard-read; clipboard-write"
+              allowFullScreen
+            />
+          ) : (
+            <div className="canvas-whiteboard-empty">
+              {loading ? 'Loading boards...' : 'Choose a board from the table.'}
+            </div>
+          )}
+          <div className="canvas-marker-rail" aria-hidden>
+            <span className="is-black" />
+            <span className="is-red" />
+            <span className="is-blue" />
+            <span className="is-green" />
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowCreate(true)}
-            className="vs-mono text-[10px] uppercase tracking-[0.22em] px-3 py-1.5 border border-info text-info bg-transparent hover:bg-info/10 inline-flex items-center gap-1.5"
-          >
-            <Plus className="w-3.5 h-3.5" /> New board
-          </button>
-          <button
-            type="button"
-            onClick={loadBoards}
-            className="vs-mono text-[10px] uppercase tracking-[0.22em] px-3 py-1.5 border border-border text-text-muted bg-transparent hover:text-text-secondary hover:border-text-muted inline-flex items-center gap-1.5"
-          >
-            <RefreshCw className={'w-3.5 h-3.5 ' + (loading ? 'animate-spin' : '')} /> Refresh
-          </button>
-        </div>
-      </header>
+      </section>
 
       {error && (
-        <div className="mb-3 px-3 py-2 border border-danger/40 bg-danger/10 text-danger text-[12px] flex items-center gap-2">
-          <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold">Miro API error</div>
-            <div className="opacity-80 truncate">{error}</div>
-            {error.includes('not configured') && (
-              <div className="opacity-80 text-[11px] mt-1">
-                Set <code className="vs-mono">MIRO_ACCESS_TOKEN</code> in <code className="vs-mono">.env</code> and restart the API container.
-              </div>
-            )}
+        <div className="canvas-room-error" role="alert">
+          <AlertTriangle className="h-4 w-4" />
+          <div className="min-w-0">
+            <strong>Miro is not ready</strong>
+            <span>{error}</span>
           </div>
         </div>
       )}
 
-      <div className="flex items-center gap-3 mb-3">
-        <label className="vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">Board</label>
-        <select
-          value={activeId ?? ''}
-          onChange={(e) => setActiveId(e.target.value)}
-          disabled={boards.length === 0}
-          className="flex-1 max-w-md bg-surface-1 border border-border text-text-primary text-[13px] px-3 py-1.5 vs-mono"
-        >
-          {boards.length === 0 && <option value="">— no boards —</option>}
-          {boards.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name} {b.team ? `· ${b.team}` : ''}
-            </option>
-          ))}
-        </select>
-        {active?.viewLink && (
-          <a
-            href={active.viewLink}
-            target="_blank"
-            rel="noopener"
-            className="vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted hover:text-info inline-flex items-center gap-1"
-          >
-            <ExternalLink className="w-3.5 h-3.5" /> Open in Miro
-          </a>
-        )}
-      </div>
-
-      <div className="flex-1 min-h-0 border border-border bg-surface-1/40 overflow-hidden">
-        {active ? (
-          <iframe
-            key={active.id}
-            src={`https://miro.com/app/live-embed/${active.id}/?embedMode=view_only_without_ui&autoplay=false`}
-            title={active.name}
-            className="w-full h-full border-0"
-            allow="fullscreen; clipboard-read; clipboard-write"
-            allowFullScreen
-          />
-        ) : (
-          <div className="h-full flex items-center justify-center text-text-muted text-[13px]">
-            {loading ? 'Loading boards…' : 'No board selected.'}
+      <section className="canvas-table-console" aria-label="Canvas table controls">
+        <div className="canvas-table-header">
+          <div>
+            <div className="vs-mono canvas-table-kicker">CANVAS TABLE</div>
+            <h2>{active?.name ?? 'Choose a board'}</h2>
+            <p>
+              {active?.team || 'Miro workspace'}
+              {active?.modifiedAt ? ` / updated ${formatBoardDate(active.modifiedAt)}` : ''}
+            </p>
           </div>
-        )}
-      </div>
+          <button
+            type="button"
+            onClick={() => void loadBoards()}
+            className="canvas-round-button"
+            title="Refresh boards"
+            aria-label="Refresh boards"
+          >
+            <RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+          </button>
+        </div>
 
-      {showCreate && (
-        <CreateBoardModal
-          creating={creating}
-          onClose={() => setShowCreate(false)}
-          onSubmit={onCreate}
-        />
-      )}
+        <div className="canvas-board-strip" aria-label="Switch Miro boards">
+          {boards.length > 0 ? (
+            boards.slice(0, 10).map((board) => (
+              <button
+                key={board.id}
+                type="button"
+                onClick={() => setActiveId(board.id)}
+                className={board.id === activeId ? 'canvas-board-note is-active' : 'canvas-board-note'}
+              >
+                <span>{board.name}</span>
+                <small>{board.team || 'Miro'}</small>
+              </button>
+            ))
+          ) : (
+            <div className="canvas-board-note is-empty">
+              {loading ? 'Syncing boards...' : 'No Miro boards found'}
+            </div>
+          )}
+        </div>
+
+        <div className="canvas-action-row">
+          <button
+            type="button"
+            onClick={copyInvite}
+            disabled={!active?.viewLink}
+            className="canvas-action-button"
+          >
+            {copied ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+            {copied ? 'Invite copied' : 'Invite'}
+          </button>
+          <button
+            type="button"
+            onClick={openBoard}
+            disabled={!active?.viewLink}
+            className="canvas-action-button"
+          >
+            <Users className="h-4 w-4" />
+            Collaborate
+          </button>
+          <button
+            type="button"
+            onClick={openBoard}
+            disabled={!active?.viewLink}
+            className="canvas-action-button"
+          >
+            <Eye className="h-4 w-4" />
+            View
+          </button>
+          <span className="canvas-talk-pill">
+            <Mic2 className="h-4 w-4" />
+            Click or talk
+          </span>
+          <span className="canvas-count-pill">
+            <Layers3 className="h-4 w-4" />
+            {boards.length} boards
+          </span>
+          {active?.viewLink && (
+            <a className="canvas-miro-link" href={active.viewLink} target="_blank" rel="noopener">
+              <ExternalLink className="h-4 w-4" />
+              Miro
+            </a>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
 
-interface CreateModalProps {
-  creating: boolean;
-  onClose: () => void;
-  onSubmit: (name: string, description: string) => void;
-}
-
-function CreateBoardModal({ creating, onClose, onSubmit }: CreateModalProps) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div
-        className="bg-surface-1 border border-border w-full max-w-md p-5 space-y-3"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="vs-mono text-[10px] text-text-muted tracking-[0.28em]">NEW BOARD</div>
-        <h2 className="text-lg font-semibold text-text-primary">Create Miro board</h2>
-        <div className="space-y-2">
-          <label className="block vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">Name</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. 06-Debbie-TTC — Process Map"
-            className="w-full bg-surface-0 border border-border text-text-primary text-[13px] px-3 py-2"
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="block vs-mono text-[10px] uppercase tracking-[0.22em] text-text-muted">Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            className="w-full bg-surface-0 border border-border text-text-primary text-[13px] px-3 py-2"
-          />
-        </div>
-        <div className="flex gap-2 justify-end pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={creating}
-            className="vs-mono text-[10px] uppercase tracking-[0.22em] px-3 py-1.5 border border-border text-text-muted hover:text-text-secondary"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => name.trim() && onSubmit(name.trim(), description.trim())}
-            disabled={creating || !name.trim()}
-            className="vs-mono text-[10px] uppercase tracking-[0.22em] px-3 py-1.5 border border-info text-info bg-transparent hover:bg-info/10 disabled:opacity-50"
-          >
-            {creating ? 'Creating…' : 'Create'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+function formatBoardDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'unknown';
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
 }

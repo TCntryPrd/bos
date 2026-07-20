@@ -62,7 +62,7 @@ async function transcribe(audioBlob: Blob): Promise<string> {
     : audioFormat.includes('mp4') ? 'm4a'
     : audioFormat.includes('wav') ? 'wav'
     : 'audio';
-  const res = await fetch('api/voice/transcribe', {
+  const res = await fetch('/api/voice/transcribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ audio, audioFormat, filename: `voice.${ext}` }),

@@ -18,9 +18,10 @@ import { moveTask, parseDndId } from './dnd-helpers';
 interface Props {
   scope: KanbanScope;
   onCardClick?: (task: KanbanTask) => void;
+  initialNewTask?: boolean;
 }
 
-export function KanbanBoard({ scope, onCardClick }: Props) {
+export function KanbanBoard({ scope, onCardClick, initialNewTask = false }: Props) {
   // Single agent job board — the columns the agents work each heartbeat
   // (inbox → today → in_progress → to_close → done). No view toggle.
   const [view] = useState<KanbanView>('client');
@@ -29,6 +30,7 @@ export function KanbanBoard({ scope, onCardClick }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showNew, setShowNew] = useState(false);
+  const [initialNewConsumed, setInitialNewConsumed] = useState(false);
   const [showNewWo, setShowNewWo] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [selected, setSelected] = useState<KanbanTask | null>(null);
@@ -56,6 +58,12 @@ export function KanbanBoard({ scope, onCardClick }: Props) {
   }, [scope, view, filters.showArchived]);
 
   useEffect(() => { fetchBoard(); }, [fetchBoard, refreshKey]);
+
+  useEffect(() => {
+    if (!initialNewTask || initialNewConsumed) return;
+    setShowNew(true);
+    setInitialNewConsumed(true);
+  }, [initialNewConsumed, initialNewTask]);
 
   // SSE consumer — pushes server-side mutations into the board state without
   // needing a refetch. Pauses while the tab is hidden; reconnects with a 3s

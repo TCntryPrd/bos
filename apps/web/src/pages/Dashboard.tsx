@@ -16,7 +16,8 @@
  *   pipeline engine) ships in a follow-up.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
   Bolt,
@@ -27,8 +28,10 @@ import {
   Clock,
   ArrowRight,
   FileText,
+  GripVertical,
   MessageSquare,
   LayoutGrid,
+  Maximize2,
   Calendar as CalendarIcon,
   Check,
   X,
@@ -36,8 +39,15 @@ import {
   Users,
   Linkedin,
   Send,
+  Heart,
+  Play,
+  Plus,
+  Square,
 } from 'lucide-react';
 import { AgentAvatar } from '../components/AgentAvatar';
+import { useTilesLocked } from '../lib/tileLock';
+import { healthDataApi, fmtHm, fmtInt, sparkPoints, HEALTH_COLORS } from '../lib/healthData';
+import type { HealthOverview } from '../lib/healthData';
 
 // ──────────────────────────────────────────────────────────────────────
 // Auth helper (v1.6.1)
@@ -383,7 +393,7 @@ function useCalendarToday(): CalendarState {
       })
       .catch(() => setState((s) => ({ ...s, loaded: true }))); // keep last on poll error
   });
-  return state;
+  return { ...state };
 }
 
 // Slack user IDs we care about on the dashboard preview. Mentions of
@@ -464,8 +474,23 @@ function useSlackAttention(): SlackAttentionState {
   return state;
 }
 
-function useInbox(): InboxState {
+function useInbox(): InboxState & { dismiss: (id: string) => void; dismissAll: () => void } {
   const [state, setState] = useState<InboxState>({ list: [], email: null, loaded: false });
+
+  const dismiss = useCallback((id: string) => {
+    setState(s => ({ ...s, list: s.list.filter(x => x.id !== id) }));
+    authedFetch('api/email/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emailLogId: id, resolvedBy: 'kevin' }),
+    }).catch(() => {});
+  }, []);
+
+  const dismissAll = useCallback(() => {
+    setState(s => ({ ...s, list: [] }));
+    authedFetch('api/email/resolve-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+  }, []);
+
   usePoll(() => {
     // The Email Agent's triaged attention items (boss_email_log, needs_attention) —
     // what the agent flagged for Kevin, with its category + note. This is the
@@ -557,22 +582,21 @@ function inboxHue(id: string): string {
   return INBOX_HUES[h % INBOX_HUES.length];
 }
 
-// Structural colors map to theme tokens so panels follow Dark/Light; accent hues stay.
 const DASH = {
-  panel: 'var(--v-surface-1)',
-  panel2: 'var(--v-surface-2)',
-  panel3: 'var(--v-surface-3)',
-  border: 'var(--v-hairline-strong)',
-  borderSoft: 'var(--v-hairline)',
-  text: 'var(--v-text)',
-  textDim: 'var(--v-text-muted)',
-  textMuted: 'var(--v-text-dim)',
-  pink: '#D946EF',
-  orange: '#F5C542',
-  blue: '#4F6DF5',
+  panel: 'rgba(255,255,255,0.62)',
+  panel2: 'rgba(241,248,255,0.44)',
+  panel3: 'rgba(226,240,253,0.5)',
+  border: 'rgba(100,116,139,0.28)',
+  borderSoft: 'rgba(100,116,139,0.16)',
+  text: '#0F172A',
+  textDim: '#475569',
+  textMuted: '#64748B',
+  pink: '#DB2777',
+  orange: '#D97706',
+  blue: '#2563EB',
   green: '#22C55E',
-  yellow: '#F5C542',
-  violet: '#8B5CF6',
+  yellow: '#CA8A04',
+  violet: '#7C3AED',
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -586,12 +610,14 @@ interface PanelProps {
   accent?: string;
   children: React.ReactNode;
   className?: string;
+  titleTo?: string;
 }
 
-function Panel({ title, icon, meta, accent, children, className = '' }: PanelProps) {
+function Panel({ title, icon, meta, accent, children, className = '', titleTo }: PanelProps) {
+  const navigate = useNavigate();
   return (
     <div
-      className={`relative rounded-[14px] overflow-hidden flex flex-col h-full ${className}`}
+      className={`relative rounded-lg overflow-hidden flex flex-col h-full ${className}`}
       style={{
         background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`,
         border: `1px solid ${DASH.border}`,
@@ -623,7 +649,19 @@ function Panel({ title, icon, meta, accent, children, className = '' }: PanelPro
           style={{ borderBottom: `1px solid ${DASH.borderSoft}` }}
         >
           {icon && <div style={{ color: DASH.violet, opacity: 0.9 }}>{icon}</div>}
-          <div className="text-[15px] font-semibold tracking-[0.01em]">{title}</div>
+          {titleTo ? (
+            <button
+              type="button"
+              onClick={() => navigate(titleTo)}
+              className="text-[15px] font-semibold tracking-[0.01em] text-left transition-colors hover:text-sky-700"
+              style={{ color: 'inherit' }}
+              title={`Open ${title}`}
+            >
+              {title}
+            </button>
+          ) : (
+            <div className="text-[15px] font-semibold tracking-[0.01em]">{title}</div>
+          )}
           {meta && <div className="ml-auto">{meta}</div>}
         </div>
       )}
@@ -689,7 +727,7 @@ function StatCard({ label, value, sub, hue, spark }: StatCardProps) {
         <div
           className="text-[36px] font-semibold leading-none"
           style={{
-            letterSpacing: '-0.02em',
+            letterSpacing: 0,
             background: grad,
             WebkitBackgroundClip: 'text',
             backgroundClip: 'text',
@@ -699,7 +737,7 @@ function StatCard({ label, value, sub, hue, spark }: StatCardProps) {
           {value}
         </div>
       </div>
-      <div className="text-[11.5px] mt-0.5" style={{ color: '#9AA8C2' }}>
+      <div className="text-[11.5px] mt-0.5" style={{ color: DASH.textMuted }}>
         {sub}
       </div>
     </Panel>
@@ -723,7 +761,7 @@ function AutomationsCard({ state }: AutomationsCardProps) {
     (data?.n8n.status?.total ?? 0) + (data?.make.status?.total ?? 0);
   return (
     <div
-      className="relative rounded-[14px] px-3.5 pt-3 pb-3.5 overflow-hidden"
+      className="relative rounded-lg px-3.5 pt-3 pb-3.5 overflow-hidden"
       style={{
         background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`,
         border: `1px solid ${DASH.border}`,
@@ -853,7 +891,7 @@ function LiveActivity({ state }: { state: RecentActivityState }) {
             data-recent-activity-row
             style={{
               borderBottom:
-                i < list.length - 1 ? '1px solid var(--v-hairline-strong)' : 'none',
+                i < list.length - 1 ? '1px solid #232A4D' : 'none',
             }}
             title={`Open ${it.agent}'s workspace`}
           >
@@ -908,9 +946,66 @@ const PEEK_COLS: { id: 'today' | 'overdue' | 'tomorrow'; title: string; hue: str
   { id: 'tomorrow', title: 'TOMORROW', hue: '#0EA5E9' },
 ];
 
+function TaskPreviewDialog({ task, onClose }: { task: TaskRow; onClose: () => void }) {
+  const navigate = useNavigate();
+  const due = formatDue(task.due_at);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-5" role="dialog" aria-modal="true">
+      <button className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" type="button" aria-label="Close task preview" onClick={onClose} />
+      <div
+        className="relative w-full max-w-md rounded-lg p-4 shadow-2xl"
+        style={{
+          background: 'linear-gradient(145deg, rgba(255,255,255,0.9), rgba(232,244,255,0.76))',
+          border: '1px solid rgba(14, 165, 233, 0.38)',
+          color: '#0c2d57',
+        }}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="vs-mono text-[10px] uppercase tracking-[0.22em]" style={{ color: '#2563EB' }}>
+              Task Preview
+            </div>
+            <div className="mt-1 text-[18px] font-semibold">{task.title}</div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-md p-1 text-slate-600 hover:bg-white/55">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-[12.5px]">
+          <div><span className="font-semibold">Status:</span> {task.status}</div>
+          <div><span className="font-semibold">Priority:</span> {task.priority}</div>
+          <div><span className="font-semibold">Assigned:</span> {task.assigned_agent ?? 'unassigned'}</div>
+          <div><span className="font-semibold">Due:</span> {due ?? 'not set'}</div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/kanban?from=dashboard')}
+            className="rounded-md px-3 py-1.5 text-[12px] font-semibold"
+            style={{ background: '#0B2D57', color: '#F8FBFF' }}
+          >
+            Open board
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function KanbanPeek({ state }: { state: TasksState }) {
   const { list, loaded } = state;
   const navigate = useNavigate();
+  const [previewTask, setPreviewTask] = useState<TaskRow | null>(null);
 
   // Bucket cards by Today / Overdue / Tomorrow.
   //   Overdue = bucket 'today' that's been sitting since before today's
@@ -947,17 +1042,18 @@ function KanbanPeek({ state }: { state: TasksState }) {
   return (
     <Panel
       title="Task Board · Today"
+      titleTo="/kanban?from=dashboard"
       icon={<Columns3 size={14} />}
       accent="linear-gradient(135deg, #FF4D8D, #FF8A3D)"
       meta={
         <button
           type="button"
-          onClick={() => navigate('/kanban')}
+          onClick={() => navigate('/kanban?from=dashboard&new=task')}
           className="flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-md border border-sky-200 hover:bg-sky-50 transition-colors"
-          style={{ color: '#F1F4FF' }}
+          style={{ color: '#0B2D57', background: 'rgba(255,255,255,0.54)' }}
         >
-          Open board
-          <ArrowRight className="w-2.5 h-2.5" aria-hidden />
+          Create
+          <Plus className="w-2.5 h-2.5" aria-hidden />
         </button>
       }
     >
@@ -972,19 +1068,19 @@ function KanbanPeek({ state }: { state: TasksState }) {
                   className="block w-1.5 h-1.5 rounded-[2px]"
                   style={{ background: c.hue, boxShadow: `0 0 8px ${c.hue}` }}
                 />
-                <span className="vs-mono text-[10px] tracking-[0.18em]" style={{ color: '#9AA8C2' }}>
+                <span className="vs-mono text-[10px] tracking-[0.18em]" style={{ color: '#0B2D57', fontWeight: 800, textShadow: '0 1px 8px rgba(255,255,255,0.72)' }}>
                   {c.title}
                 </span>
-                <span className="vs-mono text-[10px] ml-auto" style={{ color: '#74849A' }}>
+                <span className="vs-mono text-[10px] ml-auto" style={{ color: '#143A64', fontWeight: 800 }}>
                   {colTasks.length}
                 </span>
               </div>
               <div className="flex flex-col gap-1.5">
                 {!loaded && (
-                  <div className="text-[11px] italic" style={{ color: '#74849A' }}>loading…</div>
+                  <div className="text-[11px] italic" style={{ color: '#1F466D', fontWeight: 700 }}>loading…</div>
                 )}
                 {loaded && cards.length === 0 && (
-                  <div className="text-[11px] italic" style={{ color: '#74849A' }}>none</div>
+                  <div className="text-[11px] italic" style={{ color: '#1F466D', fontWeight: 700 }}>none</div>
                 )}
                 {cards.map((k) => {
                   const due = formatDue(k.due_at);
@@ -993,11 +1089,17 @@ function KanbanPeek({ state }: { state: TasksState }) {
                       key={k.id}
                       role="button"
                       tabIndex={0}
-                      onClick={() => navigate('/kanban')}
+                      onClick={() => setPreviewTask(k)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setPreviewTask(k);
+                        }
+                      }}
                       className="relative p-2 rounded-md overflow-hidden cursor-pointer hover:bg-white/5 transition-colors"
                       style={{
-                        background: 'var(--v-surface-3)',
-                        border: '1px solid var(--v-hairline-strong)',
+                        background: '#181D3A',
+                        border: '1px solid #232A4D',
                       }}
                     >
                       <div
@@ -1049,6 +1151,7 @@ function KanbanPeek({ state }: { state: TasksState }) {
           );
         })}
       </div>
+      {previewTask && <TaskPreviewDialog task={previewTask} onClose={() => setPreviewTask(null)} />}
     </Panel>
   );
 }
@@ -1198,7 +1301,7 @@ function AgentRoster() {
         ) : (
           <div className="space-y-1.5">
             {list.map((a) => (
-              <div key={a.id} className="flex items-center gap-2.5 p-2 rounded-[10px]" style={{ background: 'var(--v-surface-2)', border: '1px solid var(--v-hairline-strong)' }}>
+              <div key={a.id} className="flex items-center gap-2.5 p-2 rounded-[10px]" style={{ background: '#141937', border: '1px solid #232A4D' }}>
                 <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: empDot(a), boxShadow: `0 0 6px ${empDot(a)}` }} aria-hidden />
                 <div className="flex-1 min-w-0">
                   <div className="text-[12px] font-semibold truncate" style={{ color: '#F1F4FF' }}>{a.name}</div>
@@ -1348,7 +1451,7 @@ function SlackAttentionPanel({ state }: { state: SlackAttentionState }) {
   );
 }
 
-function InboxPanel({ state }: { state: InboxState }) {
+function InboxPanel({ state, dismiss, dismissAll }: { state: InboxState; dismiss: (id: string) => void; dismissAll: () => void }) {
   const { list, loaded, email } = state;
   return (
     <Panel
@@ -1365,6 +1468,15 @@ function InboxPanel({ state }: { state: InboxState }) {
             >
               {email}
             </span>
+          )}
+          {loaded && list.length > 0 && (
+            <button
+              onClick={(e) => { e.preventDefault(); dismissAll(); }}
+              className="px-1.5 py-0.5 rounded text-[9px] vs-mono"
+              style={{ background: 'rgba(255,80,80,0.13)', color: '#FF8C8C', border: '1px solid rgba(255,80,80,0.25)', cursor: 'pointer' }}
+            >
+              CLEAR ALL
+            </button>
           )}
           <span
             style={{ color: loaded && list.length > 0 ? '#20B26B' : '#74849A' }}
@@ -1429,6 +1541,14 @@ function InboxPanel({ state }: { state: InboxState }) {
               <span className="vs-mono text-[10px] shrink-0" style={{ color: '#74849A' }}>
                 {timeAgo(m.timestamp)}
               </span>
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); dismiss(m.id); }}
+                className="shrink-0 flex items-center justify-center w-5 h-5 rounded opacity-40 hover:opacity-100"
+                style={{ color: '#9AA8C2', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                title="Dismiss"
+              >
+                <X size={11} />
+              </button>
             </a>
           );
         })}
@@ -1523,7 +1643,7 @@ function LinkedInPanel() {
       <div className="px-3.5 py-3 space-y-2.5">
         {!connected ? (
           <div className="text-[12px]" style={{ color: DASH.textMuted }}>
-            Connect LinkedIn in Settings → Connections to post.
+            Connect LinkedIn via Unipile in Settings → Connections to post.
           </div>
         ) : (
           <>
@@ -1674,7 +1794,20 @@ function LinkedInPostsPanel() {
   );
 }
 
-interface EmailDraftT { id: string; account: string; to_addr: string | null; subject: string | null; reply_subject: string | null; body: string; rating: number | null; rating_note: string | null; created_at: string; }
+interface EmailDraftT { id: string; account: string; to_addr: string | null; subject: string | null; reply_subject: string | null; body: string; rating: number | null; rating_note: string | null; created_at: string; verdict: 'pass' | 'needs_human' | 'block' | null; verdict_issues: { severity: string; detail: string }[] | null; flags: string[] | null; }
+
+function VerdictBadge({ verdict }: { verdict: EmailDraftT['verdict'] }) {
+  if (!verdict) return null;
+  const map: Record<NonNullable<EmailDraftT['verdict']>, { label: string; color: string; bg: string }> = {
+    pass:        { label: 'PASS',        color: DASH.green, bg: 'rgba(60,200,140,0.15)' },
+    needs_human: { label: 'NEEDS HUMAN', color: '#E2B341', bg: 'rgba(226,179,65,0.15)' },
+    block:       { label: 'BLOCK',       color: '#F5736B', bg: 'rgba(245,115,107,0.16)' },
+  };
+  const v = map[verdict];
+  return (
+    <span className="vs-mono text-[9px] px-1 rounded" style={{ color: v.color, background: v.bg }}>{v.label}</span>
+  );
+}
 
 function EmailDraftsPanel() {
   const [refresh, setRefresh] = useState(0);
@@ -1717,6 +1850,7 @@ function EmailDraftsPanel() {
               <li key={d.id} className="pb-2.5" style={{ borderBottom: `1px solid ${DASH.borderSoft}` }}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="vs-mono text-[9px] px-1 rounded" style={{ background: 'rgba(139,127,232,0.18)', color: '#B9A6FF' }}>{d.account.split('@')[0]}</span>
+                  <VerdictBadge verdict={d.verdict} />
                   <span className="text-[11px] truncate" style={{ color: DASH.textMuted }}>{d.subject ?? d.reply_subject ?? '(no subject)'}</span>
                 </div>
                 <div className="text-[12px] leading-snug mb-1.5" style={{ color: DASH.text }}>{d.body.slice(0, 220)}{d.body.length > 220 ? '…' : ''}</div>
@@ -2288,6 +2422,114 @@ function WhatsAppPanel({ state }: { state: WhatsAppState }) {
   );
 }
 
+// Unipile is LinkedIn-ONLY. WhatsApp connection state comes from
+// /api/whatsapp/status (wa-bridge) — see WhatsAppConnStatus below.
+interface UnipileDashboardStatus {
+  configured: boolean;
+  accounts: Array<{
+    provider: 'LINKEDIN';
+    connected: boolean;
+    name: string | null;
+    health: string;
+  }>;
+}
+
+interface WhatsAppConnStatus {
+  provider: 'baileys';
+  configured: boolean;
+  paired: boolean;
+  session: { status: 'ready' | 'scan_qr' | 'starting' | 'error'; phone?: string };
+  disclaimerAcceptedAt: string | null;
+}
+
+function LinkedInLaunchTile({ unipile }: { unipile: UnipileDashboardStatus | null }) {
+  const navigate = useNavigate();
+  const linkedin = unipile?.accounts?.find((account) => account.provider === 'LINKEDIN');
+
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('/linkedin')}
+      className="group relative h-full w-full overflow-hidden rounded-lg px-4 py-3.5 text-left"
+      style={{
+        background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`,
+        border: `1px solid ${DASH.border}`,
+        color: DASH.text,
+      }}
+    >
+      <div aria-hidden className="absolute inset-x-0 top-0 h-[2px]" style={{ background: 'linear-gradient(90deg, #0A66C2, #4F9BE8)' }} />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Linkedin className="h-4 w-4" style={{ color: DASH.blue }} />
+            <span className="text-[14px] font-semibold">LinkedIn System</span>
+          </div>
+          <div className="mt-1 text-[12px]" style={{ color: DASH.textMuted }}>
+            Posts, connections, follow-up queue, webhooks, tracking
+          </div>
+        </div>
+        <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" style={{ color: DASH.textMuted }} />
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <LaunchStatus label="LinkedIn" ready={!!linkedin?.connected} />
+        <LaunchStatus label="Agent" ready={!!linkedin?.connected} />
+        <LaunchStatus label="Tracking" ready={!!linkedin?.connected} />
+      </div>
+      <div className="mt-2 vs-mono text-[10px] uppercase tracking-[0.14em]" style={{ color: DASH.textMuted }}>
+        {linkedin?.connected ? (linkedin.name || linkedin.health || 'connected') : 'not connected'}
+      </div>
+    </button>
+  );
+}
+
+function WhatsAppLaunchTile({ whatsappState, wa }: { whatsappState: WhatsAppState; wa: WhatsAppConnStatus | null }) {
+  const navigate = useNavigate();
+  const unread = whatsappState.list.reduce((sum, thread) => sum + thread.unread_count, 0);
+
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('/whatsapp')}
+      className="group relative h-full w-full overflow-hidden rounded-lg px-4 py-3.5 text-left"
+      style={{
+        background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`,
+        border: `1px solid ${DASH.border}`,
+        color: DASH.text,
+      }}
+    >
+      <div aria-hidden className="absolute inset-x-0 top-0 h-[2px]" style={{ background: 'linear-gradient(90deg, #25D366, #128C7E)' }} />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4" style={{ color: '#25D366' }} />
+            <span className="text-[14px] font-semibold">WhatsApp Inbox</span>
+          </div>
+          <div className="mt-1 text-[12px]" style={{ color: DASH.textMuted }}>
+            {whatsappState.loaded ? `${whatsappState.list.length} live threads` : 'Loading live threads'}
+          </div>
+        </div>
+        <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" style={{ color: DASH.textMuted }} />
+      </div>
+      <div className="mt-3 flex items-baseline gap-2">
+        <span className="text-[28px] font-semibold">{whatsappState.loaded ? unread : '-'}</span>
+        <span className="text-[12px]" style={{ color: DASH.textMuted }}>unread</span>
+      </div>
+      <div className="mt-1 vs-mono text-[10px] uppercase tracking-[0.14em]" style={{ color: !!wa?.paired ? '#25D366' : DASH.textMuted }}>
+        {wa?.paired ? `Connected via WhatsApp bridge${wa.session?.phone ? ` - ${wa.session.phone}` : ''}` : 'Not connected'}
+      </div>
+    </button>
+  );
+}
+
+function LaunchStatus({ label, ready }: { label: string; ready: boolean }) {
+  return (
+    <div className="rounded-md px-2 py-1.5" style={{ background: ready ? 'rgba(32,178,107,0.12)' : DASH.panel3, border: `1px solid ${ready ? 'rgba(32,178,107,0.28)' : DASH.borderSoft}` }}>
+      <div className="text-[10.5px] font-medium truncate" style={{ color: ready ? DASH.green : DASH.textMuted }}>{label}</div>
+      <div className="vs-mono text-[8.5px] uppercase tracking-[0.1em]" style={{ color: ready ? DASH.green : DASH.textMuted }}>{ready ? 'ready' : 'off'}</div>
+    </div>
+  );
+}
+
 interface IntegrationStatus {
   id: string;
   name?: string;
@@ -2516,11 +2758,12 @@ function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
   return (
     <Panel
       title="Today · Timeline (from Calendar)"
+      titleTo="/calendar?from=dashboard"
       icon={<Clock size={14} />}
       accent="linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)"
       className="flex-1"
       meta={
-        <span className="vs-mono text-[10px]" style={{ color: '#9AA8C2' }} data-testid="timeline-meta">
+        <span className="vs-mono text-[11px]" style={{ color: '#36526D' }} data-testid="timeline-meta">
           {loading
             ? 'LOADING…'
             : `${youBlocks.length} EVENTS · ${Object.values(taskByAgent).reduce((s, b) => s + b.length, 0)} TASKS`}
@@ -2529,13 +2772,13 @@ function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
     >
       <div className="px-3.5 pt-2.5 pb-4 relative" data-testid="timeline-panel">
         {empty && (
-          <div className="text-[12px] italic py-3" style={{ color: '#74849A' }}>
+          <div className="text-[13px] italic py-3" style={{ color: '#36526D' }}>
             No events or tasks scheduled in the {startH}–{endH}:00 window today.
           </div>
         )}
         {!empty && (
           <>
-            <div className="flex relative h-4 ml-[110px]" style={{ color: '#74849A' }}>
+            <div className="flex relative h-4 ml-[110px]" style={{ color: '#36526D' }}>
               {hours.map((h) => (
                 <div key={h} className="vs-mono flex-1 text-[10px]">
                   {h}:00
@@ -2577,10 +2820,10 @@ function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
                       style={{ background: 'linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)' }}
                     />
                   )}
-                  <span className="text-[11px] truncate" style={{ color: '#F1F4FF' }}>
+                  <span className="text-[12px] truncate" style={{ color: '#102A43' }}>
                     {lane.title}
                     {lane.allDay ? (
-                      <span className="vs-mono ml-1 text-[9px]" style={{ color: '#74849A' }}>
+                      <span className="vs-mono ml-1 text-[10px]" style={{ color: '#36526D' }}>
                         +{lane.allDay}d
                       </span>
                     ) : null}
@@ -2621,7 +2864,7 @@ function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
                       key={`${lane.agent ?? 'you'}-${bi}`}
                       {...(b.href ? { href: b.href, target: '_blank', rel: 'noreferrer' } : {})}
                       title={b.href ? `${b.label} — open in Google Calendar` : b.label}
-                      className="absolute flex items-center gap-1.5 rounded-md text-[10.5px] px-2 truncate"
+                      className="absolute flex items-center gap-1.5 rounded-md text-[11.5px] px-2 truncate"
                       style={{
                         top: b.row * (rowHeight + rowGap),
                         height: rowHeight,
@@ -2629,7 +2872,7 @@ function TimelinePanel({ calendar, tasks, rascals }: TimelinePanelProps) {
                         width: `calc(${Math.max(2, pct(b.endH) - pct(b.startH))}% - 2px)`,
                         background: `linear-gradient(135deg, ${b.hue}44, ${b.hue}22)`,
                         border: `1px solid ${b.hue}88`,
-                        color: '#F1F4FF',
+                        color: '#102A43',
                         boxShadow: `inset 0 0 12px ${b.hue}22`,
                         cursor: b.href ? 'pointer' : 'default',
                         textDecoration: 'none',
@@ -2693,17 +2936,170 @@ function greetingFor(d: Date): string {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Personal health tile — Health Connect bridge data (ported from vasari-dev,
+// spec 2026-07-01). Owner/admin only: reads /api/health/overview via
+// healthDataApi and deep-links to the /health page.
+// ──────────────────────────────────────────────────────────────────────
+
+function isOwnerRole(): boolean {
+  try {
+    const u = JSON.parse(localStorage.getItem('boss_user') ?? 'null') as { role?: string } | null;
+    return u?.role === 'admin' || u?.role === 'owner';
+  } catch {
+    return false;
+  }
+}
+
+interface HealthState { data: HealthOverview | null; loaded: boolean }
+
+function useHealthOverview(enabled: boolean): HealthState {
+  const [state, setState] = useState<HealthState>({ data: null, loaded: false });
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    const load = () =>
+      healthDataApi.overview()
+        .then((data) => { if (alive) setState({ data, loaded: true }); })
+        .catch(() => { if (alive) setState({ data: null, loaded: true }); });
+    void load();
+    const t = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [enabled]);
+  return state;
+}
+
+function HealthSpark({ values, color }: { values: number[]; color: string }) {
+  const pts = sparkPoints(values, 48, 22);
+  if (!pts) return null;
+  return (
+    <svg width="48" height="22" viewBox="0 0 48 22" fill="none" className="block">
+      <polyline points={pts} stroke={color} strokeWidth="1.3" fill="none"
+        strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function HealthMini({ label, value, sub, spark, color }: {
+  label: string; value: string; sub?: string; spark?: number[]; color: string;
+}) {
+  return (
+    <div className="rounded-[10px] px-3 py-2.5"
+      style={{ background: DASH.panel3, border: `1px solid ${DASH.borderSoft}` }}>
+      <div className="flex items-center">
+        <div className="vs-mono text-[9.5px] tracking-[0.2em]" style={{ color: DASH.textMuted }}>
+          {label}
+        </div>
+        {spark && <div className="ml-auto"><HealthSpark values={spark} color={color} /></div>}
+      </div>
+      <div className="text-[22px] font-semibold leading-tight mt-1" style={{ color: DASH.text }}>
+        {value}
+      </div>
+      {sub && <div className="text-[11px] mt-0.5" style={{ color: DASH.textDim }}>{sub}</div>}
+    </div>
+  );
+}
+
+function agoLabel(iso: string | null): string {
+  if (!iso) return 'never synced';
+  const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
+  if (mins < 60) return `synced ${mins}m ago`;
+  if (mins < 60 * 24) return `synced ${Math.round(mins / 60)}h ago`;
+  return `synced ${Math.round(mins / (60 * 24))}d ago`;
+}
+
+function HealthPanel({ state }: { state: HealthState }) {
+  const navigate = useNavigate();
+  const { data, loaded } = state;
+  const stale = !!data?.last_sync_at &&
+    Date.now() - Date.parse(data.last_sync_at) > 24 * 60 * 60 * 1000;
+  const dot = !data?.paired ? DASH.textMuted : stale ? DASH.yellow : DASH.green;
+  return (
+    <Panel
+      title="Health"
+      icon={<Heart size={14} />}
+      accent={`linear-gradient(135deg, ${HEALTH_COLORS.activity}, ${DASH.blue})`}
+      meta={
+        <span className="flex items-center gap-1.5 text-[10.5px]" style={{ color: DASH.textMuted }}>
+          <span className="inline-block w-[7px] h-[7px] rounded-full" style={{ background: dot }} />
+          {data?.paired ? agoLabel(data.last_sync_at) : 'no device'}
+        </span>
+      }
+    >
+      <div className="px-3.5 py-3">
+        {!loaded && <div className="text-[12px]" style={{ color: DASH.textDim }}>Loading…</div>}
+        {loaded && !data?.paired && (
+          <button className="btn-secondary w-full justify-center" onClick={() => navigate('/health')}>
+            Pair your phone to start syncing
+          </button>
+        )}
+        {loaded && data?.paired && (
+          <>
+            <div className="grid grid-cols-2 gap-2.5">
+              <HealthMini label="STEPS" color={HEALTH_COLORS.activity}
+                value={data.today.steps != null ? fmtInt(data.today.steps) : '—'}
+                spark={data.spark.steps} />
+              <HealthMini label="SLEEP" color={HEALTH_COLORS.sleepDeep}
+                value={data.today.sleep_minutes != null ? fmtHm(data.today.sleep_minutes) : '—'}
+                spark={data.spark.sleep_minutes} />
+              <HealthMini label="RESTING HR" color={HEALTH_COLORS.heart}
+                value={data.today.resting_hr != null ? `${Math.round(data.today.resting_hr)}` : '—'}
+                sub="bpm" spark={data.spark.resting_hr} />
+              <HealthMini label="ACTIVE" color={HEALTH_COLORS.body}
+                value={data.today.active_kcal != null ? fmtInt(data.today.active_kcal) : '—'}
+                sub={data.today.exercise_minutes != null
+                  ? `kcal · ${Math.round(data.today.exercise_minutes)} min exercise` : 'kcal'}
+                spark={data.spark.active_kcal} />
+            </div>
+            <button
+              className="mt-2.5 text-[11.5px] flex items-center gap-1"
+              style={{ color: DASH.blue }}
+              onClick={() => navigate('/health')}
+            >
+              Open health <ArrowRight size={12} />
+            </button>
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Customizable widget layout — Kane: "let them choose which widgets/tiles
 // show… a pop-up gallery to pick and choose." Selection persists per browser.
 // ──────────────────────────────────────────────────────────────────────
 
-type WidgetId = 'agents' | 'tasks' | 'activity' | 'inbox' | 'slack' | 'slack_sales' | 'social_stats' | 'social_feed' | 'linkedin' | 'linkedin_posts' | 'email_drafts' | 'whatsapp' | 'timeline' | 'finance' | 'crm' | 'revenue' | 'email' | 'health' | 'csat';
+type WidgetId = 'stat_agents' | 'stat_tasks' | 'stat_inbox' | 'stat_calendar' | 'launch_linkedin' | 'launch_whatsapp' | 'agents' | 'tasks' | 'activity' | 'inbox' | 'slack' | 'slack_sales' | 'social_stats' | 'social_feed' | 'linkedin' | 'linkedin_posts' | 'email_drafts' | 'whatsapp' | 'timeline' | 'finance' | 'crm' | 'revenue' | 'email' | 'health' | 'health_data' | 'csat' | 'life' | 'brief' | 'approvals' | 'spend' | 'integrations';
 
-// Brand-new widgets that must be force-added to existing saved layouts (which
-// predate them) on load — see useDashWidgets / useDashOrder migration below.
-const NEW_WIDGETS: WidgetId[] = ['social_stats', 'social_feed', 'linkedin', 'linkedin_posts', 'email_drafts'];
+// Executive lobby first-look preset: the dashboard should open like a Fortune 5
+// command wall, not a full internal app dump. Customize can still re-enable any
+// operational/content widgets when they are useful.
+const EXECUTIVE_LOBBY_PRESET_VERSION = 'executive-lobby-v3';
+const EXECUTIVE_LOBBY_WIDGETS: WidgetId[] = ['life', 'brief', 'tasks', 'timeline'];
+const LOCKED_DASHBOARD_WIDGETS = new Set<WidgetId>(EXECUTIVE_LOBBY_WIDGETS);
+const EXECUTIVE_LOBBY_ORDER: WidgetId[] = [
+  'life', 'brief', 'tasks', 'timeline',
+  'stat_agents', 'stat_tasks', 'stat_inbox', 'stat_calendar',
+  'launch_linkedin', 'launch_whatsapp',
+  'finance', 'crm', 'health_data',
+  'approvals', 'agents', 'inbox', 'activity', 'spend', 'integrations',
+  'revenue', 'health', 'email', 'whatsapp', 'slack',
+  'slack_sales', 'social_stats', 'social_feed', 'linkedin',
+  'linkedin_posts', 'email_drafts', 'csat',
+];
 
 const WIDGET_CATALOG: { id: WidgetId; label: string; blurb: string; span?: 1 | 2 | 3 }[] = [
+  { id: 'life',     label: 'Dashboard of Life', blurb: 'Life domains — wealth, reputation, pipeline, energy', span: 3 },
+  { id: 'brief',    label: 'Daily Brief',       blurb: 'Your morning briefing — what wants attention', span: 2 },
+  { id: 'stat_agents', label: 'Employee Agents Stat', blurb: 'Compact employee-agent count', span: 1 },
+  { id: 'stat_tasks', label: 'Tasks Today Stat', blurb: 'Compact today / blocked task count', span: 1 },
+  { id: 'stat_inbox', label: 'Inbox Stat', blurb: 'Compact unread inbox count', span: 1 },
+  { id: 'stat_calendar', label: 'Calendar Stat', blurb: 'Compact calendar count and next event', span: 1 },
+  { id: 'launch_linkedin', label: 'LinkedIn Launch', blurb: 'Shortcut and readiness for LinkedIn', span: 2 },
+  { id: 'launch_whatsapp', label: 'WhatsApp Launch', blurb: 'Shortcut and unread WhatsApp count', span: 2 },
+  { id: 'approvals',label: 'Needs Your OK',     blurb: 'Actions waiting on your approval', span: 2 },
+  { id: 'spend',    label: 'Spend',             blurb: 'AI model spend vs your budget cap', span: 1 },
+  { id: 'integrations', label: 'Integration Health', blurb: 'Connected-app status', span: 1 },
   { id: 'finance',  label: 'Financial Snapshot', blurb: 'Cash, revenue, AR + flags (CFO agent)', span: 3 },
   { id: 'crm',      label: 'CRM / Sales',        blurb: 'Pipeline, contacts, conversion (Sales Review)', span: 2 },
   { id: 'agents',   label: 'Employee Agents',  blurb: 'Your AI staff and their live status', span: 2 },
@@ -2712,6 +3108,7 @@ const WIDGET_CATALOG: { id: WidgetId; label: string; blurb: string; span?: 1 | 2
   { id: 'revenue',  label: 'Revenue',          blurb: 'This month vs last (live Stripe)' },
   { id: 'email',    label: 'Email Agent',      blurb: 'Processed / drafts / attention today' },
   { id: 'health',   label: 'Ops Health',       blurb: 'Live score: agents + tasks + attention' },
+  { id: 'health_data', label: 'Health',        blurb: 'Steps, sleep, heart rate — synced from your phone', span: 2 },
   { id: 'csat',     label: 'Client Satisfaction', blurb: 'Trustpilot / Google review rating' },
   { id: 'activity', label: 'Live Activity',    blurb: 'Recent work your agents completed', span: 2 },
   { id: 'slack',    label: 'Slack @ Mentions', blurb: '@-mentions and DMs that need a reply' },
@@ -2725,8 +3122,10 @@ const WIDGET_CATALOG: { id: WidgetId; label: string; blurb: string; span?: 1 | 2
   { id: 'timeline', label: "Today's Timeline", blurb: 'Your calendar, stacked by hour', span: 3 },
 ];
 
-const DEFAULT_WIDGETS: WidgetId[] = ['finance', 'crm', 'agents', 'tasks', 'health', 'revenue', 'slack_sales', 'social_stats', 'social_feed', 'linkedin', 'linkedin_posts', 'email_drafts', 'inbox', 'email', 'slack', 'whatsapp', 'activity', 'csat', 'timeline'];
+const DEFAULT_WIDGETS: WidgetId[] = EXECUTIVE_LOBBY_WIDGETS;
 const WIDGETS_KEY = 'boss_dash_widgets_v2';
+const WIDGET_PRESET_KEY = 'boss_dash_widget_preset_v1';
+const ORDER_KEY = 'boss_dash_order_v2';
 
 function useDashWidgets(): { enabled: Set<WidgetId>; toggle: (id: WidgetId) => void } {
   // Migration (see migratedEnabled): drop ids no longer in the catalog (e.g.
@@ -2757,7 +3156,7 @@ function WidgetGallery({ enabled, toggle, onClose }: {
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-6" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="relative w-full max-w-3xl rounded-xl p-5 shadow-xl flex flex-col max-h-[85vh]"
+        className="relative w-full max-w-3xl rounded-lg p-5 shadow-xl flex flex-col max-h-[85vh]"
         style={{ background: `linear-gradient(180deg, ${DASH.panel}, ${DASH.panel2})`, border: `1px solid ${DASH.border}`, color: DASH.text }}
       >
         <header className="flex items-start justify-between mb-4 shrink-0">
@@ -2766,7 +3165,9 @@ function WidgetGallery({ enabled, toggle, onClose }: {
             <h2 className="text-lg font-semibold mt-1 flex items-center gap-2">
               <LayoutGrid className="w-4 h-4" style={{ color: DASH.violet }} /> Choose your widgets
             </h2>
-            <p className="text-[12px] mt-1" style={{ color: DASH.textMuted }}>Pick which tiles show on your dashboard. Saved on this browser.</p>
+            <p className="text-[12px] mt-1" style={{ color: DASH.textMuted }}>
+              The lobby opens with the executive first look. Add deeper operating panels when you want them on the wall.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close" style={{ color: DASH.textMuted }}><X className="w-4 h-4" /></button>
         </header>
@@ -2807,6 +3208,10 @@ interface RevenueData {
   currency: string;
   thisMonth: number;
   lastMonth: number;
+  ytd: number;
+  ytdStripe?: number;
+  ytdIr?: number;
+  year: number;
   pctChange: number | null;
   series: { day: number; amount: number }[];
   recent: { amount: number; description: string; created: number }[];
@@ -2830,11 +3235,46 @@ function Sparkline({ points, color = '#7C3CFF' }: { points: number[]; color?: st
     </svg>
   );
 }
-function RailCard({ title, meta, children }: { title: string; meta?: React.ReactNode; children: React.ReactNode }) {
+function RailCard({
+  title,
+  titleTo,
+  meta,
+  children,
+  className = '',
+  transparent = false,
+}: {
+  title: string;
+  titleTo?: string;
+  meta?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+  transparent?: boolean;
+}) {
+  const navigate = useNavigate();
   return (
-    <div className="rounded-[14px] p-3.5 h-full overflow-y-auto" style={{ background: DASH.panel2, border: `1px solid ${DASH.border}` }}>
+    <div
+      className={`rounded-lg p-3.5 h-full ${transparent ? 'overflow-hidden' : 'overflow-y-auto'} ${className}`}
+      style={{
+        background: transparent ? 'transparent' : DASH.panel2,
+        border: transparent ? '1px solid transparent' : `1px solid ${DASH.border}`,
+        color: transparent ? '#0c2d57' : DASH.text,
+        boxShadow: transparent ? 'none' : undefined,
+      }}
+    >
       <div className="flex items-center justify-between mb-2.5">
-        <div className="vs-mono text-[9px] tracking-[0.2em] uppercase" style={{ color: '#74849A' }}>{title}</div>
+        {titleTo ? (
+          <button
+            type="button"
+            onClick={() => navigate(titleTo)}
+            className="vs-mono text-[9px] tracking-[0.2em] uppercase text-left transition-colors hover:text-sky-700"
+            style={{ color: '#143A64' }}
+            title={`Open ${title}`}
+          >
+            {title}
+          </button>
+        ) : (
+          <div className="vs-mono text-[9px] tracking-[0.2em] uppercase" style={{ color: '#74849A' }}>{title}</div>
+        )}
         {meta}
       </div>
       {children}
@@ -2845,7 +3285,7 @@ function RailCard({ title, meta, children }: { title: string; meta?: React.React
 function RevenueOverview({ data, error }: { data: RevenueData | null; error: boolean }) {
   const pct = data?.pctChange ?? null;
   return (
-    <RailCard title="Revenue Overview" meta={<span className="text-[10px]" style={{ color: '#9AA8C2' }}>This Month</span>}>
+    <RailCard title="Revenue Overview" meta={<span className="text-[10px]" style={{ color: '#9AA8C2' }}>{data ? `YTD ${data.year}` : 'Year to Date'}</span>}>
       {error ? (
         <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Stripe unavailable</div>
       ) : !data ? (
@@ -2853,10 +3293,14 @@ function RevenueOverview({ data, error }: { data: RevenueData | null; error: boo
       ) : (
         <>
           <div className="flex items-baseline gap-2 flex-wrap">
-            <div className="text-[24px] font-semibold" style={{ color: '#F1F4FF' }}>{money(data.thisMonth)}</div>
+            <div className="text-[24px] font-semibold" style={{ color: '#F1F4FF' }}>{money(data.ytd)}</div>
+            <div className="text-[11px]" style={{ color: '#9AA8C2' }}>{data.ytdIr ? `Stripe ${money(data.ytdStripe ?? 0)} + IR ${money(data.ytdIr)}` : 'YTD · Stripe'}</div>
+          </div>
+          <div className="flex items-baseline gap-2 flex-wrap mt-0.5">
+            <div className="text-[12px] font-medium" style={{ color: '#C3CCE6' }}>{money(data.thisMonth)} this month</div>
             {pct != null && (
               <div className="text-[11px] font-medium" style={{ color: pct >= 0 ? '#20B26B' : '#FF5C5C' }}>
-                {pct >= 0 ? '↑' : '↓'} {Math.abs(pct)}% vs last month
+                {pct >= 0 ? '↑' : '↓'} {Math.abs(pct)}% vs last
               </div>
             )}
           </div>
@@ -2888,7 +3332,7 @@ function HealthGauge({ value }: { value: number }) {
   return (
     <div className="relative shrink-0 grid place-items-center" style={{ width: 92, height: 92 }}>
       <svg width="92" height="92" viewBox="0 0 92 92" style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx="46" cy="46" r={r} fill="none" stroke="var(--v-hairline-strong)" strokeWidth="7" />
+        <circle cx="46" cy="46" r={r} fill="none" stroke="#232A4D" strokeWidth="7" />
         <circle cx="46" cy="46" r={r} fill="none" stroke={hue} strokeWidth="7" strokeLinecap="round" strokeDasharray={`${dash} ${c}`} />
       </svg>
       <div className="absolute text-[22px] font-semibold" style={{ color: '#F1F4FF' }}>{value}</div>
@@ -3071,10 +3515,69 @@ function EmailWidget() {
 // ── Larger main-grid panels for the agent data (Finance + CRM) ──────────────────
 function BigStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl py-2.5 text-center" style={{ background: 'rgba(124,60,255,0.06)', border: '1px solid rgba(124,60,255,0.12)' }}>
-      <div className="text-[20px] font-semibold leading-tight" style={{ color: '#F1F4FF' }}>{value}</div>
+    <div className="rounded-lg py-2.5 text-center" style={{ background: 'rgba(124,60,255,0.06)', border: '1px solid rgba(124,60,255,0.12)' }}>
+      <div className="text-[20px] font-semibold leading-tight" style={{ color: DASH.text }}>{value}</div>
       <div className="vs-mono text-[9px] uppercase tracking-wide mt-0.5" style={{ color: '#74849A' }}>{label}</div>
       {sub && <div className="text-[10px] mt-0.5" style={{ color: '#9AA8C2' }}>{sub}</div>}
+    </div>
+  );
+}
+
+interface FinTxnT { transaction_id: string; account: string | null; date: string | null; amount: number; description: string; category: string | null; label: string | null; note: string | null; }
+
+function FinanceTxns() {
+  const [refresh, setRefresh] = useState(0);
+  const { data, loaded } = usePolledJson<{ transactions: FinTxnT[] }>(`api/finance/transactions?limit=200&v=${refresh}`, 60_000);
+  const txns = data?.transactions ?? [];
+  const [editId, setEditId] = useState<string | null>(null);
+  const [labelText, setLabelText] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function save(t: FinTxnT) {
+    if (busy) return; setBusy(t.transaction_id);
+    try {
+      const token = localStorage.getItem('boss_token') ?? '';
+      await fetch('api/finance/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ transaction_id: t.transaction_id, account: t.account, date: t.date, amount: t.amount, description: t.description, label: labelText.trim() }),
+      });
+      setEditId(null); setLabelText(''); setRefresh((n) => n + 1);
+    } finally { setBusy(null); }
+  }
+
+  if (loaded && txns.length === 0) return null;
+  return (
+    <div className="mt-3 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+      <div className="text-[10px] vs-mono mb-1.5" style={{ color: '#74849A' }}>THIS MONTH ({txns.length}) · tag any to teach the CFO</div>
+      <div className="space-y-1.5 overflow-y-auto" style={{ maxHeight: 260 }}>
+        {txns.map((t) => (
+          <div key={t.transaction_id} className="text-[11px]">
+            <div className="flex items-center gap-2">
+              <span className="vs-mono" style={{ color: t.amount >= 0 ? '#20B26B' : '#9AA8C2', minWidth: 62 }}>{fmtMoney(t.amount)}</span>
+              <span className="truncate flex-1" style={{ color: DASH.textDim }}>{t.description || '—'}</span>
+              <span className="vs-mono text-[9px]" style={{ color: '#74849A' }}>{t.date ?? ''}</span>
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5" style={{ paddingLeft: 70 }}>
+              {editId === t.transaction_id ? (
+                <>
+                  <input autoFocus value={labelText} onChange={(e) => setLabelText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') save(t); if (e.key === 'Escape') { setEditId(null); setLabelText(''); } }}
+                    placeholder="your label, e.g. Industry Rockstar June"
+                    className="flex-1 bg-transparent text-[11px] px-1 py-0.5 rounded" style={{ border: '1px solid rgba(100,116,139,0.18)', color: DASH.text }} />
+                  <button onClick={() => save(t)} disabled={busy === t.transaction_id} style={{ color: '#20B26B' }} className="text-[11px]">Save</button>
+                  <button onClick={() => { setEditId(null); setLabelText(''); }} style={{ color: '#74849A' }} className="text-[11px]">×</button>
+                </>
+              ) : t.label ? (
+                <button onClick={() => { setEditId(t.transaction_id); setLabelText(t.label ?? ''); }}
+                  className="vs-mono text-[9px] px-1 rounded" style={{ background: 'rgba(60,200,140,0.15)', color: '#7CE0B0' }}>🏷 {t.label}</button>
+              ) : (
+                <button onClick={() => { setEditId(t.transaction_id); setLabelText(''); }} className="text-[10px]" style={{ color: '#74849A' }}>+ tag</button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -3107,6 +3610,7 @@ function FinancePanel() {
             {snap.bottom_line && <div className="text-[12px] leading-relaxed" style={{ color: '#9AA8C2' }}>{snap.bottom_line}</div>}
           </>
         )}
+        <FinanceTxns />
       </div>
     </Panel>
   );
@@ -3137,8 +3641,8 @@ function CrmPanel() {
                 {stages.slice(0, 7).map((s, i) => (
                   <div key={i}>
                     <div className="flex justify-between text-[11px] mb-0.5">
-                      <span style={{ color: '#C3CCE6' }}>{s.stage ?? '—'}</span>
-                      <span style={{ color: '#F1F4FF' }}>{s.count ?? 0}{s.value ? ` · ${fmtMoney(s.value)}` : ''}</span>
+                      <span style={{ color: DASH.textDim }}>{s.stage ?? '—'}</span>
+                      <span style={{ color: DASH.text }}>{s.count ?? 0}{s.value ? ` · ${fmtMoney(s.value)}` : ''}</span>
                     </div>
                     <div className="h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}>
                       <div className="h-1.5 rounded-full" style={{ width: `${Math.round(((s.count ?? 0) / maxCount) * 100)}%`, background: 'linear-gradient(90deg, #7C3CFF, #0EA5E9)' }} />
@@ -3164,22 +3668,25 @@ function CrmPanel() {
   );
 }
 
-const ORDER_KEY = 'boss_dash_order_v2';
-
 /**
  * Recompute the enabled-widget Set from storage with the same migration as
- * useDashWidgets (drop retired ids, force-add the new ones). The order hook
- * needs this so it can append any newly-enabled id missing from a saved order.
+ * useDashWidgets. It also applies the executive-lobby preset once to browsers
+ * that still have the old "everything on" dashboard saved.
  */
 function migratedEnabled(): Set<WidgetId> {
   const VALID = new Set<WidgetId>(WIDGET_CATALOG.map((w) => w.id));
   try {
+    if (localStorage.getItem(WIDGET_PRESET_KEY) !== EXECUTIVE_LOBBY_PRESET_VERSION) {
+      const preset = EXECUTIVE_LOBBY_WIDGETS.filter((id) => VALID.has(id));
+      localStorage.setItem(WIDGETS_KEY, JSON.stringify(preset));
+      localStorage.setItem(ORDER_KEY, JSON.stringify(EXECUTIVE_LOBBY_ORDER.filter((id) => VALID.has(id))));
+      localStorage.setItem(WIDGET_PRESET_KEY, EXECUTIVE_LOBBY_PRESET_VERSION);
+      return new Set(preset);
+    }
     const raw = localStorage.getItem(WIDGETS_KEY);
     if (raw) {
       const saved = (JSON.parse(raw) as WidgetId[]).filter((id) => VALID.has(id));
-      const next = new Set<WidgetId>(saved);
-      for (const id of NEW_WIDGETS) next.add(id);
-      return next;
+      return new Set<WidgetId>(saved);
     }
   } catch { /* ignore */ }
   return new Set(DEFAULT_WIDGETS);
@@ -3187,9 +3694,8 @@ function migratedEnabled(): Set<WidgetId> {
 
 function useDashOrder(): { order: WidgetId[]; reorder: (from: WidgetId, to: WidgetId) => void } {
   const [order, setOrder] = useState<WidgetId[]>(() => {
-    // Migration: keep only ids still in the catalog (drops retired tiles), then
-    // append any enabled id missing from the saved order so the new social
-    // tiles surface for existing users. No saved order → catalog order.
+    // Keep only ids still in the catalog, then append any enabled id missing
+    // from the saved order. No saved order -> executive-lobby order.
     const VALID = new Set<WidgetId>(WIDGET_CATALOG.map((w) => w.id));
     try {
       const raw = localStorage.getItem(ORDER_KEY);
@@ -3200,7 +3706,7 @@ function useDashOrder(): { order: WidgetId[]; reorder: (from: WidgetId, to: Widg
         return saved;
       }
     } catch { /* ignore */ }
-    return WIDGET_CATALOG.map((w) => w.id);
+    return EXECUTIVE_LOBBY_ORDER.filter((id) => VALID.has(id));
   });
   const reorder = (from: WidgetId, to: WidgetId) => setOrder((prev) => {
     const ids = WIDGET_CATALOG.map((w) => w.id).sort((a, b) => {
@@ -3215,6 +3721,987 @@ function useDashOrder(): { order: WidgetId[]; reorder: (from: WidgetId, to: Widg
   });
   return { order, reorder };
 }
+
+type FixedDashboardTileId = 'hero';
+
+type FloatingTileId = WidgetId | FixedDashboardTileId;
+
+interface FloatingRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  z: number;
+}
+
+interface FloatingTileDef {
+  id: FloatingTileId;
+  node: React.ReactNode;
+}
+
+type FloatingLayout = Partial<Record<FloatingTileId, FloatingRect>>;
+
+const FLOAT_LAYOUT_KEY = 'boss_dash_float_layout_v1';
+const FLOAT_LAYOUT_PRESET_KEY = 'boss_dash_float_layout_preset_v1';
+const FLOAT_LAYOUT_PRESET_VERSION = 'executive-float-v8-aligned';
+
+const FIXED_FLOATING_IDS: FixedDashboardTileId[] = ['hero'];
+
+const BASE_FLOATING_LAYOUT: FloatingLayout = {
+  hero: { x: 2, y: 2, w: 50, h: 14, z: 20 },
+  stat_agents: { x: 54, y: 2, w: 10.75, h: 14, z: 21 },
+  stat_tasks: { x: 65.75, y: 2, w: 10.75, h: 14, z: 22 },
+  stat_inbox: { x: 76.5, y: 2, w: 10.75, h: 14, z: 23 },
+  stat_calendar: { x: 87.25, y: 2, w: 10.75, h: 14, z: 24 },
+  launch_linkedin: { x: 2, y: 18, w: 31, h: 16, z: 25 },
+  launch_whatsapp: { x: 35, y: 18, w: 28, h: 16, z: 26 },
+  life: { x: 2, y: 18, w: 25, h: 80, z: 48 },
+  brief: { x: 29, y: 18, w: 36, h: 46, z: 53 },
+  finance: { x: 2, y: 62, w: 36, h: 26, z: 29 },
+  crm: { x: 40, y: 62, w: 27, h: 26, z: 30 },
+  tasks: { x: 67, y: 18, w: 31, h: 46, z: 42 },
+  timeline: { x: 29, y: 66, w: 69, h: 32, z: 50 },
+  health_data: { x: 69, y: 52, w: 29, h: 36, z: 32 },
+};
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function isFloatingTileId(id: string): id is FloatingTileId {
+  return FIXED_FLOATING_IDS.includes(id as FixedDashboardTileId) || WIDGET_CATALOG.some((w) => w.id === id);
+}
+
+function defaultFloatingRect(id: FloatingTileId, index = 0): FloatingRect {
+  const existing = BASE_FLOATING_LAYOUT[id];
+  if (existing) return { ...existing };
+  const catalog = WIDGET_CATALOG.find((w) => w.id === id);
+  const width = catalog?.span === 3 ? 36 : catalog?.span === 2 ? 28 : 18;
+  const height = catalog?.span === 3 ? 24 : catalog?.span === 2 ? 22 : 18;
+  const col = index % 3;
+  const row = Math.floor(index / 3);
+  return {
+    x: 2 + col * 32,
+    y: 72 + row * 20,
+    w: width,
+    h: height,
+    z: 40 + index,
+  };
+}
+
+function buildFloatingLayout(tileIds: FloatingTileId[]): FloatingLayout {
+  const next: FloatingLayout = {};
+  tileIds.forEach((id, index) => { next[id] = defaultFloatingRect(id, index); });
+  return next;
+}
+
+function persistFloatingLayout(layout: FloatingLayout): void {
+  try {
+    localStorage.setItem(FLOAT_LAYOUT_KEY, JSON.stringify(layout));
+    localStorage.setItem(FLOAT_LAYOUT_PRESET_KEY, FLOAT_LAYOUT_PRESET_VERSION);
+  } catch { /* ignore */ }
+}
+
+function readFloatingLayout(tileIds: FloatingTileId[]): FloatingLayout {
+  try {
+    if (localStorage.getItem(FLOAT_LAYOUT_PRESET_KEY) !== FLOAT_LAYOUT_PRESET_VERSION) {
+      const preset = buildFloatingLayout(tileIds);
+      persistFloatingLayout(preset);
+      return preset;
+    }
+    const raw = localStorage.getItem(FLOAT_LAYOUT_KEY);
+    if (!raw) return buildFloatingLayout(tileIds);
+    const parsed = JSON.parse(raw) as Record<string, FloatingRect>;
+    const layout: FloatingLayout = {};
+    Object.entries(parsed).forEach(([id, rect]) => {
+      if (!isFloatingTileId(id)) return;
+      if (!rect || typeof rect !== 'object') return;
+      layout[id] = {
+        x: Number(rect.x) || 0,
+        y: Number(rect.y) || 0,
+        w: Number(rect.w) || 20,
+        h: Number(rect.h) || 20,
+        z: Number(rect.z) || 1,
+      };
+    });
+    tileIds.forEach((id, index) => {
+      if (!layout[id]) layout[id] = defaultFloatingRect(id, index);
+    });
+    return layout;
+  } catch {
+    return buildFloatingLayout(tileIds);
+  }
+}
+
+function useFloatingLayout(tileIds: FloatingTileId[]): {
+  layout: FloatingLayout;
+  setRect: (id: FloatingTileId, rect: FloatingRect) => void;
+  bringForward: (id: FloatingTileId) => void;
+  resetLayout: () => void;
+} {
+  const tileKey = tileIds.join('|');
+  const [layout, setLayout] = useState<FloatingLayout>(() => readFloatingLayout(tileIds));
+
+  useEffect(() => {
+    setLayout((prev) => {
+      let changed = false;
+      const next: FloatingLayout = { ...prev };
+      tileIds.forEach((id, index) => {
+        if (!next[id]) {
+          next[id] = defaultFloatingRect(id, index);
+          changed = true;
+        }
+      });
+      if (changed) persistFloatingLayout(next);
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tileKey]);
+
+  const setRect = useCallback((id: FloatingTileId, rect: FloatingRect) => {
+    setLayout((prev) => {
+      const next = { ...prev, [id]: rect };
+      persistFloatingLayout(next);
+      return next;
+    });
+  }, []);
+
+  const bringForward = useCallback((id: FloatingTileId) => {
+    setLayout((prev) => {
+      const maxZ = Math.max(1, ...Object.values(prev).map((rect) => rect?.z ?? 1));
+      const current = prev[id] ?? defaultFloatingRect(id);
+      const next = { ...prev, [id]: { ...current, z: maxZ + 1 } };
+      persistFloatingLayout(next);
+      return next;
+    });
+  }, []);
+
+  const resetLayout = useCallback(() => {
+    const next = buildFloatingLayout(tileIds);
+    persistFloatingLayout(next);
+    setLayout(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tileKey]);
+
+  return { layout, setRect, bringForward, resetLayout };
+}
+
+function minTileSize(id: FloatingTileId): { w: number; h: number } {
+  if (id === 'hero') return { w: 420, h: 128 };
+  if (id.startsWith('stat_')) return { w: 132, h: 118 };
+  if (id.startsWith('launch_')) return { w: 280, h: 150 };
+  const catalog = WIDGET_CATALOG.find((w) => w.id === id);
+  if (catalog?.span === 3) return { w: 420, h: 230 };
+  if (catalog?.span === 2) return { w: 330, h: 210 };
+  return { w: 230, h: 170 };
+}
+
+function clampRectToStage(rect: FloatingRect, stage: DOMRect, id: FloatingTileId): FloatingRect {
+  const min = minTileSize(id);
+  const minW = (min.w / Math.max(stage.width, 1)) * 100;
+  const minH = (min.h / Math.max(stage.height, 1)) * 100;
+  const w = clampNumber(rect.w, minW, 98);
+  const h = clampNumber(rect.h, minH, 96);
+  return {
+    x: clampNumber(rect.x, 0, 100 - w),
+    y: clampNumber(rect.y, 0, 100 - h),
+    w,
+    h,
+    z: rect.z,
+  };
+}
+
+function FloatingDashboardTile({
+  id,
+  rect,
+  stageRef,
+  onRect,
+  getFrontZ,
+  children,
+}: {
+  id: FloatingTileId;
+  rect: FloatingRect;
+  stageRef: React.RefObject<HTMLDivElement>;
+  onRect: (id: FloatingTileId, rect: FloatingRect) => void;
+  getFrontZ: () => number;
+  children: React.ReactNode;
+}) {
+  // Governed by the global tile lock (padlock in the TopBar): unlocked ->
+  // every tile grows a move grip and a resize handle.
+  const adjustable = !useTilesLocked();
+
+  const beginMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const stageEl = stageRef.current;
+    if (!stageEl || !adjustable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const activeRect = { ...rect, z: getFrontZ() };
+    onRect(id, activeRect);
+    const stage = stageEl.getBoundingClientRect();
+    const start = { x: e.clientX, y: e.clientY, rect: activeRect };
+    const onMove = (ev: PointerEvent) => {
+      const dx = ((ev.clientX - start.x) / Math.max(stage.width, 1)) * 100;
+      const dy = ((ev.clientY - start.y) / Math.max(stage.height, 1)) * 100;
+      onRect(id, clampRectToStage({ ...start.rect, x: start.rect.x + dx, y: start.rect.y + dy }, stage, id));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const beginResize = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const stageEl = stageRef.current;
+    if (!stageEl || !adjustable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const activeRect = { ...rect, z: getFrontZ() };
+    onRect(id, activeRect);
+    const stage = stageEl.getBoundingClientRect();
+    const start = { x: e.clientX, y: e.clientY, rect: activeRect };
+    const onMove = (ev: PointerEvent) => {
+      const dw = ((ev.clientX - start.x) / Math.max(stage.width, 1)) * 100;
+      const dh = ((ev.clientY - start.y) / Math.max(stage.height, 1)) * 100;
+      onRect(id, clampRectToStage({ ...start.rect, w: start.rect.w + dw, h: start.rect.h + dh }, stage, id));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  return (
+    <div
+      data-floating-tile={id}
+      className="dashboard-floating-tile group"
+      style={{
+        left: `${rect.x}%`,
+        top: `${rect.y}%`,
+        width: `${rect.w}%`,
+        height: `${rect.h}%`,
+        zIndex: rect.z,
+      }}
+    >
+      {adjustable && (
+        <button
+          type="button"
+          className="dashboard-floating-move"
+          onPointerDown={beginMove}
+          title="Move tile"
+          aria-label="Move tile"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+      )}
+      <div className="dashboard-floating-content h-full min-h-0">
+        {children}
+      </div>
+      {adjustable && (
+        <button
+          type="button"
+          className="dashboard-floating-resize"
+          onPointerDown={beginResize}
+          title="Resize tile"
+          aria-label="Resize tile"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface Integration { id: string; label: string; status: 'connected' | 'expired' | 'disconnected'; detail: string }
+const INT_COLOR: Record<string, string> = { connected: '#3FB97F', expired: '#E5A50A', disconnected: '#74849A' };
+function IntegrationsWidget() {
+  const { data, error, loaded } = usePolledJson<{ integrations: Integration[]; connected: number; total: number }>('api/life/integrations');
+  const items = data?.integrations ?? [];
+  return (
+    <RailCard title="Integration Health" meta={<span className="text-[10px]" style={{ color: '#9AA8C2' }}>{data ? `${data.connected}/${data.total}` : ''}</span>}>
+      {error ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Unavailable</div>
+      ) : !loaded ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Loading…</div>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((it) => (
+            <div key={it.id} className="flex items-center justify-between text-[11.5px]">
+              <span style={{ color: '#E8ECF7' }}>{it.label}</span>
+              <span className="flex items-center gap-1.5" style={{ color: INT_COLOR[it.status] }}>
+                <span style={{ fontSize: '7px' }}>●</span>
+                <span className="text-[10px]">{it.detail}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </RailCard>
+  );
+}
+
+// ── Spend — AI budget discipline (Fusion CoS P2) ──────────────────────────────
+interface BudgetStatus { period: string; cap_usd: number | null; spent_usd: number; pct: number | null; status: 'no_budget' | 'ok' | 'warn' | 'over'; alert_pct: number; hard_stop: boolean }
+const SPEND_COLOR: Record<string, string> = { ok: '#3FB97F', warn: '#E5A50A', over: '#E5484D', no_budget: '#74849A' };
+function SpendWidget() {
+  const { data, error, loaded } = usePolledJson<BudgetStatus>('api/cost/budget');
+  const [capInput, setCapInput] = useState('');
+  const [saving, setSaving] = useState(false);
+  async function setCap() {
+    const cap = Number(capInput);
+    if (!Number.isFinite(cap) || cap <= 0) return;
+    setSaving(true);
+    const token = localStorage.getItem('boss_token') ?? '';
+    await fetch('api/cost/budget', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ cap_usd: cap, period: 'monthly' }),
+    }).catch(() => {});
+    setSaving(false); setCapInput('');
+  }
+  return (
+    <RailCard title="Spend" meta={<span className="text-[10px]" style={{ color: '#9AA8C2' }}>{data?.period ?? ''}</span>}>
+      {error ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Unavailable</div>
+      ) : !loaded || !data ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Loading…</div>
+      ) : data.status === 'no_budget' ? (
+        <div className="space-y-2">
+          <div className="text-[12px]" style={{ color: '#C3CCE6' }}>${data.spent_usd.toFixed(2)} spent this {data.period === 'daily' ? 'day' : 'month'}</div>
+          <div className="text-[10.5px]" style={{ color: '#74849A' }}>Set a monthly cap to track it:</div>
+          <div className="flex gap-1.5">
+            <input value={capInput} onChange={(e) => setCapInput(e.target.value)} placeholder="$ cap" inputMode="decimal"
+              className="flex-1 text-[11.5px] px-2 py-1 rounded" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#E8ECF7' }} />
+            <button type="button" disabled={saving} onClick={setCap} className="text-[10.5px] px-2.5 py-1 rounded font-medium" style={{ background: '#3FB97F', color: '#04130B' }}>Set</button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-baseline justify-between">
+            <span className="text-[18px] font-semibold" style={{ color: '#F1F4FF' }}>${data.spent_usd.toFixed(2)}</span>
+            <span className="text-[11px]" style={{ color: '#9AA8C2' }}>of ${data.cap_usd?.toFixed(0)} {data.period === 'daily' ? '/day' : '/mo'}</span>
+          </div>
+          <div className="h-[6px] rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <div className="h-full rounded-full" style={{ width: `${Math.min(100, data.pct ?? 0)}%`, background: SPEND_COLOR[data.status] }} />
+          </div>
+          <div className="text-[10.5px]" style={{ color: SPEND_COLOR[data.status] }}>
+            {data.pct}% used{data.status === 'over' ? ' — over cap' : data.status === 'warn' ? ' — approaching cap' : ' — on track'}
+          </div>
+        </div>
+      )}
+    </RailCard>
+  );
+}
+
+// ── Daily Brief — proactive Chief-of-Staff summary (Fusion CoS P3) ────────────
+interface BriefPriority { kind: string; label: string; count?: number; severity: 'high' | 'medium' | 'low'; route?: string; actionLabel?: string }
+interface DailyBrief {
+  date: string;
+  generated_at?: string;
+  freshness_key?: string;
+  greeting: string;
+  headline: string;
+  priorities: BriefPriority[];
+  sections: { label: string; items: string[] }[];
+  spoken?: string;
+}
+const SEV_COLOR: Record<string, string> = { high: '#E5484D', medium: '#E5A50A', low: '#3FB97F' };
+const BRIEF_TEXT = '#082B52';
+const BRIEF_DIM = '#123E68';
+const BRIEF_MUTED = '#234E75';
+const BRIEF_GLOW = '0 0 12px rgba(255,255,255,0.88), 0 1px 3px rgba(8,43,82,0.2)';
+
+function dailyBriefUrl(): string {
+  const d = new Date();
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `api/life/brief?day=${day}&login=${Date.now()}`;
+}
+
+function briefStamp(brief: DailyBrief | null): string {
+  if (!brief?.generated_at) return brief?.date ?? '';
+  const generated = new Date(brief.generated_at);
+  if (Number.isNaN(generated.getTime())) return brief.date;
+  return generated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+const DASHBOARD_RETURN_PATHS = new Set([
+  '/agents',
+  '/calendar',
+  '/kanban',
+  '/tasks',
+]);
+
+function dashboardRoute(route?: string | null): string | null {
+  if (!route) return null;
+  if (/^https?:\/\//i.test(route)) return route;
+
+  const [withoutHash, hash = ''] = route.split('#');
+  const [rawPath, rawQuery = ''] = withoutHash.split('?');
+  let path = rawPath || '/';
+  const query = new URLSearchParams(rawQuery);
+
+  if (path === '/tasks') path = '/kanban';
+  if (path === '/email') {
+    path = '/settings';
+    query.set('focus', 'email');
+  }
+  if (path === '/slack') {
+    path = '/settings';
+    query.set('focus', 'slack');
+  }
+  if (path === '/self-healing') {
+    path = '/settings';
+    query.set('focus', 'self-healing');
+  }
+
+  if (DASHBOARD_RETURN_PATHS.has(path) && !query.has('from')) {
+    query.set('from', 'dashboard');
+  }
+
+  const queryString = query.toString();
+  return `${path}${queryString ? `?${queryString}` : ''}${hash ? `#${hash}` : ''}`;
+}
+
+function briefSectionRoute(label: string): string | null {
+  const raw = label.toLowerCase();
+  if (raw === 'today') return dashboardRoute('/calendar');
+  if (raw === 'business') return dashboardRoute('/crm');
+  if (raw === 'operations') return dashboardRoute('/agents');
+  if (raw === 'communications') return dashboardRoute('/whatsapp');
+  if (raw === 'systems') return dashboardRoute('/settings?focus=systems');
+  if (raw === 'wellness') return dashboardRoute('/health');
+  if (raw === 'attention') return dashboardRoute('/kanban');
+  return null;
+}
+
+function briefSectionAction(label: string): string {
+  const raw = label.toLowerCase();
+  if (raw === 'today') return 'Open calendar';
+  if (raw === 'business') return 'Open revenue';
+  if (raw === 'operations') return 'Open agents';
+  if (raw === 'communications') return 'Open messages';
+  if (raw === 'systems') return 'Open controls';
+  if (raw === 'wellness') return 'Open health';
+  return 'Open';
+}
+
+function briefFallbackScript(brief: DailyBrief): string {
+  const focus = brief.priorities
+    .slice(0, 4)
+    .map((priority) => `${priority.label}${priority.route ? '; I put the action button next to it' : ''}`);
+  const sectionLines = brief.sections
+    .slice(0, 5)
+    .flatMap((section) => section.items.slice(0, 1).map((item) => `${section.label}: ${item}`));
+  return [
+    `${brief.greeting}. I have your executive brief for ${brief.date}.`,
+    brief.headline,
+    focus.length
+      ? `I would handle these first: ${focus.join('. ')}.`
+      : 'Nothing urgent is asking for you first.',
+    ...sectionLines,
+    'I left the action links in the Daily Brief so you can jump straight into each item when you are ready.',
+  ].join(' ');
+}
+
+function DailyBriefWidget() {
+  const briefUrl = useMemo(dailyBriefUrl, []);
+  const { data, error, loaded } = usePolledJson<DailyBrief>(briefUrl, 15 * 60_000);
+  const navigate = useNavigate();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [speaking, setSpeaking] = useState(false);
+
+  const stopBrief = useCallback(() => {
+    audioRef.current?.pause();
+    audioRef.current = null;
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    setSpeaking(false);
+  }, []);
+
+  const browserSpeak = useCallback((text: string) => {
+    if (!window.speechSynthesis || !text.trim()) {
+      setSpeaking(false);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text.slice(0, 1400));
+    utterance.rate = 0.95;
+    utterance.pitch = 0.96;
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    setSpeaking(true);
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  const speakBrief = useCallback(async () => {
+    if (!data) return;
+    const text = (data.spoken || briefFallbackScript(data)).trim();
+    if (!text) return;
+    stopBrief();
+    setSpeaking(true);
+    try {
+      const token = localStorage.getItem('boss_token') ?? '';
+      const res = await fetch('api/tts/persona', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          text,
+          surface: 'dashboard',
+          handle: 'daily-brief',
+          displayName: 'Daily Brief',
+          title: 'Executive Chief of Staff',
+        }),
+      });
+      if (!res.ok) throw new Error(`TTS ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setSpeaking(false);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        browserSpeak(text);
+      };
+      audioRef.current = audio;
+      await audio.play();
+    } catch {
+      browserSpeak(text);
+    }
+  }, [browserSpeak, data, stopBrief]);
+
+  useEffect(() => () => stopBrief(), [stopBrief]);
+
+  return (
+    <RailCard
+      title="Daily Brief"
+      meta={
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={speaking ? stopBrief : speakBrief}
+            disabled={!data}
+            title={speaking ? 'Stop briefing' : 'Play briefing'}
+            aria-label={speaking ? 'Stop Daily Brief audio' : 'Play Daily Brief audio'}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors"
+            style={{
+              color: speaking ? '#7F1D1D' : '#0B2D57',
+              background: speaking ? 'rgba(254,226,226,0.74)' : 'rgba(255,255,255,0.54)',
+              border: '1px solid rgba(100,116,139,0.22)',
+              opacity: data ? 1 : 0.45,
+            }}
+          >
+            {speaking ? <Square className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+          </button>
+          <span className="text-[10px]" style={{ color: BRIEF_MUTED, fontWeight: 800, textShadow: BRIEF_GLOW }}>{briefStamp(data)}</span>
+        </div>
+      }
+    >
+      {error ? (
+        <div className="text-[11.5px] py-3" style={{ color: BRIEF_DIM, fontWeight: 700, textShadow: BRIEF_GLOW }}>Unavailable</div>
+      ) : !loaded || !data ? (
+        <div className="text-[11.5px] py-3" style={{ color: BRIEF_DIM, fontWeight: 700, textShadow: BRIEF_GLOW }}>Loading…</div>
+      ) : (
+        <div className="space-y-2.5">
+          <div>
+            <div className="text-[13px] font-semibold" style={{ color: BRIEF_TEXT, textShadow: BRIEF_GLOW }}>{data.greeting}.</div>
+            <div className="text-[11.5px]" style={{ color: BRIEF_DIM, fontWeight: 700, textShadow: BRIEF_GLOW }}>{data.headline}</div>
+          </div>
+          {data.priorities.length > 0 && (
+            <div className="space-y-1">
+              {data.priorities.map((p, i) => {
+                const route = dashboardRoute(p.route);
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => { if (route) navigate(route); }}
+                    className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-[11.5px] transition-colors hover:bg-white/30"
+                    style={{ cursor: route ? 'pointer' : 'default' }}
+                  >
+                    <span style={{ color: SEV_COLOR[p.severity], fontSize: '8px' }}>●</span>
+                    <span className="min-w-0 flex-1" style={{ color: BRIEF_TEXT, fontWeight: 750, textShadow: BRIEF_GLOW }}>{p.label}</span>
+                    {route && (
+                      <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide" style={{ color: '#062F57', background: 'rgba(255,255,255,0.56)', border: '1px solid rgba(8,43,82,0.16)' }}>
+                        {p.actionLabel ?? 'Open'}
+                        <ArrowRight className="h-3 w-3" />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {data.sections.map((s) => {
+            const route = briefSectionRoute(s.label);
+            return (
+              <div key={s.label}>
+                <div className="mb-0.5 flex items-center justify-between gap-2">
+                  <div className="text-[9.5px] uppercase tracking-wide" style={{ color: BRIEF_MUTED, fontWeight: 900, textShadow: BRIEF_GLOW }}>{s.label}</div>
+                  {route && (
+                    <button
+                      type="button"
+                      onClick={() => navigate(route)}
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide transition-colors hover:bg-white/50"
+                      style={{ color: '#062F57', background: 'rgba(255,255,255,0.36)' }}
+                    >
+                      {briefSectionAction(s.label)}
+                      <ArrowRight className="h-2.5 w-2.5" />
+                    </button>
+                  )}
+                </div>
+                {s.items.map((it, i) => (<div key={i} className="text-[11px]" style={{ color: BRIEF_DIM, fontWeight: 650, textShadow: BRIEF_GLOW }}>{it}</div>))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </RailCard>
+  );
+}
+
+// ── Dashboard of Life — life-domain overview (Fusion CoS P3) ──────────────────
+interface LifeDomain {
+  key: string; label: string; display: string;
+  value: number | null; unit: string | null; trend: string | null;
+  status: 'good' | 'watch' | 'attention' | 'neutral'; source: string; hint?: string;
+}
+const LIFE_STATUS_COLOR: Record<string, string> = { good: '#3FB97F', watch: '#E5A50A', attention: '#E5484D', neutral: '#74849A' };
+const LIFE_ICON: Record<string, string> = {
+  wealth: '$',
+  business: '*',
+  pipeline: 'P',
+  projects: 'PR',
+  operations: 'OP',
+  energy: 'EN',
+  focus: 'FO',
+  agents: 'AI',
+  tasks: 'TK',
+  inbox: 'IN',
+  calendar: 'CA',
+  linkedin: 'LI',
+  whatsapp: 'WA',
+  automations: 'AU',
+  health: 'HX',
+  revenue: 'RV',
+  crm: 'CRM',
+  spend: 'AI',
+  reviews: 'CS',
+  ops: 'OPS',
+  slack: 'SL',
+  email: 'EM',
+};
+
+interface LifeSignalTile {
+  key: string;
+  label: string;
+  display: string;
+  status: LifeDomain['status'];
+  source: string;
+  hint?: string;
+  trend?: string | null;
+  route?: string;
+  details?: string[];
+}
+
+function LifeSignalDialog({ tile, onClose }: { tile: LifeSignalTile; onClose: () => void }) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const details = (tile.details ?? [
+    tile.hint,
+    tile.trend ? `Trend: ${tile.trend}` : null,
+    tile.source ? `Source: ${tile.source}` : null,
+  ]).filter((detail): detail is string => Boolean(detail));
+  const route = dashboardRoute(tile.route);
+
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-5" role="dialog" aria-modal="true">
+      <button className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" type="button" aria-label="Close detail" onClick={onClose} />
+      <div
+        className="relative w-full max-w-md rounded-lg p-4 shadow-2xl"
+        style={{
+          background: 'linear-gradient(145deg, rgba(255,255,255,0.88), rgba(232,244,255,0.72))',
+          border: `1px solid ${LIFE_STATUS_COLOR[tile.status]}66`,
+          color: '#0c2d57',
+        }}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="vs-mono text-[10px] uppercase tracking-[0.22em]" style={{ color: LIFE_STATUS_COLOR[tile.status] }}>
+              {tile.label}
+            </div>
+            <div className="mt-1 text-[18px] font-semibold">{tile.display}</div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-md p-1 text-slate-600 hover:bg-white/55">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {details.length > 0 && (
+          <div className="mt-3 space-y-1.5">
+            {details.map((detail, index) => (
+              <div key={index} className="text-[12.5px] leading-snug" style={{ color: '#26486f' }}>
+                {detail}
+              </div>
+            ))}
+          </div>
+        )}
+        {route && (
+          <button
+            type="button"
+            onClick={() => { onClose(); navigate(route); }}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-[12px] font-semibold"
+            style={{ background: `${LIFE_STATUS_COLOR[tile.status]}22`, color: '#0c2d57', border: `1px solid ${LIFE_STATUS_COLOR[tile.status]}66` }}
+          >
+            Open full view
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// Per-user pick-and-choose for Dashboard-of-Life signals. Keys hidden here are
+// dropped from the grid; editable while the global tile lock is open.
+const LIFE_HIDDEN_KEY = 'boss_life_hidden_signals_v1';
+
+function readHiddenSignals(): Set<string> {
+  try {
+    const raw = localStorage.getItem(LIFE_HIDDEN_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function LifeOverviewWidget({ highlights }: { highlights: LifeSignalTile[] }) {
+  const { data, error, loaded } = usePolledJson<{ domains: LifeDomain[] }>('api/life/overview');
+  const navigate = useNavigate();
+  const [detailTile, setDetailTile] = useState<LifeSignalTile | null>(null);
+  const lifeTilesLocked = useTilesLocked();
+  const [hiddenSignals, setHiddenSignals] = useState<Set<string>>(readHiddenSignals);
+  const toggleSignal = useCallback((key: string) => {
+    setHiddenSignals((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      try {
+        localStorage.setItem(LIFE_HIDDEN_KEY, JSON.stringify([...next]));
+      } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+  const domains = data?.domains ?? [];
+  const tiles: LifeSignalTile[] = [
+    ...domains.map((d) => ({
+      key: d.key,
+      label: d.label,
+      display: d.display,
+      status: d.status,
+      source: d.source,
+      hint: d.hint,
+      trend: d.trend,
+      details: [
+        d.hint ?? '',
+        d.trend ? `Trend: ${d.trend}` : '',
+        d.source ? `Source: ${d.source}` : '',
+      ].filter(Boolean),
+    })),
+    ...highlights,
+  ];
+
+  const visibleTiles = tiles.filter((tile) => !hiddenSignals.has(tile.key));
+  const hiddenTiles = tiles.filter((tile) => hiddenSignals.has(tile.key));
+  const openTile = (tile: LifeSignalTile) => setDetailTile(tile);
+  const openTileRoute = (tile: LifeSignalTile) => {
+    const route = dashboardRoute(tile.route);
+    if (route) navigate(route);
+  };
+
+  return (
+    <RailCard
+      title="Dashboard of Life"
+      transparent
+      className="dashboard-life-card"
+      meta={
+        <span className="text-[10px]" style={{ color: '#183c68' }}>
+          {visibleTiles.length ? `${visibleTiles.length} signals` : ''}
+          {hiddenTiles.length ? ` · ${hiddenTiles.length} hidden` : ''}
+        </span>
+      }
+    >
+      {error && tiles.length === 0 ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Unavailable</div>
+      ) : !loaded && tiles.length === 0 ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Loading…</div>
+      ) : (
+        <div className="dashboard-life-grid">
+          {visibleTiles.map((tile) => {
+            const route = dashboardRoute(tile.route);
+            return (
+              <div
+                key={`${tile.key}-${tile.label}`}
+                role="button"
+                tabIndex={0}
+                className="dashboard-life-signal"
+                title={tile.hint ?? tile.display}
+                onClick={() => openTile(tile)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openTile(tile);
+                  }
+                }}
+                data-life-signal={tile.key}
+                style={{
+                  borderColor: `${LIFE_STATUS_COLOR[tile.status]}66`,
+                  '--life-signal-color': LIFE_STATUS_COLOR[tile.status],
+                } as React.CSSProperties}
+              >
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="dashboard-life-chip">{LIFE_ICON[tile.key] ?? 'i'}</span>
+                  {route ? (
+                    <button
+                      type="button"
+                      className="dashboard-life-label dashboard-life-title-link"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openTileRoute(tile);
+                      }}
+                      title={`Open ${tile.label}`}
+                    >
+                      {tile.label}
+                    </button>
+                  ) : (
+                    <span className="dashboard-life-label">{tile.label}</span>
+                  )}
+                </div>
+                <div className="dashboard-life-value">{tile.display}</div>
+                {!lifeTilesLocked && (
+                  <button
+                    type="button"
+                    className="dashboard-life-hide"
+                    onClick={(event) => { event.stopPropagation(); toggleSignal(tile.key); }}
+                    title={`Hide ${tile.label}`}
+                    aria-label={`Hide ${tile.label}`}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {!lifeTilesLocked && hiddenTiles.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="vs-mono text-[9px] uppercase tracking-[0.14em]" style={{ color: '#74849A' }}>
+            Hidden:
+          </span>
+          {hiddenTiles.map((tile) => (
+            <button
+              key={tile.key}
+              type="button"
+              className="dashboard-life-restore"
+              onClick={() => toggleSignal(tile.key)}
+              title={`Show ${tile.label} again`}
+            >
+              + {tile.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {detailTile && <LifeSignalDialog tile={detailTile} onClose={() => setDetailTile(null)} />}
+    </RailCard>
+  );
+}
+
+// ── Needs Your OK — human-in-the-loop approval queue (Fusion CoS) ─────────────
+interface PendingApproval {
+  id: string;
+  tool_name: string;
+  risk_tier: number;
+  commit_message: string;
+  agent_name: string | null;
+  created_at: string;
+}
+const RISK_LABEL = ['Read', 'Internal', 'External', 'Critical'];
+const RISK_COLOR = ['#74849A', '#3FB97F', '#E5A50A', '#E5484D'];
+function NeedsYourOkWidget() {
+  const { data, error, loaded } = usePolledJson<{ approvals: PendingApproval[] }>('api/approvals?status=pending');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [done, setDone] = useState<Record<string, string>>({});
+  async function decide(id: string, decision: 'approve' | 'deny') {
+    setBusy(id);
+    const token = localStorage.getItem('boss_token') ?? '';
+    try {
+      const r = await fetch(`api/approvals/${id}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ decision }),
+      });
+      setDone((d) => ({ ...d, [id]: r.ok ? (decision === 'approve' ? 'Approved ✓' : 'Denied') : 'Failed' }));
+    } catch {
+      setDone((d) => ({ ...d, [id]: 'Failed' }));
+    } finally {
+      setBusy(null);
+    }
+  }
+  const items = (data?.approvals ?? []).filter((a) => !done[a.id]);
+  return (
+    <RailCard title="Needs Your OK" meta={<span className="text-[10px]" style={{ color: '#9AA8C2' }}>{items.length || ''}</span>}>
+      {error ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Unavailable</div>
+      ) : !loaded ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="text-[11.5px] py-3" style={{ color: '#74849A' }}>Nothing waiting — your agents are clear. ✓</div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((a) => (
+            <div key={a.id} className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: (RISK_COLOR[a.risk_tier] ?? '#74849A') + '22', color: RISK_COLOR[a.risk_tier] ?? '#74849A' }}>
+                  {RISK_LABEL[a.risk_tier] ?? 'Action'}
+                </span>
+                {a.agent_name && <span className="text-[9.5px]" style={{ color: '#74849A' }}>{a.agent_name}</span>}
+              </div>
+              <div className="text-[11.5px] mb-1.5" style={{ color: '#E8ECF7' }}>{a.commit_message}</div>
+              {done[a.id] ? (
+                <div className="text-[10.5px]" style={{ color: '#9AA8C2' }}>{done[a.id]}</div>
+              ) : (
+                <div className="flex gap-1.5">
+                  <button type="button" disabled={busy === a.id} onClick={() => decide(a.id, 'approve')}
+                    className="text-[10.5px] px-2.5 py-1 rounded font-medium" style={{ background: '#3FB97F', color: '#04130B', opacity: busy === a.id ? 0.6 : 1 }}>
+                    {busy === a.id ? '…' : 'Approve'}
+                  </button>
+                  <button type="button" disabled={busy === a.id} onClick={() => decide(a.id, 'deny')}
+                    className="text-[10.5px] px-2.5 py-1 rounded" style={{ background: 'rgba(229,72,77,0.15)', color: '#E5484D' }}>
+                    Deny
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </RailCard>
+  );
+}
+
+
 
 export default function Dashboard() {
   const [now, setNow] = useState(() => new Date());
@@ -3232,11 +4719,21 @@ export default function Dashboard() {
   const calendarState = useCalendarToday();
   const whatsappState = useWhatsApp();
   const auth = useAuthHealth();
+  const healthEnabled = isOwnerRole();
+  const healthState = useHealthOverview(healthEnabled);
+  const { snap: financeSnap } = useFinanceSnapshot();
+  const { snap: crmSnap } = useCrmSnapshot();
+  const { data: revenueOverview } = useRevenue();
+  const { data: budgetStatus } = usePolledJson<BudgetStatus>('api/cost/budget');
+  const { data: opsHealth } = useOpsHealth();
+  const { d: emailDigest } = useEmailDigest();
   const { enabled: enabledWidgets, toggle: toggleWidget } = useDashWidgets();
-  const { order, reorder } = useDashOrder();
-  const [dragId, setDragId] = useState<WidgetId | null>(null);
+  const { order } = useDashOrder();
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
   const empAgents = useEmployeeAgents();
+  const { data: unipileStatus } = usePolledJson<UnipileDashboardStatus>('api/unipile/status', 30_000);
+  const { data: waStatus } = usePolledJson<WhatsAppConnStatus>('api/whatsapp/status', 30_000);
   const automationsTotal =
     (automationsState.data?.n8n.status?.total ?? 0) +
     (automationsState.data?.make.status?.total ?? 0);
@@ -3282,12 +4779,316 @@ export default function Dashboard() {
     return { value: String(total), sub };
   }, [calendarState]);
 
+  const lifeHighlights = useMemo<LifeSignalTile[]>(() => {
+    const activeEmpAgents = empAgents.list.filter((a) => a.status === 'active').length;
+    const activeTasks = tasksState.list.filter((t) => t.status === 'active').length;
+    const whatsappUnread = whatsappState.list.reduce((sum, thread) => sum + thread.unread_count, 0);
+    const slackOpen = slackAttentionState.list.length;
+    const linkedin = unipileStatus?.accounts?.find((account) => account.provider === 'LINKEDIN');
+    const whatsappPaired = !!waStatus?.paired;
+    const nextEvent = [...calendarState.list]
+      .filter((e) => e.start && new Date(e.start).getTime() >= Date.now())
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())[0];
+    const automationDetails = [
+      automationsState.data?.n8n
+        ? `n8n: ${automationsState.data.n8n.configured ? `${automationsState.data.n8n.status?.active ?? 0}/${automationsState.data.n8n.status?.total ?? 0} active` : 'not connected'}`
+        : '',
+      automationsState.data?.make
+        ? `Make: ${automationsState.data.make.configured ? `${automationsState.data.make.status?.active ?? 0}/${automationsState.data.make.status?.total ?? 0} active` : 'not connected'}`
+        : '',
+    ].filter(Boolean);
+
+    const highlights: LifeSignalTile[] = [
+      {
+        key: 'revenue',
+        label: 'Revenue',
+        display: financeSnap?.revenue_mtd != null
+          ? `${fmtMoney(financeSnap.revenue_mtd)} MTD`
+          : revenueOverview
+            ? `${money(revenueOverview.thisMonth)} MTD`
+            : 'loading revenue',
+        status: financeSnap?.flags?.length ? 'watch' : 'good',
+        source: 'CFO Agent',
+        hint: financeSnap?.bottom_line ?? 'Revenue snapshot from the CFO agent.',
+        details: [
+          `Cash: ${fmtMoney(financeSnap?.cash_available)}`,
+          `Revenue MTD: ${fmtMoney(financeSnap?.revenue_mtd ?? revenueOverview?.thisMonth)}`,
+          `AR Open: ${fmtMoney(financeSnap?.ar_open_total)}${financeSnap?.ar_open_count != null ? ` across ${financeSnap.ar_open_count}` : ''}`,
+          ...(financeSnap?.flags ?? []),
+        ],
+      },
+      {
+        key: 'crm',
+        label: 'CRM',
+        display: crmSnap
+          ? `${crmSnap.total_contacts ?? 0} contacts / ${fmtMoney(crmSnap.pipeline_value)}`
+          : 'loading CRM',
+        status: crmSnap?.flags?.length ? 'watch' : 'good',
+        source: 'Sales Review',
+        route: '/crm',
+        hint: crmSnap?.bottom_line ?? 'Open the sales pipeline.',
+        details: [
+          `${crmSnap?.open_opportunities ?? 0} open opportunities`,
+          `${crmSnap?.new_contacts_month ?? 0} new contacts this month`,
+          `Pipeline: ${fmtMoney(crmSnap?.pipeline_value)}`,
+          ...(crmSnap?.flags ?? []),
+        ],
+      },
+      {
+        key: 'ops',
+        label: 'Ops',
+        display: opsHealth ? `${opsHealth.score} ${opsHealth.label}` : 'loading ops',
+        status: !opsHealth ? 'neutral' : opsHealth.score >= 85 ? 'good' : opsHealth.score >= 70 ? 'watch' : 'attention',
+        source: 'Ops Health',
+        route: '/agents',
+        hint: 'Operational health from agents, tasks, and attention queues.',
+        details: opsHealth
+          ? [
+              `Agents: ${opsHealth.components.agents.ok}/${opsHealth.components.agents.total}`,
+              `Tasks: ${opsHealth.components.tasks.open} open / ${opsHealth.components.tasks.overdue} late`,
+              `Attention: ${opsHealth.components.attention.open} open`,
+            ]
+          : ['Ops health loading.'],
+      },
+      {
+        key: 'spend',
+        label: 'Spend',
+        display: budgetStatus
+          ? budgetStatus.cap_usd
+            ? `$${budgetStatus.spent_usd.toFixed(0)} / $${budgetStatus.cap_usd.toFixed(0)}`
+            : `$${budgetStatus.spent_usd.toFixed(0)} spent`
+          : 'loading spend',
+        status: !budgetStatus ? 'neutral' : budgetStatus.status === 'over' ? 'attention' : budgetStatus.status === 'warn' ? 'watch' : 'good',
+        source: 'AI budget',
+        hint: 'AI spend budget discipline.',
+        details: budgetStatus
+          ? [
+              `Period: ${budgetStatus.period}`,
+              `Spent: $${budgetStatus.spent_usd.toFixed(2)}`,
+              budgetStatus.cap_usd ? `Cap: $${budgetStatus.cap_usd.toFixed(2)}` : 'No budget cap set',
+              budgetStatus.pct != null ? `${budgetStatus.pct}% used` : 'Usage percent unavailable',
+            ]
+          : ['Spend status loading.'],
+      },
+      {
+        key: 'email',
+        label: 'Email',
+        display: emailDigest ? `${emailDigest.needsAttention ?? 0} need attn` : 'loading email',
+        status: !emailDigest ? 'neutral' : (emailDigest.needsAttention ?? 0) > 0 ? 'watch' : 'good',
+        source: 'Email agent',
+        hint: 'Email processing summary.',
+        details: emailDigest
+          ? [
+              `${emailDigest.totalProcessed ?? 0} processed today`,
+              `${emailDigest.draftsCreated ?? 0} drafts created`,
+              `${emailDigest.needsAttention ?? 0} need attention`,
+              ...Object.entries(emailDigest.categories ?? {}).slice(0, 4).map(([label, count]) => `${label}: ${count}`),
+            ]
+          : ['Email digest loading.'],
+      },
+      {
+        key: 'slack',
+        label: 'Slack',
+        display: slackAttentionState.loaded ? `${slackOpen} open` : 'loading Slack',
+        status: !slackAttentionState.loaded ? 'neutral' : slackOpen > 0 ? 'watch' : 'good',
+        source: 'Slack attention',
+        hint: 'DMs and mentions that need a look.',
+        details: slackAttentionState.loaded && slackOpen > 0
+          ? slackAttentionState.list.slice(0, 5).map((item) => `${item.userName ?? 'Slack'}: ${item.preview || item.reason || 'attention item'}`)
+          : ['Slack is clear.'],
+      },
+      {
+        key: 'agents',
+        label: 'Agents',
+        display: empAgents.loaded ? `${activeEmpAgents}/${empAgents.list.length} online` : 'loading agents',
+        status: !empAgents.loaded ? 'neutral' : activeEmpAgents > 0 ? 'good' : 'watch',
+        source: 'Employee Agents',
+        route: '/agents',
+        hint: 'Open the employee-agent roster.',
+        details: empAgents.list.slice(0, 4).map((a) => `${a.name}: ${a.status}${a.last_status ? `, last ${a.last_status}` : ''}`),
+      },
+      {
+        key: 'tasks',
+        label: 'Tasks',
+        display: tasksState.loaded ? `${tasksToday ?? 0} today / ${blockedCount} blocked` : 'loading tasks',
+        status: !tasksState.loaded ? 'neutral' : blockedCount > 0 ? 'attention' : (tasksToday ?? 0) > 0 ? 'watch' : 'good',
+        source: 'Task Board',
+        route: '/tasks',
+        hint: 'Open the task board.',
+        details: [
+          `${activeTasks} active tasks`,
+          `${blockedCount} blocked tasks`,
+          ...tasksState.list.slice(0, 3).map((t) => `${t.title}: ${t.status}`),
+        ],
+      },
+      {
+        key: 'inbox',
+        label: 'Inbox',
+        display: inboxState.loaded ? `${inboxState.list.length} unread` : 'loading inbox',
+        status: !inboxState.loaded ? 'neutral' : inboxState.list.length > 0 ? 'attention' : 'good',
+        source: inboxState.email ?? 'Email agent',
+        hint: 'Inbox attention items from the email agent.',
+        details: inboxState.list.length > 0
+          ? inboxState.list.slice(0, 5).map((item) => `${item.sender}: ${item.subject}`)
+          : ['No unread attention items.'],
+      },
+      {
+        key: 'calendar',
+        label: 'Calendar',
+        display: calendarState.loaded ? `${calendarState.list.length} events today` : 'loading calendar',
+        status: !calendarState.loaded ? 'neutral' : calendarState.list.length > 0 ? 'watch' : 'good',
+        source: 'Google Calendar',
+        route: '/calendar',
+        hint: nextEvent ? `Next: ${nextEvent.summary}` : 'Open today in Calendar.',
+        details: calendarState.list.length > 0
+          ? calendarState.list.slice(0, 5).map((event) => `${new Date(event.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}: ${event.summary || 'event'}`)
+          : ['No calendar events left today.'],
+      },
+      {
+        key: 'linkedin',
+        label: 'LinkedIn',
+        display: linkedin?.connected ? 'connected' : 'needs link',
+        status: linkedin?.connected ? 'good' : 'watch',
+        source: 'Unipile',
+        route: '/linkedin',
+        hint: linkedin?.connected ? `LinkedIn: ${linkedin.name ?? 'connected'}` : 'Open LinkedIn to reconnect.',
+        details: [`Health: ${linkedin?.health ?? 'unknown'}`],
+      },
+      {
+        key: 'whatsapp',
+        label: 'WhatsApp',
+        display: whatsappState.loaded ? `${whatsappUnread} unread` : 'loading WhatsApp',
+        status: !whatsappState.loaded ? 'neutral' : whatsappUnread > 0 ? 'attention' : whatsappPaired ? 'good' : 'watch',
+        source: 'WhatsApp Bridge · Baileys',
+        route: '/whatsapp',
+        hint: whatsappPaired ? `WhatsApp: ${waStatus?.session?.phone ?? 'connected'}` : 'Open WhatsApp to pair.',
+        details: whatsappState.list.length > 0
+          ? whatsappState.list.slice(0, 5).map((thread) => `${thread.display_name ?? thread.phone ?? 'Thread'}: ${thread.unread_count} unread`)
+          : [`Session: ${waStatus?.session?.status ?? 'unknown'}`],
+      },
+      {
+        key: 'automations',
+        label: 'Automations',
+        display: automationsState.loaded ? `${automationsActive}/${automationsTotal} warm` : 'loading automations',
+        status: !automationsState.loaded ? 'neutral' : automationsTotal === 0 ? 'neutral' : automationsActive === automationsTotal ? 'good' : 'watch',
+        source: 'n8n + Make',
+        hint: 'Automation warmth from connected platforms.',
+        details: automationDetails.length > 0 ? automationDetails : ['No automation platform status available.'],
+      },
+    ];
+
+    if (healthEnabled) {
+      const health = healthState.data;
+      const stale = !!health?.last_sync_at && Date.now() - Date.parse(health.last_sync_at) > 24 * 60 * 60 * 1000;
+      highlights.push({
+        key: 'health',
+        label: 'Health',
+        display: !healthState.loaded
+          ? 'loading vitals'
+          : health?.paired
+            ? `${health.today.steps != null ? fmtInt(health.today.steps) : '—'} steps`
+            : 'pair phone',
+        status: !healthState.loaded ? 'neutral' : !health?.paired ? 'watch' : stale ? 'watch' : 'good',
+        source: 'Phone health sync',
+        route: '/health',
+        hint: health?.paired ? `Synced ${agoLabel(health.last_sync_at)}` : 'Open Health to pair your phone.',
+        details: health?.paired
+          ? [
+              `Steps: ${health.today.steps != null ? fmtInt(health.today.steps) : '—'}`,
+              `Sleep: ${health.today.sleep_minutes != null ? fmtHm(health.today.sleep_minutes) : '—'}`,
+              `Resting HR: ${health.today.resting_hr != null ? Math.round(health.today.resting_hr) : '—'} bpm`,
+              `Last sync: ${agoLabel(health.last_sync_at)}`,
+            ]
+          : ['No paired phone.'],
+      });
+    }
+
+    return highlights;
+  }, [
+    automationsActive,
+    automationsState,
+    automationsTotal,
+    budgetStatus,
+    blockedCount,
+    calendarState,
+    crmSnap,
+    emailDigest,
+    empAgents,
+    financeSnap,
+    healthEnabled,
+    healthState,
+    inboxState,
+    opsHealth,
+    revenueOverview,
+    slackAttentionState,
+    tasksState,
+    tasksToday,
+    unipileStatus,
+    waStatus,
+    whatsappState,
+  ]);
+
   // Which tile each widget id renders. Filtered by the user's gallery choices.
   const widgetNode: Record<WidgetId, React.ReactNode> = {
+    stat_agents: (
+      <StatCard
+        label="EMPLOYEE AGENTS"
+        value={empAgents.loaded ? String(empAgents.list.filter((a) => a.status === 'active').length) : '-'}
+        sub={empAgents.loaded ? `${empAgents.list.length} configured · staff agents` : 'loading agents...'}
+        hue="purple"
+        spark="rise"
+      />
+    ),
+    stat_tasks: (
+      <StatCard
+        label="TASKS TODAY"
+        value={tasksToday == null ? '-' : String(tasksToday)}
+        sub={
+          tasksState.loaded
+            ? `${tasksState.list.filter((t) => t.status === 'active').length} active · ${blockedCount} blocked`
+            : 'loading tasks...'
+        }
+        hue="pink"
+        spark="split"
+      />
+    ),
+    stat_inbox: (
+      <StatCard
+        label="INBOX"
+        value={inboxState.loaded ? String(inboxState.list.length) : '-'}
+        sub={
+          inboxState.loaded
+            ? inboxState.email
+              ? `${inboxState.list.length} unread · ${inboxState.email}`
+              : inboxState.list.length === 0
+                ? 'no unread mail'
+                : `${inboxState.list.length} unread`
+            : 'loading inbox...'
+        }
+        hue="green"
+        spark="rise"
+      />
+    ),
+    stat_calendar: (
+      <StatCard
+        label="CALENDAR"
+        value={calendarStat.value}
+        sub={calendarStat.sub}
+        hue="blue"
+        spark="wave"
+      />
+    ),
+    launch_linkedin: <LinkedInLaunchTile unipile={unipileStatus} />,
+    launch_whatsapp: <WhatsAppLaunchTile whatsappState={whatsappState} wa={waStatus} />,
     agents:   <AgentRoster />,
     tasks:    <KanbanPeek state={tasksState} />,
     activity: <LiveActivity state={recentActivityState} />,
-    inbox:    <InboxPanel state={inboxState} />,
+    life: <LifeOverviewWidget highlights={lifeHighlights} />,
+    brief: <DailyBriefWidget />,
+    approvals: <NeedsYourOkWidget />,
+    spend: <SpendWidget />,
+    integrations: <IntegrationsWidget />,
+    inbox: <InboxPanel state={inboxState} dismiss={inboxState.dismiss} dismissAll={inboxState.dismissAll} />,
     slack:    <SlackAttentionPanel state={slackAttentionState} />,
     slack_sales: <SalesPanel />,
     social_stats: <SocialStatsPanel />,
@@ -3302,10 +5103,29 @@ export default function Dashboard() {
     revenue:  <RevenueWidget />,
     email:    <EmailWidget />,
     health:   <OpsHealthWidget />,
+    health_data: <HealthPanel state={healthState} />,
     csat:     <CsatWidget />,
   };
   const orderRank = (id: WidgetId) => { const i = order.indexOf(id); return i === -1 ? 999 : i; };
-  const activeWidgets = WIDGET_CATALOG.filter((w) => enabledWidgets.has(w.id)).sort((a, b) => orderRank(a.id) - orderRank(b.id));
+  const activeWidgets = WIDGET_CATALOG
+    .filter((w) => LOCKED_DASHBOARD_WIDGETS.has(w.id))
+    // Personal health data is owner/admin-only regardless of saved layout.
+    .filter((w) => w.id !== 'health_data' || healthEnabled)
+    .sort((a, b) => orderRank(a.id) - orderRank(b.id));
+  const floatingTileIds: FloatingTileId[] = [
+    ...FIXED_FLOATING_IDS,
+    ...activeWidgets.map((w) => w.id),
+  ];
+  const {
+    layout: floatingLayout,
+    setRect: setFloatingRect,
+    resetLayout: resetFloatingLayout,
+  } = useFloatingLayout(floatingTileIds);
+  const tilesLocked = useTilesLocked();
+  const getFrontFloatingZ = useCallback(
+    () => Math.max(1, ...Object.values(floatingLayout).map((rect) => rect?.z ?? 1)) + 1,
+    [floatingLayout],
+  );
 
   const displayName = useMemo(getDisplayName, []);
   const dateLabel = useMemo(
@@ -3317,12 +5137,67 @@ export default function Dashboard() {
   );
   const timeLabel = useMemo(() => now.toLocaleTimeString('en-US', { hour12: false }), [now]);
   const greeting = useMemo(() => greetingFor(now), [now]);
+  const floatingTiles: FloatingTileDef[] = [
+    {
+      id: 'hero',
+      node: (
+        <div className="aios-command-hero dashboard-floating-hero flex h-full flex-wrap items-end gap-4 px-4 py-3">
+          <div className="flex-1 min-w-[240px]">
+            <div
+              className="vs-mono text-[10px] tracking-[0.26em]"
+              style={{ color: '#123965' }}
+            >
+              EXECUTIVE LOBBY / {dateLabel}
+            </div>
+            <div className="flex items-baseline gap-3.5 mt-1.5">
+              <h1
+                className="m-0 text-[28px] font-semibold"
+                style={{ letterSpacing: 0 }}
+              >
+                {greeting},{' '}
+                <span
+                  style={{
+                    color: '#123c7a',
+                    textShadow: '0 0 16px rgba(255,255,255,0.94), 0 2px 7px rgba(9,48,92,0.36)',
+                  }}
+                >
+                  {displayName}
+                </span>
+                .
+              </h1>
+              <div className="vs-mono text-[11px]" style={{ color: '#163d68' }}>
+                {timeLabel}
+              </div>
+            </div>
+            <div
+              className="text-[13px] mt-1"
+              style={{
+                color: '#062f5f',
+                fontWeight: 700,
+                lineHeight: 1.25,
+                textShadow: '0 0 14px rgba(255,255,255,0.96), 0 1px 4px rgba(6,47,95,0.32)',
+              }}
+              data-testid="dashboard-substat"
+            >
+              {tasksState.loaded ? `${blockedCount} threads need you` : 'tasks...'}
+              {' · '}
+              {rascalsState.loaded ? `${enabledRascals} agents online` : 'agents...'}
+              {' · '}
+              {automationsState.loaded
+                ? `${automationsActive}/${automationsTotal} automations warm`
+                : 'automations...'}
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    ...activeWidgets.map((w) => ({ id: w.id, node: widgetNode[w.id] })),
+  ];
 
   return (
     <div
       data-testid="dashboard-v2"
-      className="relative h-full overflow-auto p-4"
-      style={{ background: 'var(--v-base)' }}
+      className="aios-page aios-page-pad relative h-full overflow-hidden"
     >
       {auth.expired && (
         <div
@@ -3361,129 +5236,34 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Everything below is scaled up ~18% for legibility (Kane: bigger fonts). */}
-      <div style={{ zoom: 1.18 }}>
-      {/* Title bar */}
-      <div className="flex items-end gap-4 mb-4">
-        <div className="flex-1">
-          <div
-            className="vs-mono text-[10px] tracking-[0.26em]"
-            style={{ color: '#74849A' }}
-          >
-            COMMAND CENTER / {dateLabel}
-          </div>
-          <div className="flex items-baseline gap-3.5 mt-1.5">
-            <h1
-              className="m-0 text-[28px] font-semibold"
-              style={{ letterSpacing: '-0.01em' }}
-            >
-              {greeting},{' '}
-              <span
-                style={{
-                  background: 'linear-gradient(135deg, #7C3CFF 0%, #0EA5E9 100%)',
-                  WebkitBackgroundClip: 'text',
-                  backgroundClip: 'text',
-                  color: 'transparent',
-                }}
+      <div className="dashboard-floating-lobby">
+        <div ref={stageRef} className="dashboard-floating-stage">
+          {floatingTiles.map((tile, index) => {
+            const rect = floatingLayout[tile.id] ?? defaultFloatingRect(tile.id, index);
+            return (
+              <FloatingDashboardTile
+                key={tile.id}
+                id={tile.id}
+                rect={rect}
+                stageRef={stageRef}
+                onRect={setFloatingRect}
+                getFrontZ={getFrontFloatingZ}
               >
-                {displayName}
-              </span>
-              .
-            </h1>
-            <div className="vs-mono text-[11px]" style={{ color: '#9AA8C2' }}>
-              {timeLabel}
-            </div>
-          </div>
-          <div className="text-[13px] mt-1" style={{ color: '#9AA8C2' }} data-testid="dashboard-substat">
-            {tasksState.loaded ? `${blockedCount} threads need you` : 'tasks…'}
-            {' · '}
-            {rascalsState.loaded ? `${enabledRascals} agents online` : 'agents…'}
-            {' · '}
-            {automationsState.loaded
-              ? `${automationsActive}/${automationsTotal} automations warm`
-              : 'automations…'}
-          </div>
+                {tile.node}
+              </FloatingDashboardTile>
+            );
+          })}
+          {!tilesLocked && (
+            <button
+              type="button"
+              onClick={resetFloatingLayout}
+              className="dashboard-layout-reset vs-mono"
+              title="Reset all tiles to the default arrangement"
+            >
+              Reset layout
+            </button>
+          )}
         </div>
-        <button
-          type="button"
-          onClick={() => setGalleryOpen(true)}
-          className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-md shrink-0"
-          style={{ background: DASH.panel2, border: `1px solid ${DASH.border}`, color: DASH.text }}
-          data-testid="dashboard-customize"
-        >
-          <LayoutGrid className="w-3.5 h-3.5" /> Customize
-        </button>
-      </div>
-
-      {/* Stat strip — one 4-col row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 mt-3.5">
-        <StatCard
-          label="EMPLOYEE AGENTS"
-          value={empAgents.loaded ? String(empAgents.list.filter((a) => a.status === 'active').length) : '—'}
-          sub={empAgents.loaded ? `${empAgents.list.length} configured · staff agents` : 'loading agents…'}
-          hue="purple"
-          spark="rise"
-        />
-        <StatCard
-          label="TASKS TODAY"
-          value={tasksToday == null ? '—' : String(tasksToday)}
-          sub={
-            tasksState.loaded
-              ? `${tasksState.list.filter((t) => t.status === 'active').length} active · ${blockedCount} blocked`
-              : 'loading tasks…'
-          }
-          hue="pink"
-          spark="split"
-        />
-        <StatCard
-          label="INBOX"
-          value={inboxState.loaded ? String(inboxState.list.length) : '—'}
-          sub={
-            inboxState.loaded
-              ? inboxState.email
-                ? `${inboxState.list.length} unread · ${inboxState.email}`
-                : inboxState.list.length === 0
-                  ? 'no unread mail'
-                  : `${inboxState.list.length} unread`
-              : 'loading inbox…'
-          }
-          hue="green"
-          spark="rise"
-        />
-        <StatCard
-          label="CALENDAR"
-          value={calendarStat.value}
-          sub={calendarStat.sub}
-          hue="blue"
-          spark="wave"
-        />
-      </div>
-
-      {/* ONE unified board — up to 4 columns, equal-height tiles, span-based,
-          drag any tile to rearrange (gallery handles show/hide). */}
-      <div className="grid grid-flow-row-dense gap-3.5 mt-3.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 auto-rows-[340px]">
-        {activeWidgets.map((w) => (
-          <div
-            key={w.id}
-            draggable
-            onDragStart={() => setDragId(w.id)}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={() => { if (dragId && dragId !== w.id) reorder(dragId, w.id); setDragId(null); }}
-            onDragEnd={() => setDragId(null)}
-            className={`min-h-0 transition-opacity ${w.span === 3 ? 'sm:col-span-2 xl:col-span-3' : w.span === 2 ? 'sm:col-span-2 xl:col-span-2' : ''} ${w.id === 'social_feed' ? 'row-span-2' : ''} ${dragId === w.id ? 'opacity-40' : ''}`}
-            style={{ cursor: 'grab' }}
-            title="Drag to rearrange"
-          >{widgetNode[w.id]}</div>
-        ))}
-        {activeWidgets.length === 0 && (
-          <div
-            className="sm:col-span-2 xl:col-span-5 rounded-[14px] p-8 text-center text-[13px]"
-            style={{ border: `1px dashed ${DASH.border}`, color: DASH.textMuted }}
-          >
-            No widgets selected. Click “Customize” to choose which tiles show.
-          </div>
-        )}
-      </div>
       </div>
 
       {galleryOpen && (

@@ -1,28 +1,59 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { NavRail } from './shell/NavRail';
 import { TopBar } from './shell/TopBar';
 import { BossOrb } from './shell/BossOrb';
 import { useVoiceCommands } from '../hooks/useVoiceCommands';
+import { isPlainBrand } from '../lib/brand';
+import officeScene from '../assets/office-scene.png';
+import boardroomScene from '../assets/boardroom-scene.png';
+import rascalsBullpenScene from '../assets/rascals-bullpen-scene.png';
+import rascalDeskScene from '../assets/rascal-desk-scene.png';
+import lobbyScene from '../assets/lobby-scene.png';
+import entranceElevatorScene from '../assets/entrance-elevator-scene.png';
+import medicalExamSuiteScene from '../assets/medical-exam-suite-scene.png';
+import planningRoomScene from '../assets/planning-room-scene.png';
+import mailroomScene from '../assets/mailroom-scene.png';
+import revenueSuiteScene from '../assets/revenue-suite-scene.png';
+import scheduleSuiteScene from '../assets/schedule-suite-scene.png';
+import broadcastStudioScene from '../assets/broadcast-studio-scene.png';
+import archiveRoomScene from '../assets/archive-room-scene.png';
+import controlRoomScene from '../assets/control-room-scene.png';
+import aiOpsRoomScene from '../assets/ai-ops-room-scene.png';
 
 const TITLE_MAP: Record<string, string> = {
   '/':             'Dashboard',
+  '/dashboard':    'Dashboard',
+  '/office':       'Office',
+  '/board':        'Advisory Board',
+  '/tasks':        'Task Board',
+  '/kanban':       'Task Board',
+  '/canvas':       'Canvas',
   '/calendar':     'Calendar',
   '/paperclip':    'Paperclip',
   '/crm':          'CRM',
+  '/social':       'LinkedIn',
+  '/linkedin':     'LinkedIn',
   '/whatsapp':     'WhatsApp',
   '/oc':           'COE - Gio',
-  '/rascals':      'Rascals',
+  '/coo':          'COO - Claude',
+  '/agents':       'Employee Agents',
+  '/rascals':      'Client Managers',
   '/outsiders':    'Outsiders',
-  '/voice':        'Voice Devices',
-  '/brain':        'Brain Config',
-  '/connectors':   'Connectors',
-  '/learning':     'Learning',
-  '/self-healing': 'Self-Healing',
-  '/backup':       'Backup',
+  '/health':       'Health',
+  '/admin':        'Settings',
+  '/hermes':       'Settings',
+  '/chief':        'Settings',
+  '/voice':        'Settings',
+  '/brain':        'Settings',
+  '/connectors':   'Settings',
+  '/learning':     'Settings',
+  '/self-healing': 'Settings',
+  '/backup':       'Settings',
   '/settings':     'Settings',
   '/setup/claude-auth': 'Claude Auth',
+  '/setup/hermes': 'Hermes Setup',
 };
 
 function pageTitleFor(pathname: string): string {
@@ -41,6 +72,40 @@ function readCollapsed(): boolean {
   }
 }
 
+type RoomTone =
+  | 'office'
+  | 'lobby'
+  | 'entrance'
+  | 'wellness'
+  | 'planning'
+  | 'mailroom'
+  | 'revenue'
+  | 'schedule'
+  | 'broadcast'
+  | 'archive'
+  | 'control'
+  | 'aiops'
+  | 'board'
+  | 'bullpen'
+  | 'desk';
+
+function roomToneFor(pathname: string): RoomTone {
+  if (pathname.startsWith('/rascals/') || pathname.startsWith('/agents/')) return 'desk';
+  if (pathname === '/rascals' || pathname === '/agents') return 'bullpen';
+  if (pathname === '/' || pathname === '/dashboard') return 'lobby';
+  if (pathname === '/tasks' || pathname === '/kanban' || pathname === '/canvas') return 'planning';
+  if (pathname === '/whatsapp') return 'mailroom';
+  if (pathname === '/crm') return 'revenue';
+  if (pathname === '/calendar') return 'schedule';
+  if (pathname === '/linkedin' || pathname === '/social') return 'broadcast';
+  if (pathname === '/paperclip') return 'archive';
+  if (pathname === '/health' || pathname.startsWith('/health/')) return 'wellness';
+  if (pathname === '/settings' || pathname.startsWith('/setup/')) return 'control';
+  if (pathname === '/oc' || pathname === '/coo') return 'aiops';
+  if (pathname === '/board') return 'board';
+  return 'office';
+}
+
 interface LayoutProps {
   children: React.ReactNode;
 }
@@ -49,6 +114,7 @@ export function Layout({ children }: LayoutProps) {
   const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   useVoiceCommands({ setCollapsed });
 
@@ -63,12 +129,163 @@ export function Layout({ children }: LayoutProps) {
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   const pageTitle = useMemo(() => pageTitleFor(location.pathname), [location.pathname]);
+  const officeImmersive = location.pathname === '/office';
+  const boardImmersive = location.pathname === '/board';
+  const rascalDeskImmersive = location.pathname.startsWith('/rascals/');
+  const outsiderDeskImmersive = location.pathname.startsWith('/agents/');
+  const deskImmersive = rascalDeskImmersive || outsiderDeskImmersive;
+  const rascalsImmersive = location.pathname === '/rascals' || deskImmersive;
+  const healthImmersive = location.pathname === '/health' || location.pathname.startsWith('/health/');
+  const roomTone = useMemo(() => roomToneFor(location.pathname), [location.pathname]);
+  const displayCollapsed = healthImmersive ? false : collapsed;
+  const dashboardReturn = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('from') !== 'dashboard') return false;
+    return [
+      '/agents',
+      '/calendar',
+      '/kanban',
+      '/tasks',
+    ].some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`));
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!rascalsImmersive) return;
+    setCollapsed((prev) => {
+      if (prev) return prev;
+      try { localStorage.setItem('boss_sidebar_collapsed', 'true'); } catch { /* ignore */ }
+      return true;
+    });
+  }, [rascalsImmersive]);
+
+  const immersiveScene = useMemo(() => {
+    if (officeImmersive) return officeScene;
+    if (boardImmersive) return boardroomScene;
+    if (deskImmersive) return rascalDeskScene;
+    if (rascalsImmersive) return rascalsBullpenScene;
+    return null;
+  }, [boardImmersive, deskImmersive, officeImmersive, rascalsImmersive]);
+  const immersive = !isPlainBrand && !!immersiveScene;
+  const roomScenes: Record<RoomTone, string> = {
+    office: officeScene,
+    lobby: lobbyScene,
+    entrance: entranceElevatorScene,
+    wellness: medicalExamSuiteScene,
+    planning: planningRoomScene,
+    mailroom: mailroomScene,
+    revenue: revenueSuiteScene,
+    schedule: scheduleSuiteScene,
+    broadcast: broadcastStudioScene,
+    archive: archiveRoomScene,
+    control: controlRoomScene,
+    aiops: aiOpsRoomScene,
+    board: boardroomScene,
+    bullpen: rascalsBullpenScene,
+    desk: rascalDeskScene,
+  };
+  const roomWashClasses: Record<RoomTone, string> = {
+    office: 'aios-room-wash aios-room-wash-office',
+    lobby: 'aios-room-wash aios-room-wash-lobby',
+    entrance: 'aios-room-wash aios-room-wash-entrance',
+    wellness: 'aios-room-wash aios-room-wash-wellness',
+    planning: 'aios-room-wash aios-room-wash-planning',
+    mailroom: 'aios-room-wash aios-room-wash-mailroom',
+    revenue: 'aios-room-wash aios-room-wash-revenue',
+    schedule: 'aios-room-wash aios-room-wash-schedule',
+    broadcast: 'aios-room-wash aios-room-wash-broadcast',
+    archive: 'aios-room-wash aios-room-wash-archive',
+    control: 'aios-room-wash aios-room-wash-control',
+    aiops: 'aios-room-wash aios-room-wash-aiops',
+    board: 'aios-room-wash aios-room-wash-board',
+    bullpen: 'aios-room-wash aios-room-wash-bullpen',
+    desk: 'aios-room-wash aios-room-wash-desk',
+  };
+  const roomScene = roomScenes[roomTone];
+  const ambientRoom = !immersive;
+  const shellScene = isPlainBrand ? null : (immersiveScene ?? roomScene);
+  const glassShell = true;
+  const roomObjectPosition = ambientRoom
+    ? roomTone === 'office' ? 'center 38%' : roomTone === 'wellness' ? '30% center' : 'center center'
+    : officeImmersive ? 'center 38%' : 'center center';
+  const roomFilter = ambientRoom
+    ? (() => {
+        if (roomTone === 'office') return 'brightness(0.92) saturate(1.05) contrast(1.02)';
+        if (roomTone === 'bullpen') return 'brightness(1.08) saturate(1.04) contrast(1.02)';
+        if (roomTone === 'lobby') return 'brightness(1.12) saturate(1.08) contrast(1.02)';
+        if (roomTone === 'planning') return 'brightness(1.1) saturate(1.06) contrast(1.02)';
+        if (roomTone === 'wellness') return 'brightness(1.04) saturate(1.05) contrast(1.04)';
+        return 'brightness(1.04) saturate(1.06) contrast(1.02)';
+      })()
+    : deskImmersive ? 'brightness(1.08) saturate(1.04)' : rascalsImmersive ? 'brightness(1.16) saturate(1.08)' : undefined;
+  const mainColumnClass = [
+    'relative z-10 flex-1 flex flex-col min-w-0',
+    healthImmersive ? 'overflow-visible' : 'overflow-hidden',
+  ].join(' ');
+  const mainClass = ambientRoom
+    ? [
+        'aios-main flex-1',
+        healthImmersive ? 'overflow-visible' : 'overflow-y-auto',
+      ].join(' ')
+    : [
+        'flex-1',
+        healthImmersive ? 'overflow-visible' : 'overflow-y-auto',
+      ].join(' ');
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--v-base-bg, var(--v-base))' }}>
+    <div
+      className={`relative flex h-screen overflow-hidden aios-room-shell aios-room-${roomTone}${healthImmersive ? '' : ' aios-non-health'}`}
+      style={{ background: rascalsImmersive || roomTone === 'bullpen' ? '#d8d1c2' : '#06080b' }}
+    >
+      {shellScene && (
+        <>
+          <img
+            src={shellScene}
+            alt=""
+            className="aios-room-scene absolute inset-0 h-full w-full object-cover"
+            style={{
+              objectPosition: roomObjectPosition,
+              objectFit: rascalsImmersive && !deskImmersive ? 'fill' : undefined,
+              filter: roomFilter,
+              transform: rascalsImmersive && !deskImmersive
+                ? `translateX(${collapsed ? '28px' : '106px'}) scaleX(${collapsed ? 1.03 : 1.12})`
+                : undefined,
+              transformOrigin: 'center center',
+            }}
+            aria-hidden="true"
+          />
+          <div
+            className={`absolute inset-0 ${ambientRoom ? roomWashClasses[roomTone] : officeImmersive ? 'bg-gradient-to-r from-black/32 via-black/0 to-black/18' : boardImmersive ? 'bg-gradient-to-r from-black/40 via-black/0 to-black/22' : deskImmersive ? 'bg-gradient-to-r from-black/18 via-transparent to-black/12' : rascalsImmersive ? 'bg-gradient-to-r from-white/10 via-transparent to-black/8' : 'bg-gradient-to-r from-black/70 via-black/18 to-black/46'}`}
+            aria-hidden="true"
+          />
+          {ambientRoom && (
+            <>
+              <div
+                className="aios-room-glass absolute inset-0"
+                aria-hidden="true"
+              />
+              <div className="aios-atmosphere-grid aios-room-lines absolute inset-0" aria-hidden="true" />
+            </>
+          )}
+          <div
+            className={`absolute inset-x-0 top-0 h-24 ${ambientRoom && roomTone === 'wellness' ? 'bg-gradient-to-b from-white/10 to-transparent' : ambientRoom ? 'bg-gradient-to-b from-black/68 to-transparent' : officeImmersive ? 'bg-gradient-to-b from-black/34 to-transparent' : boardImmersive ? 'bg-gradient-to-b from-black/42 to-transparent' : rascalsImmersive ? 'bg-gradient-to-b from-white/10 to-transparent' : 'bg-gradient-to-b from-black/72 to-transparent'}`}
+            aria-hidden="true"
+          />
+          <div
+            className={`absolute inset-x-0 bottom-0 h-1/2 ${ambientRoom && roomTone === 'wellness' ? 'bg-gradient-to-t from-white/4 to-transparent' : ambientRoom ? 'bg-gradient-to-t from-black/72 to-transparent' : officeImmersive ? 'bg-gradient-to-t from-black/48 to-transparent' : boardImmersive ? 'bg-gradient-to-t from-black/58 to-transparent' : deskImmersive ? 'bg-gradient-to-t from-black/20 to-transparent' : rascalsImmersive ? 'bg-gradient-to-t from-black/16 to-transparent' : 'bg-gradient-to-t from-black/80 to-transparent'}`}
+            aria-hidden="true"
+          />
+        </>
+      )}
+
       {/* Desktop NavRail */}
-      <div className="hidden lg:flex flex-shrink-0">
-        <NavRail collapsed={collapsed} onCollapseToggle={toggleCollapse} />
+      <div
+        className={`relative hidden lg:flex flex-shrink-0 ${healthImmersive ? 'z-30' : 'z-10'}`}
+      >
+        <NavRail
+          collapsed={displayCollapsed}
+          onCollapseToggle={healthImmersive ? undefined : toggleCollapse}
+          immersive={glassShell}
+        />
       </div>
 
       {/* Mobile overlay */}
@@ -96,6 +313,7 @@ export function Layout({ children }: LayoutProps) {
             collapsed={false}
             onCollapseToggle={() => setMobileOpen(false)}
             onNavClick={() => setMobileOpen(false)}
+            immersive={glassShell}
           />
           <button
             className="absolute top-3 right-2 p-1 rounded text-text-muted hover:text-text-primary"
@@ -108,18 +326,35 @@ export function Layout({ children }: LayoutProps) {
       </div>
 
       {/* Main column */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <TopBar pageTitle={pageTitle} onMobileMenu={() => setMobileOpen(true)} />
+      <div className={mainColumnClass}>
+        <TopBar pageTitle={pageTitle} onMobileMenu={() => setMobileOpen(true)} immersive={glassShell} />
+        {dashboardReturn && (
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="absolute right-5 top-[76px] z-40 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-md transition-colors hover:bg-white/85"
+            style={{
+              background: 'rgba(255,255,255,0.72)',
+              color: '#082B52',
+              border: '1px solid rgba(8,43,82,0.18)',
+            }}
+          >
+            <X className="h-3.5 w-3.5" />
+            Close
+          </button>
+        )}
         <main
           id="main-content"
           tabIndex={-1}
-          className="flex-1 overflow-y-auto"
+          className={mainClass}
         >
           {children}
         </main>
       </div>
 
-      <BossOrb />
+      <div className="relative z-20">
+        <BossOrb />
+      </div>
     </div>
   );
 }

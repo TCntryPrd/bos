@@ -11,6 +11,7 @@
 
 import React, { Suspense, lazy, useState, useCallback } from 'react';
 import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
+import Builder from './pages/Builder';
 import { Rascals } from './pages/Rascals';
 import { Layout } from './components/Layout';
 import { PageLoader } from './components/LoadingSpinner';
@@ -18,29 +19,30 @@ import { WorkspaceContext, type WorkspaceType } from './hooks/useWorkspace';
 
 // Lazy-load pages
 const Dashboard    = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })));
+const Office       = lazy(() => import('./pages/Office'));
 const Login        = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })));
-const VoiceDevices = lazy(() => import('./pages/VoiceDevices').then((m) => ({ default: m.VoiceDevices })));
-const BrainConfig  = lazy(() => import('./pages/BrainConfig').then((m) => ({ default: m.BrainConfig })));
-const Connectors   = lazy(() => import('./pages/Connectors').then((m) => ({ default: m.Connectors })));
-const Learning     = lazy(() => import('./pages/Learning').then((m) => ({ default: m.Learning })));
-const SelfHealing  = lazy(() => import('./pages/SelfHealing').then((m) => ({ default: m.SelfHealing })));
-const BackupStatus = lazy(() => import('./pages/BackupStatus').then((m) => ({ default: m.BackupStatus })));
 const Settings     = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
 const ClaudeAuth   = lazy(() => import('./pages/ClaudeAuth').then((m) => ({ default: m.ClaudeAuth })));
 import { HermesSetup } from './pages/HermesSetup';
 const Onboarding   = lazy(() => import('./pages/Onboarding').then((m) => ({ default: m.Onboarding })));
 const Calendar     = lazy(() => import('./pages/Calendar'));
 const Paperclip    = lazy(() => import('./pages/Paperclip'));
+const LinkedIn     = lazy(() => import('./pages/LinkedIn'));
 const WhatsApp     = lazy(() => import('./pages/WhatsApp'));
 const TaskBoard    = lazy(() => import('./pages/TaskBoard'));
 const Canvas       = lazy(() => import('./pages/Canvas'));
 const CRM          = lazy(() => import('./pages/CRM'));
 const OC           = lazy(() => import('./pages/OC'));
-const ChiefOfStaff = lazy(() => import('./pages/ChiefOfStaff'));
+const Board        = lazy(() => import('./pages/Board'));
+const JoinMeeting  = lazy(() => import('./pages/JoinMeeting'));
 const COO          = lazy(() => import('./pages/COO'));
 const AgentWorkspace = lazy(() => import('./pages/AgentWorkspace').then((m) => ({ default: m.OutsiderWorkspace })));
 const RascalWorkspace = lazy(() => import('./pages/AgentWorkspace').then((m) => ({ default: m.RascalWorkspace })));
 const EmployeeAgents = lazy(() => import('./pages/EmployeeAgents').then((m) => ({ default: m.EmployeeAgents })));
+const Health       = lazy(() => import('./pages/Health'));
+const HealthHolo   = lazy(() => import('./pages/HealthHolo'));
+const HealthJournal = lazy(() => import('./pages/HealthJournal'));
+const HealthMedicalRecords = lazy(() => import('./pages/HealthMedicalRecords'));
 
 function getUser(): { role: string } | null {
   try {
@@ -115,19 +117,26 @@ export default function App() {
         {/* Public routes */}
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/join/:code" element={<JoinMeeting />} />
 
         {/* Authenticated routes */}
         <Route element={<RequireAuth />}>
           {/* Top-level tabs — all roles */}
           <Route path="/" element={<Dashboard />} />
+          <Route path="/office" element={<Office />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/calendar" element={<Calendar />} />
           <Route path="/kanban" element={<TaskBoard />} />
           <Route path="/tasks" element={<TaskBoard />} />
+          <Route path="/board" element={<Board />} />
           <Route path="/canvas" element={<Canvas />} />
           <Route path="/paperclip" element={<Paperclip />} />
           <Route path="/crm" element={<CRM />} />
+          <Route path="/linkedin" element={<LinkedIn />} />
+          <Route path="/social" element={<Navigate to="/linkedin" replace />} />
           <Route path="/whatsapp" element={<WhatsApp />} />
           <Route path="/oc" element={<OC />} />
+          {import.meta.env.VITE_BUILDER === '1' && <Route path="/builder" element={<Builder />} />}
           <Route path="/coo" element={<COO />} />
           <Route path="/rascals" element={<Rascals />} />
           <Route path="/rascals/:handle" element={<RascalWorkspace />} />
@@ -138,15 +147,21 @@ export default function App() {
           <Route element={<RequireAdmin />}>
             <Route path="/agents"            element={<EmployeeAgents />} />
             <Route path="/agents/:handle"    element={<AgentWorkspace />} />
-            <Route path="/hermes"            element={<ChiefOfStaff />} />
-            <Route path="/chief"             element={<ChiefOfStaff />} />
-            <Route path="/voice"        element={<VoiceDevices />} />
-            <Route path="/brain"        element={<BrainConfig />} />
-            <Route path="/connectors"   element={<Connectors />} />
-            <Route path="/learning"     element={<Learning />} />
-            <Route path="/self-healing" element={<SelfHealing />} />
-            <Route path="/backup"       element={<BackupStatus />} />
+            <Route path="/health"            element={<Health />} />
+            <Route path="/health/holo"       element={<HealthHolo />} />
+            <Route path="/health/journal"    element={<HealthJournal />} />
+            <Route path="/health/records"    element={<HealthMedicalRecords />} />
             <Route path="/settings"     element={<Settings />} />
+            <Route path="/settings/:section" element={<Navigate to="/settings" replace />} />
+            <Route path="/admin"        element={<Navigate to="/settings" replace />} />
+            <Route path="/hermes"       element={<Navigate to="/settings" replace />} />
+            <Route path="/chief"        element={<Navigate to="/settings" replace />} />
+            <Route path="/voice"        element={<Navigate to="/settings" replace />} />
+            <Route path="/brain"        element={<Navigate to="/settings" replace />} />
+            <Route path="/connectors"   element={<Navigate to="/settings" replace />} />
+            <Route path="/learning"     element={<Navigate to="/settings" replace />} />
+            <Route path="/self-healing" element={<Navigate to="/settings" replace />} />
+            <Route path="/backup"       element={<Navigate to="/settings" replace />} />
           </Route>
         </Route>
 

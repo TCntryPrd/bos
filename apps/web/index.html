@@ -18,6 +18,8 @@
     <script>
       (function () {
         try {
+          var brand = '%VITE_BRAND%'; if (brand !== 'plain') brand = 'ir';
+          document.documentElement.setAttribute('data-brand', brand);
           var m = localStorage.getItem('boss_mode');
           if (m !== 'executive' && m !== 'plain') {
             m = localStorage.getItem('boss_theme') === 'light' ? 'plain' : 'executive';

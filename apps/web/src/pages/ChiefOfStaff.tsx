@@ -18,15 +18,15 @@ import { filesToAttachments, toWire, bytesLabel, MAX_ATTACHMENTS, type PendingAt
 import { KanbanBoard } from '../components/kanban/KanbanBoard.js';
 
 const T = {
-  bg: 'var(--v-base)',
-  panel: 'var(--v-surface-1)',
-  panel2: 'var(--v-surface-2)',
-  panel3: 'var(--v-surface-3)',
-  border: 'var(--v-hairline-strong)',
+  bg: '#05060F',
+  panel: '#0B0E1D',
+  panel2: '#11152E',
+  panel3: '#181D3A',
+  border: '#232A4D',
   borderSoft: 'rgba(139,92,246,0.16)',
   text: '#F1F4FF',
   textDim: '#AAB3D6',
-  textMuted: '#7681A8',
+  textMuted: '#8B95BC',
   green: '#22C55E',
   amber: '#F5C542',
   red: '#E84A6A',
@@ -110,7 +110,7 @@ function Panel({ title, icon: Icon, children, action }: {
   action?: React.ReactNode;
 }) {
   return (
-    <section className="min-h-0 rounded border flex flex-col" style={{ background: T.panel, borderColor: T.border }}>
+    <section className="aios-panel min-h-0 flex flex-col">
       <header className="h-9 px-3 flex items-center gap-2 border-b" style={{ borderColor: T.borderSoft }}>
         <Icon className="h-3.5 w-3.5" style={{ color: T.cyan }} />
         <h2 className="text-xs font-semibold flex-1" style={{ color: T.text }}>{title}</h2>
@@ -195,14 +195,14 @@ function ContextPanel({ overview }: { overview: OverviewPayload | null }) {
           </div>
         </div>
       </Panel>
-      <Panel title="Today's Tasks" icon={CheckCircle2}>
+      <Panel title="Operator Checklist" icon={CheckCircle2}>
         <div className="p-2 space-y-1.5">
           <SignalRow name="Hermes CLI" ok={!!overview?.binReady} detail={overview?.binReady ? 'executable' : 'set BOSS_ZUCCHI_BIN'} />
           <SignalRow name="Memory context" ok={!!overview?.memoryReady} detail={overview?.memoryReady ? 'MEMORY.md found' : 'workspace memory missing'} />
           <SignalRow name="Workspace root" ok={!!overview?.workspaceReady} detail={overview?.workspace ?? 'hermes-workspace'} />
         </div>
       </Panel>
-      <Panel title="Take Action" icon={Box}>
+      <Panel title="Executable From Here" icon={Box}>
         <div className="p-3 space-y-2">
           <Badge text="Send Hermes CLI turns through chat" />
           <Badge text="Inspect memory files" />
@@ -417,7 +417,7 @@ function ChatPane({ disabled, onActivity }: { disabled: boolean; onActivity: (it
 }
 
 function GatewayPane() {
-  const url = 'https://gateway.vasari.starrpartners.ai';
+  const url = (window as { BOSS_GATEWAY_URL?: string }).BOSS_GATEWAY_URL || '';
   return (
     <main className="min-h-0 flex-1 flex flex-col">
       <div className="h-10 px-3 flex items-center gap-2 border-b shrink-0" style={{ borderColor: T.border, background: T.panel }}>
@@ -490,14 +490,14 @@ export default function ChiefOfStaff() {
   const chatDisabled = overview?.gateway === 'down';
 
   return (
-    <div className="h-full min-h-0 flex flex-col" style={{ background: T.bg, color: T.text }}>
+    <div className="aios-page h-full min-h-0 flex flex-col" style={{ color: T.text }}>
       <TopBar overview={overview} loading={overviewLoading} mode={mode} setMode={setMode} />
       {overviewError && <div className="px-4 py-2 text-[11px] border-b flex items-center gap-2" style={{ color: T.red, background: T.redDim, borderColor: T.border }}><AlertTriangle className="h-3.5 w-3.5" />Overview fetch failed: {overviewError}</div>}
-      {mode === 'tasks' ? <div className="min-h-0 flex-1 overflow-hidden"><KanbanBoard scope={{ kind: 'outsider', handle: 'zucchi' }} /></div> : mode === 'gateway' ? <GatewayPane /> : mode === 'ops' ? <OpsMode overview={overview} /> : (
-        <main className="min-h-0 flex-1 grid gap-3 p-3" style={{ gridTemplateColumns: '300px minmax(420px, 1fr) 340px' }}>
+      {mode === 'tasks' ? <div className="aios-page-pad min-h-0 flex-1 overflow-hidden"><div className="aios-workbench h-full"><KanbanBoard scope={{ kind: 'outsider', handle: 'zucchi' }} /></div></div> : mode === 'gateway' ? <GatewayPane /> : mode === 'ops' ? <OpsMode overview={overview} /> : (
+        <main className="aios-page-pad min-h-0 flex-1 grid gap-3" style={{ gridTemplateColumns: '300px minmax(420px, 1fr) 340px' }}>
           <aside className="min-h-0 overflow-y-auto space-y-3"><ContextPanel overview={overview} /><MemoryPanel files={memoryFiles} selected={selectedMemory} content={memoryContent} loading={memoryLoading} onSelect={selectMemory} onRefresh={fetchMemory} /></aside>
           <section className="min-h-0 grid gap-3" style={{ gridTemplateRows: 'minmax(360px, 1fr) 220px' }}><ChatPane disabled={!!chatDisabled} onActivity={addActivity} /><ActivityPanel items={activity} /></section>
-          <aside className="min-h-0 overflow-y-auto space-y-3"><Panel title="Current Objective" icon={PanelRightOpen}><div className="p-3 text-[12px] leading-relaxed" style={{ color: T.textDim }}>{currentObjective}</div></Panel><Panel title="Publish Channels" icon={SquareTerminal}><div className="grid grid-cols-2 gap-2 p-3"><a href="/kanban" className="px-2 py-2 rounded border no-underline" style={{ background: T.panel2, borderColor: T.borderSoft }}><div className="text-[11px] font-medium truncate" style={{ color: T.text }}>Task Board</div><div className="text-[10px] truncate" style={{ color: T.textMuted }}>Work queue</div></a><a href="/agents" className="px-2 py-2 rounded border no-underline" style={{ background: T.panel2, borderColor: T.borderSoft }}><div className="text-[11px] font-medium truncate" style={{ color: T.text }}>Employee Agents</div><div className="text-[10px] truncate" style={{ color: T.textMuted }}>Agent roster</div></a></div></Panel><ContextPanel overview={overview} /></aside>
+          <aside className="min-h-0 overflow-y-auto space-y-3"><Panel title="Current Objective" icon={PanelRightOpen}><div className="p-3 text-[12px] leading-relaxed" style={{ color: T.textDim }}>{currentObjective}</div></Panel><Panel title="Launch Surfaces" icon={SquareTerminal}><div className="grid grid-cols-2 gap-2 p-3"><a href="/kanban" className="px-2 py-2 rounded border no-underline" style={{ background: T.panel2, borderColor: T.borderSoft }}><div className="text-[11px] font-medium truncate" style={{ color: T.text }}>Task Board</div><div className="text-[10px] truncate" style={{ color: T.textMuted }}>Work queue</div></a><a href="/agents" className="px-2 py-2 rounded border no-underline" style={{ background: T.panel2, borderColor: T.borderSoft }}><div className="text-[11px] font-medium truncate" style={{ color: T.text }}>Employee Agents</div><div className="text-[10px] truncate" style={{ color: T.textMuted }}>Agent roster</div></a></div></Panel><ContextPanel overview={overview} /></aside>
         </main>
       )}
     </div>

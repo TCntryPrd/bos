@@ -77,7 +77,7 @@ export const mockConnectedAccounts: ConnectedAccount[] = [
     id: 'acc-1',
     provider: 'google',
     accountLabel: 'Work',
-    email: 'kevin@starrpartners.com',
+    email: 'owner@example.com',
     scopes: ['gmail.read', 'gmail.send', 'calendar', 'drive', 'tasks', 'contacts'],
     tokenExpiresAt: new Date(Date.now() + 45 * 60_000).toISOString(),
     services: [
@@ -92,7 +92,7 @@ export const mockConnectedAccounts: ConnectedAccount[] = [
     id: 'acc-2',
     provider: 'microsoft',
     accountLabel: 'M365',
-    email: 'kevin@dcainesolutions.com',
+    email: 'ops@example.com',
     scopes: ['mail.read', 'mail.send', 'calendar', 'onedrive', 'tasks'],
     tokenExpiresAt: new Date(Date.now() + 8 * 60_000).toISOString(),
     services: [
@@ -235,7 +235,7 @@ export const mockBackupState: BackupState = {
 
 export const mockSettings: TenantSettings = {
   id: 'tenant-kevin',
-  name: 'Kevin Starr — Starr & Partners',
+  name: 'Alex Morgan — Example Co',
   timezone: 'America/New_York',
   locale: 'en-US',
   mode: 'single',

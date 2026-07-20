@@ -55,7 +55,7 @@ export function ConfirmDialog({
       onClick={onCancel}
     >
       <div
-        className="bg-surface-2 border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 animate-slide-in"
+        className="aios-panel w-full max-w-sm p-6 shadow-2xl animate-slide-in"
         onClick={(e) => e.stopPropagation()}
       >
         {danger && (
