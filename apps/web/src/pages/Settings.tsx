@@ -791,7 +791,7 @@ export function Settings() {
                 <ActionButton icon={Bot} label="Open Hermes Gateway" onClick={openHermesGateway} />
               </div>
               <div className="rounded-md border border-border/70 bg-surface-2/40 px-3">
-                <FactRow label="Scope" value={mcp?.scope ?? 'Vasari-VPS'} />
+                <FactRow label="Scope" value={mcp?.scope ?? 'BOS host'} />
                 <FactRow label="Registry" value={mcp?.registryPath ?? 'Not set'} />
                 <FactRow label="Host Registry" value={mcp?.hostRegistryPath ?? 'Not set'} />
                 <FactRow label="Registry Present" value={mcp?.registryPresent ? 'Yes' : 'No'} />

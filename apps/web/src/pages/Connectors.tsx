@@ -44,7 +44,7 @@ const META: Record<string, { hue: string; initials: string; keyLabel: string; he
   unipile:       { hue: '#0A66C2', initials: 'Up', keyLabel: 'Unipile API key', help: 'Provider for the live LinkedIn account (LinkedIn only — WhatsApp pairs by QR on the WhatsApp page). Base URL is your DSN, for example https://api50.unipile.com:18056.', helpUrl: 'https://www.unipile.com/' },
 };
 
-const GOOGLE_REDIRECT_URI = 'https://ircustomdashboards.tech/api/connectors/oauth/google/callback';
+const GOOGLE_REDIRECT_URI = window.location.origin + '/api/connectors/oauth/google/callback';
 
 function StatusPill({ on }: { on: boolean }) {
   return (

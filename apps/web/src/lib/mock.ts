@@ -235,7 +235,7 @@ export const mockBackupState: BackupState = {
 
 export const mockSettings: TenantSettings = {
   id: 'tenant-kevin',
-  name: 'Kevin Starr — Starr & Partners',
+  name: 'Alex Morgan — Example Co',
   timezone: 'America/New_York',
   locale: 'en-US',
   mode: 'single',
