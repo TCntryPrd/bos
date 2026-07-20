@@ -117,6 +117,8 @@ interface CustomMcpConnection {
   command?: string;
   args?: string;
   loginUrl?: string;
+  authenticated?: boolean;
+  loginMethod?: 'oauth';
   tokenEnv?: string;
   configPath?: string;
   description?: string;
@@ -619,11 +621,26 @@ export function Settings() {
     }
   };
 
-  const openCustomMcpLogin = (connection: CustomMcpConnection) => {
-    const target = connection.loginUrl ?? connection.serverUrl;
-    if (!target) return;
-    const opened = window.open(target, '_blank', 'noopener,noreferrer');
-    if (!opened) window.location.assign(target);
+  const openCustomMcpLogin = async (connection: CustomMcpConnection) => {
+    // OAuth MCP servers (e.g. Mygentic Connect) cannot be logged in by opening a
+    // URL — the server endpoint returns 401 to a browser. Ask the API to run the
+    // PKCE flow and hand back the real provider authorize URL to open.
+    setError(null);
+    try {
+      const res = await fetch(`api/mcp/global/connections/${connection.id}/login`, {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.authorizeUrl) {
+        const opened = window.open(data.authorizeUrl, '_blank', 'noopener,noreferrer');
+        if (!opened) window.location.assign(data.authorizeUrl);
+        return;
+      }
+      setError(data?.error ?? `Could not start login for ${connection.name} (HTTP ${res.status}).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not start login for ${connection.name}.`);
+    }
   };
 
   const connectorCount = connectors.length;
@@ -962,6 +979,7 @@ export function Settings() {
                             <div className="text-sm font-medium text-text-primary">{connection.name}</div>
                             <StatusBadge label={connection.transport} status="external" />
                             <StatusBadge label={connection.enabled ? 'enabled' : 'disabled'} status={connection.enabled ? 'ready' : 'partial'} />
+                            <StatusBadge label={connection.authenticated ? 'authenticated' : 'login required'} status={connection.authenticated ? 'ready' : 'partial'} />
                           </div>
                           {connection.description && (
                             <p className="mt-1 text-xs text-text-muted">{connection.description}</p>
@@ -970,9 +988,9 @@ export function Settings() {
                         <div className="flex flex-wrap gap-2">
                           <ActionButton
                             icon={ExternalLink}
-                            label="Open Login"
-                            onClick={() => openCustomMcpLogin(connection)}
-                            disabled={!connection.loginUrl && !connection.serverUrl}
+                            label={connection.authenticated ? 'Re-authenticate' : 'Open Login'}
+                            onClick={() => { void openCustomMcpLogin(connection); }}
+                            disabled={!connection.serverUrl}
                           />
                           <button
                             type="button"

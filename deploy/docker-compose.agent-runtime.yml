@@ -1,0 +1,77 @@
+# Portable API-only overlay for the permanent BOS agent runtime.
+#
+# Layer this after the customer's existing compose files. It intentionally
+# defines no databases, vector stores, ports, domains, networks, or volumes so
+# those remain owned by the customer installation.
+services:
+  api:
+    user: "${BOSS_AGENT_UID:?BOSS_AGENT_UID is required}:${BOSS_AGENT_GID:?BOSS_AGENT_GID is required}"
+    environment:
+      HOME: /home/boss
+      BOSS_HOME_OVERRIDE: /home/boss
+      BOSS_BACKGROUND_AGENTS: "off"
+      # The operator-facing activity route is an ephemeral live stream, not a
+      # persisted builder history. Enable it with the runtime overlay so it is
+      # present on customer compose files that predate the feature.
+      BOSS_BUILDER_MODE: "1"
+      TELEGRAM_BOT_TOKEN: ""
+      BOSS_CHAT_RUNNER: host-bridge
+      BOSS_HOST_BRIDGE_HOST: ${BOSS_HOST_BRIDGE_HOST:?BOSS_HOST_BRIDGE_HOST is required}
+      BOSS_HOST_BRIDGE_KEY: /data/home/.ssh/boss-agent-runtime-bridge
+      BOSS_HOST_BRIDGE_KNOWN_HOSTS: /data/home/.ssh/boss-agent-runtime-known_hosts
+      BOSS_HOST_CLAUDE_HOME: /data/host-claude
+      BOSS_AGENT_USER: ${BOSS_AGENT_USER:?BOSS_AGENT_USER is required}
+      BOSS_AGENT_HOME: ${BOSS_AGENT_HOME:?BOSS_AGENT_HOME is required}
+      BOSS_AGENT_WORKSPACE_ROOT: ${BOSS_AGENT_WORKSPACE_ROOT:?BOSS_AGENT_WORKSPACE_ROOT is required}
+      BOSS_AGENT_RASCALS_ROOT: ${BOSS_AGENT_RASCALS_ROOT:?BOSS_AGENT_RASCALS_ROOT is required}
+      BOSS_AGENT_OUTSIDERS_ROOT: ${BOSS_AGENT_OUTSIDERS_ROOT:?BOSS_AGENT_OUTSIDERS_ROOT is required}
+      BOSS_AGENT_COO_ROOT: ${BOSS_AGENT_COO_ROOT:?BOSS_AGENT_COO_ROOT is required}
+      BOSS_MEMORY_DEVICE_ID: ${BOSS_MEMORY_DEVICE_ID:-bos-vps}
+      BOSS_GIO_WORKSPACE: /home/boss/gio
+      BOSS_GIO_ATTACHMENT_ROOT: /home/boss/gio/.tmp
+      AIOS_EDGE_INGEST_TOKEN: ${AIOS_EDGE_INGEST_TOKEN:?AIOS_EDGE_INGEST_TOKEN is required}
+      AIOS_EMBEDDING_URL: ${AIOS_EMBEDDING_URL:-http://embeddings:8080/embed}
+      AIOS_MEMORY_GATEWAY_INTERNAL_URL: http://127.0.0.1:8001/api/aios/memory
+      WEAVIATE_API_KEY: ${WEAVIATE_API_KEY:?WEAVIATE_API_KEY is required}
+    volumes:
+      - type: bind
+        source: ${BOSS_INSTALL_DIR:?BOSS_INSTALL_DIR is required}
+        target: /home/boss/boss-dev
+      - type: bind
+        source: ${BOSS_INSTALL_DIR:?BOSS_INSTALL_DIR is required}
+        target: /data/home/boss-dev
+      - type: bind
+        source: ${BOSS_GIO_WORKSPACE_SOURCE:?BOSS_GIO_WORKSPACE_SOURCE is required}
+        target: /home/boss/gio
+      - type: bind
+        source: ${BOSS_AGENT_HOME:?BOSS_AGENT_HOME is required}/.claude/projects
+        target: /data/host-claude/.claude/projects
+        read_only: true
+      # Replace legacy full-auth mounts at these exact targets with inert data.
+      - type: bind
+        source: ${BOSS_API_EMPTY_CLAUDE_DIR:?BOSS_API_EMPTY_CLAUDE_DIR is required}
+        target: /home/boss/.claude
+        read_only: true
+      - type: bind
+        source: ${BOSS_API_EMPTY_CLAUDE_JSON:?BOSS_API_EMPTY_CLAUDE_JSON is required}
+        target: /home/boss/.claude.json
+        read_only: true
+      - type: bind
+        source: ${BOSS_AGENT_RASCALS_ROOT:?BOSS_AGENT_RASCALS_ROOT is required}
+        target: ${BOSS_AGENT_RASCALS_ROOT:?BOSS_AGENT_RASCALS_ROOT is required}
+      - type: bind
+        source: ${BOSS_AGENT_OUTSIDERS_ROOT:?BOSS_AGENT_OUTSIDERS_ROOT is required}
+        target: ${BOSS_AGENT_OUTSIDERS_ROOT:?BOSS_AGENT_OUTSIDERS_ROOT is required}
+      - type: bind
+        source: ${BOSS_AGENT_COO_ROOT:?BOSS_AGENT_COO_ROOT is required}
+        target: ${BOSS_AGENT_COO_ROOT:?BOSS_AGENT_COO_ROOT is required}
+      - type: bind
+        source: ${BOSS_HOST_BRIDGE_KEY_SOURCE:?BOSS_HOST_BRIDGE_KEY_SOURCE is required}
+        target: /data/home/.ssh/boss-agent-runtime-bridge
+        read_only: true
+      - type: bind
+        source: ${BOSS_HOST_BRIDGE_KNOWN_HOSTS_SOURCE:?BOSS_HOST_BRIDGE_KNOWN_HOSTS_SOURCE is required}
+        target: /data/home/.ssh/boss-agent-runtime-known_hosts
+        read_only: true
+    extra_hosts:
+      - host.docker.internal:host-gateway

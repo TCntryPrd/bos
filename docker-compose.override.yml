@@ -16,11 +16,11 @@ services:
   web:
     labels:
       - traefik.enable=true
-      - "traefik.http.routers.boss-ir.rule=Host(`ircustomdashboards.tech`)"
+      - "traefik.http.routers.boss-ir.rule=Host(`ircustomdashboards.tech`) || Host(`gateway.ircustomdashboards.tech`)"
       - traefik.http.routers.boss-ir.entrypoints=websecure
       - traefik.http.routers.boss-ir.tls.certresolver=letsencrypt
       - traefik.http.services.boss-ir.loadbalancer.server.port=80
-      - "traefik.http.routers.boss-ir-http.rule=Host(`ircustomdashboards.tech`)"
+      - "traefik.http.routers.boss-ir-http.rule=Host(`ircustomdashboards.tech`) || Host(`gateway.ircustomdashboards.tech`)"
       - traefik.http.routers.boss-ir-http.entrypoints=web
       - traefik.http.routers.boss-ir-http.middlewares=boss-ir-redirect
       - traefik.http.middlewares.boss-ir-redirect.redirectscheme.scheme=https
@@ -177,6 +177,22 @@ services:
         condition: service_healthy
       unipile:
         condition: service_healthy
+
+
+  hermes-agent:
+    image: ghcr.io/hostinger/hvps-hermes-agent:latest
+    restart: unless-stopped
+    environment:
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    volumes:
+      - ./hermes-home:/opt/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4860/ 2>/dev/null | grep -qi 'html' && exit 0 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
 
   wa-bridge:
     build:

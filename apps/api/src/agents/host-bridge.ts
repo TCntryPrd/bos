@@ -25,13 +25,23 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const SSH_KEY = process.env.BOSS_HOST_BRIDGE_KEY ?? '/data/home/.ssh/boss-host-bridge';
 const SSH_HOST = process.env.BOSS_HOST_BRIDGE_HOST ?? 'tcntryprd@host.docker.internal';
-const KNOWN_HOSTS = process.env.BOSS_HOST_BRIDGE_KNOWN_HOSTS ?? '/tmp/boss-known-hosts';
+// This file is generated from the host's own public host keys by the runtime
+// installer and mounted read-only into the API container. Never use
+// `accept-new` here: a container restart must not turn a host-key change (or a
+// MITM) into a trusted bridge endpoint.
+const KNOWN_HOSTS = process.env.BOSS_HOST_BRIDGE_KNOWN_HOSTS
+  ?? '/data/home/.ssh/boss-agent-runtime-known_hosts';
 
 function sshArgs(): string[] {
   return [
     '-i', SSH_KEY,
-    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'StrictHostKeyChecking=yes',
     '-o', `UserKnownHostsFile=${KNOWN_HOSTS}`,
+    // Do not silently fall back to image-provided host trust or update the
+    // pinned file from a remote server response.
+    '-o', 'GlobalKnownHostsFile=/dev/null',
+    '-o', 'UpdateHostKeys=no',
+    '-o', 'IdentitiesOnly=yes',
     '-o', 'LogLevel=ERROR',
     '-o', 'BatchMode=yes',
     '-o', 'ConnectTimeout=10',
@@ -149,7 +159,13 @@ export function encodeJsonlSlug(projectDir: string): string {
 
 /** Directory under ~/.claude/projects/ where CC writes JSONLs for a project. */
 export function jsonlDirFor(projectDir: string): string {
-  const home = process.env.CLAUDE_HOME ?? process.env.HOME ?? '/home/tcntryprd';
+  // This must be the host agent user's Claude home as mounted read-only into
+  // the API container. Do not fall back to the container user's HOME: on a
+  // customer install that points at the wrong JSONL tree and makes a healthy
+  // tmux turn look silent.
+  const home = process.env.BOSS_HOST_CLAUDE_HOME
+    ?? process.env.CLAUDE_HOME
+    ?? '/data/host-claude';
   return `${home}/.claude/projects/${encodeJsonlSlug(projectDir)}`;
 }
 
@@ -188,9 +204,14 @@ export async function newestJsonlSince(projectDir: string, sinceMs: number): Pro
 }
 
 /** Resolve once the JSONL file appears, polling every 100ms. Rejects after timeout. */
-export async function waitForJsonl(path: string, timeoutMs = 15_000): Promise<number> {
+export async function waitForJsonl(
+  path: string,
+  timeoutMs = 15_000,
+  signal?: AbortSignal,
+): Promise<number> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (signal?.aborted) throw Object.assign(new Error('aborted'), { aborted: true });
     try {
       const s = await stat(path);
       return s.size;
@@ -265,7 +286,7 @@ export async function tailJsonlUntil(
   // endDebounceMs elapses, we reset and keep going. Otherwise the
   // turn is genuinely over.
   let candidateEndAt: number | null = null;
-  let aborted = false;
+  let aborted = opts.signal?.aborted ?? false;
 
   const onAbort = () => { aborted = true; };
   opts.signal?.addEventListener('abort', onAbort, { once: true });

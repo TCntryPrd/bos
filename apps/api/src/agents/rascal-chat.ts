@@ -30,6 +30,54 @@ import {
   tailJsonlUntil,
   BridgeError,
 } from './host-bridge.js';
+import { builderSnapshot, builderTap, builderStatus } from '../lib/builder-stream.js';
+
+function startTmuxActivityMirror(
+  ccSessionId: string,
+  label: string,
+  baselinePane: string,
+): () => void {
+  const baselineLines = baselinePane.split('\n');
+  let stopped = false;
+  let inFlight = false;
+  let lastSnapshot = '';
+
+  const capture = async () => {
+    if (stopped || inFlight) return;
+    inFlight = true;
+    try {
+      const result = await callBridge('capture', [ccSessionId], { timeoutMs: 4_000 });
+      const pane = typeof result.pane === 'string' ? result.pane : '';
+      if (!pane) return;
+      const paneLines = pane.split('\n');
+      let common = 0;
+      while (
+        common < baselineLines.length &&
+        common < paneLines.length &&
+        baselineLines[common] === paneLines[common]
+      ) {
+        common += 1;
+      }
+      const snapshot = paneLines.slice(common).slice(-120).join('\n').trimEnd();
+      if (snapshot && snapshot !== lastSnapshot) {
+        lastSnapshot = snapshot;
+        builderSnapshot(ccSessionId, label, snapshot);
+      }
+    } catch {
+      // The chat turn remains authoritative if tmux capture is temporarily unavailable.
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  void capture();
+  const timer = setInterval(() => { void capture(); }, 700);
+  timer.unref();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
 
 /**
  * Safety-net text recovery. Read the JSONL between `cursor` and EOF and
@@ -215,6 +263,15 @@ export async function runChatTurn(
   const cursor = await jsonlSize(jsonlPath);
   const pivotSinceMs = Date.now() - 2_000; // small back-window for clock skew
 
+  const builderLabel = `claude:${input.projectDir.split('/').pop() ?? 'agent'}`;
+  let baselinePane = '';
+  try {
+    const capture = await callBridge('capture', [ccSessionId], { timeoutMs: 4_000 });
+    if (typeof capture.pane === 'string') baselinePane = capture.pane;
+  } catch {
+    // A failed baseline capture must never block the chat turn.
+  }
+
   // 3. Send the message into the tmux pane.
   try {
     await callBridge('send', [ccSessionId], { stdin: input.message });
@@ -234,6 +291,9 @@ export async function runChatTurn(
       throw err;
     }
   }
+
+  const stopBuilderMirror = startTmuxActivityMirror(ccSessionId, builderLabel, baselinePane);
+  builderStatus(ccSessionId, builderLabel, 'live', 'tmux connected');
 
   // 4. Tail JSONL until we see the end-of-turn frame, an abort, or an
   // idle timeout (CC crashed / wedged).
@@ -364,9 +424,11 @@ export async function runChatTurn(
   } catch (err) {
     if ((err as { aborted?: boolean }).aborted) {
       // Aborted is the expected control flow for client disconnect.
+      builderStatus(ccSessionId, builderLabel, 'finished', 'interrupted');
       return { ccSessionId, assistantText, tokensIn, tokensOut, aborted: true };
     }
     if (err instanceof BridgeError) {
+      builderStatus(ccSessionId, builderLabel, 'error', err.message);
       writeSSE('error', { message: err.message });
       throw err;
     }
@@ -383,8 +445,10 @@ export async function runChatTurn(
         try { await input.onPartial(assistantText, tokensIn, tokensOut); } catch { /* logged by route */ }
       }
     }
+    builderStatus(ccSessionId, builderLabel, 'error', 'tmux tail timed out');
     return { ccSessionId, assistantText, tokensIn, tokensOut, aborted: false, timedOut: true };
   } finally {
+    stopBuilderMirror();
     if (input.abortSignal) {
       input.abortSignal.removeEventListener('abort', onExternalAbort);
     }
@@ -414,6 +478,8 @@ export async function runChatTurn(
     result: assistantText,
   });
   writeSSE('done', { ccSessionId, tokensIn, tokensOut });
+
+  builderStatus(ccSessionId, builderLabel, 'finished');
 
   return { ccSessionId, assistantText, tokensIn, tokensOut, aborted };
 }
@@ -527,6 +593,7 @@ export async function runLocalChatTurn(
         const line = buffer.slice(0, nl).trim();
         buffer = buffer.slice(nl + 1);
         if (line) {
+          builderTap(ccSessionId, builderChatLabel, line);
           try { handleFrame(JSON.parse(line) as Record<string, unknown>); }
           catch { /* ignore non-json noise */ }
         }
@@ -535,8 +602,12 @@ export async function runLocalChatTurn(
     };
   })();
 
+  const builderChatLabel = `claude:${input.projectDir.split('/').pop() ?? 'agent'}`;
   let stderr = '';
   proc.stdout.on('data', parseChunk);
+  proc.on('close', (code) => {
+    builderStatus(ccSessionId, builderChatLabel, code === 0 ? 'finished' : 'error', `exit ${code}`);
+  });
   proc.stderr.on('data', (d: Buffer) => {
     stderr += d.toString('utf8');
     if (stderr.length > 4000) stderr = stderr.slice(-4000);

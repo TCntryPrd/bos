@@ -27,13 +27,25 @@
  * never see each other's sessions.
  */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getPool } from '../db.js';
 import { getRascal } from '../agents/rascals-repo.js';
 import { getOutsider } from '../agents/outsiders-repo.js';
-import { runChatTurn, recoverTurnFromJsonl } from '../agents/rascal-chat.js';
-import { jsonlPathFor } from '../agents/host-bridge.js';
+import { runAgentInteractiveTurn } from '../agents/agent-interactive.js';
+import { agentRuntimeId } from '../agents/agent-runtime-id.js';
+import { recoverAbandonedAgentTurns } from '../agents/agent-turn-recovery.js';
+import { callBridge } from '../agents/host-bridge.js';
+import {
+  buildFreshTurnContext,
+  createAgentTurn,
+  finishAgentTurn,
+  ingestAgentRecap,
+  markAgentTurnInterrupting,
+  markAgentTurnRunning,
+  startAgentTurn,
+} from '../agents/agent-memory.js';
 import {
   listDirectory,
   readTextFile,
@@ -51,9 +63,74 @@ interface AgentLike {
   displayName: string;
   projectDir: string;
   model: string;
+  cli: string;
 }
 
 type AgentKind = 'rascal' | 'outsider';
+
+interface ActiveAgentTurn {
+  controller: AbortController;
+  cliSessionId: string;
+  turnId: string;
+}
+
+// Process-local coordination prevents two portal turns from being pasted into
+// one permanent agent shell. The bridge independently rejects a busy pane, so
+// an API restart cannot accidentally cross-wire prompts.
+const activeAgentTurns = new Map<string, ActiveAgentTurn>();
+const shellReconcilers = new WeakSet<FastifyInstance>();
+
+function activeAgentKey(tenantId: string, kind: AgentKind, handle: string): string {
+  return `${tenantId}:${kind}:${handle.toLowerCase()}`;
+}
+
+function installAgentShellReconciler(server: FastifyInstance): void {
+  if (shellReconcilers.has(server)) return;
+  shellReconcilers.add(server);
+  let timer: NodeJS.Timeout | null = null;
+  let running = false;
+
+  const reconcile = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const rows = await getPool().query<{
+        tenant_id: string;
+        kind: AgentKind;
+        handle: string;
+        project_dir: string;
+      }>(`
+        SELECT tenant_id, 'rascal'::text AS kind, handle, project_dir FROM boss_rascals WHERE enabled = true
+        UNION ALL
+        SELECT tenant_id, 'outsider'::text AS kind, handle, project_dir FROM boss_outsiders WHERE enabled = true
+      `);
+      const results = await Promise.allSettled(rows.rows.map((agent) =>
+        callBridge('agent-ensure', [
+          agentRuntimeId(agent.tenant_id, agent.kind, agent.handle),
+          agent.project_dir,
+        ], { timeoutMs: 10_000 })));
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          server.log.warn({ err: result.reason, handle: rows.rows[index]?.handle }, 'agent shell reconcile failed');
+        }
+      });
+      await recoverAbandonedAgentTurns(server.log);
+    } catch (error) {
+      server.log.warn({ err: error }, 'agent shell roster reconcile failed');
+    } finally {
+      running = false;
+    }
+  };
+
+  server.addHook('onReady', async () => {
+    void reconcile();
+    timer = setInterval(() => { void reconcile(); }, 60_000);
+    timer.unref();
+  });
+  server.addHook('onClose', async () => {
+    if (timer) clearInterval(timer);
+  });
+}
 
 interface WorkspaceOpts {
   /** Route prefix, e.g. "/agents/rascals" or "/agents/outsiders". */
@@ -103,6 +180,7 @@ function shapeSession(row: ChatSessionRow) {
     agentKind: row.agent_kind,
     name: row.name,
     model: row.model,
+    ccSessionId: row.cc_session_id,
     archived: row.archived,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -351,12 +429,57 @@ export function mountWorkspaceRoutes(server: FastifyInstance, opts: WorkspaceOpt
     },
   );
 
-  // POST messages — persists user turn, spawns claude -p stream-json
-  // in the agent's projectDir, SSE-relays frames, persists assistant
-  // turn, stores cc_session_id on the row.
+  // Stop the current fresh interactive Claude process without destroying the
+  // agent's permanent tmux shell. The next portal message starts a new turn.
+  server.post<{ Params: { handle: string } }>(
+    `${mountPrefix}/:handle/interrupt`,
+    async (request, reply) => {
+      const agent = await resolveAgent(request, reply, request.params.handle);
+      if (!agent) return;
+      const key = activeAgentKey(agent.tenantId, kind, agent.handle);
+      const runtimeId = agentRuntimeId(agent.tenantId, kind, agent.handle);
+      const active = activeAgentTurns.get(key);
+      try {
+        if (active) {
+          if (active.turnId) await markAgentTurnInterrupting(active.turnId);
+          await callBridge('agent-interrupt', [runtimeId, active.cliSessionId], { timeoutMs: 5_000 });
+          active.controller.abort();
+          await callBridge('agent-finish', [runtimeId, active.cliSessionId], { timeoutMs: 120_000 });
+        } else {
+          // Recovery path after an API restart: no in-memory controller owns
+          // the pane, so close any orphaned fresh Claude process cleanly.
+          const status = await callBridge('agent-status', [runtimeId], { timeoutMs: 5_000 });
+          if (status.busy === true) {
+            const ownedSession = typeof status.sessionId === 'string' ? status.sessionId : '';
+            if (!ownedSession) {
+              return reply.status(409).send({ error: 'unowned_agent_process' });
+            }
+            await callBridge('agent-interrupt', [runtimeId, ownedSession], { timeoutMs: 5_000 });
+            await callBridge('agent-finish', [runtimeId, ownedSession], { timeoutMs: 120_000 });
+          }
+          await getPool().query(
+            `UPDATE boss_agent_turns
+                SET status='interrupted', error='interrupted after API restart', completed_at=now()
+              WHERE tenant_id=$1 AND agent_kind=$2 AND handle=$3
+                AND status IN ('queued','starting','running','interrupting')`,
+            [agent.tenantId, kind, agent.handle],
+          );
+        }
+        return reply.send({
+          ok: true,
+          interrupted: Boolean(active),
+          cliSessionId: active?.cliSessionId ?? null,
+        });
+      } catch (error) {
+        request.log.warn({ err: error, handle: agent.handle }, 'agent interrupt failed');
+        return reply.status(502).send({ error: 'interrupt_failed' });
+      }
+    },
+  );
+
   server.post<{
     Params: { handle: string; id: string };
-    Body: { message: string; model?: string };
+    Body: { message: string; displayMessage?: string; model?: string };
   }>(`${mountPrefix}/:handle/sessions/:id/messages`, async (request, reply) => {
     const agent = await resolveAgent(request, reply, request.params.handle);
     if (!agent) return;
@@ -367,7 +490,12 @@ export function mountWorkspaceRoutes(server: FastifyInstance, opts: WorkspaceOpt
     if (!message) {
       return reply.status(400).send({ error: 'bad_request', message: 'message is required' });
     }
+    const displayMessage = (request.body?.displayMessage ?? '').trim() || message;
     const overrideModel = (request.body?.model ?? '').trim();
+    const activeKey = activeAgentKey(agent.tenantId, kind, agent.handle);
+    if (activeAgentTurns.has(activeKey)) {
+      return reply.status(409).send({ error: 'agent_busy', handle: agent.handle });
+    }
 
     const sessRes = await getPool().query<ChatSessionRow>(
       `SELECT * FROM boss_chat_sessions
@@ -379,20 +507,49 @@ export function mountWorkspaceRoutes(server: FastifyInstance, opts: WorkspaceOpt
     }
     const session = sessRes.rows[0];
 
+    const durableBusy = await getPool().query(
+      `SELECT 1 FROM boss_agent_turns
+        WHERE tenant_id=$1 AND agent_kind=$2 AND handle=$3
+          AND status IN ('queued','starting','running','interrupting')
+        LIMIT 1`,
+      [agent.tenantId, kind, agent.handle],
+    );
+    if (durableBusy.rowCount) {
+      return reply.status(409).send({ error: 'agent_busy', handle: agent.handle });
+    }
+
+    const turnAbortController = new AbortController();
+    const cliSessionId = randomUUID();
+    const runtimeId = agentRuntimeId(agent.tenantId, kind, agent.handle);
+    const reservation: ActiveAgentTurn = {
+      controller: turnAbortController,
+      cliSessionId,
+      turnId: '',
+    };
+    if (activeAgentTurns.has(activeKey)) {
+      return reply.status(409).send({ error: 'agent_busy', handle: agent.handle });
+    }
+    activeAgentTurns.set(activeKey, reservation);
+
+    let heartbeat: NodeJS.Timeout | null = null;
+    let latestText = '';
+    try {
+
     await getPool().query(
       `INSERT INTO boss_chat_messages (session_id, role, content)
          VALUES ($1, 'user', $2)`,
-      [session.id, message],
+      [session.id, displayMessage],
     );
 
+    reply.hijack();
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
-    const heartbeat = setInterval(() => {
-      try { reply.raw.write(':heartbeat\n\n'); } catch { clearInterval(heartbeat); }
+    heartbeat = setInterval(() => {
+      try { reply.raw.write(':heartbeat\n\n'); } catch { /* closed */ }
     }, 15_000);
 
     // 2026-05-18: SSE close no longer aborts the turn. Kevin needs to
@@ -405,10 +562,8 @@ export function mountWorkspaceRoutes(server: FastifyInstance, opts: WorkspaceOpt
     //
     // The AbortController is retained for a future explicit "stop"
     // endpoint — for now nothing wires close→abort.
-    const abortController = new AbortController();
-
     // ── Persist-on-frame ─────────────────────────────────────────────────────
-    // Create a placeholder assistant row up front; runChatTurn UPSERTs the
+    // Create a placeholder assistant row up front; the JSONL tail updates the
     // accumulated text into it throttled at ~2s intervals (and once at end).
     // Why: if the SSE dies — client disconnect, API restart, idle timeout —
     // the row already carries the latest partial text. No more "Darla
@@ -421,10 +576,6 @@ export function mountWorkspaceRoutes(server: FastifyInstance, opts: WorkspaceOpt
       [session.id],
     );
     const persistRowId = placeholder.rows[0].id;
-    // Wall-clock cutoff for post-turn JSONL reconciliation. Frames in the
-    // JSONL with timestamp >= this are considered part of this turn.
-    const sendIsoMs = Date.now() - 2_000;
-
     let lastPersistedAt = 0;
     let lastPersistedLen = 0;
     const persistPartial = async (
@@ -433,6 +584,7 @@ export function mountWorkspaceRoutes(server: FastifyInstance, opts: WorkspaceOpt
       tokensOut: number | null,
       force = false,
     ) => {
+      latestText = text;
       const now = Date.now();
       const grew = text.length !== lastPersistedLen;
       const stale = now - lastPersistedAt > 2_000;
@@ -451,73 +603,100 @@ export function mountWorkspaceRoutes(server: FastifyInstance, opts: WorkspaceOpt
       }
     };
 
-    try {
       const effectiveModel = overrideModel || session.model || agent.model;
-      const turn = await runChatTurn(
+      const freshContext = await buildFreshTurnContext(
+        agent.tenantId,
+        kind,
+        agent.handle,
+        agent.projectDir,
+        displayMessage,
+        message,
+      );
+      const turnId = await createAgentTurn({
+        tenantId: agent.tenantId,
+        kind,
+        handle: agent.handle,
+        chatSessionId: session.id,
+        assistantMessageId: persistRowId,
+        rawPrompt: displayMessage,
+        context: freshContext,
+      });
+      reservation.turnId = turnId;
+      await startAgentTurn(turnId, cliSessionId);
+
+      const turn = await runAgentInteractiveTurn(
         {
-          message,
+          runtimeId,
+          handle: agent.handle,
+          message: freshContext.enrichedPrompt,
           projectDir: agent.projectDir,
-          ccSessionId: session.cc_session_id,
+          ccSessionId: cliSessionId,
           model: effectiveModel,
-          abortSignal: abortController.signal,
-          // 2026-05-18: rascals/outsiders get --dangerously-skip-permissions
-          // through the chat surface, matching COO. Reason: the web chat
-          // has no UI for CC's interactive permission prompts (Bash, Edit,
-          // Skill consent, etc), so without the bypass every consent
-          // request silently freezes the rascal until Kevin pokes the
-          // tmux pane manually. Standing rule's spirit (Kevin must approve
-          // sensitive ops) is preserved by the ## Standing rules section
-          // in each CLAUDE.md (drafts only, no $$/scope without Kevin)
-          // rather than by CC's runtime prompt-gating.
+          abortSignal: turnAbortController.signal,
           allowAllTools: true,
+          onStarted: async () => markAgentTurnRunning(turnId),
           onPartial: persistPartial,
         },
         reply.raw,
-      );
-
-      await getPool().query(
-        `UPDATE boss_chat_sessions
-           SET cc_session_id = COALESCE(cc_session_id, $2),
-               updated_at = now()
-           WHERE id = $1`,
-        [session.id, turn.ccSessionId],
       );
 
       // Final flush — guarantees the last bytes + token totals are in the
       // row even if no partial-write fired in the last 2s window.
       const persistedText = turn.aborted
         ? `${turn.assistantText}\n\n[interrupted]`
-        : turn.assistantText;
+        : turn.timedOut
+          ? `${turn.assistantText}\n\n[incomplete: terminal stream timed out]`
+          : turn.assistantText;
       await persistPartial(persistedText, turn.tokensIn, turn.tokensOut, true);
 
-      // Final reconciliation: re-read JSONL one more time and force-overwrite
-      // if on-disk truth is longer than what we just persisted. Catches deep
-      // tool-cycle turns where the final end_turn frame lands after the bridge
-      // tail's debounce closed. COO screen-pipe drop 2026-05-20 was diagnosed
-      // here: 968-char final answer in JSONL, only 193-char opening persisted.
-      try {
-        const finalSessionId = turn.ccSessionId ?? session.cc_session_id;
-        if (finalSessionId && agent.projectDir) {
-          const jsonlPath = jsonlPathFor(agent.projectDir, finalSessionId);
-          const recovered = await recoverTurnFromJsonl(jsonlPath, sendIsoMs);
-          if (recovered.text.length > persistedText.length) {
-            const finalText = turn.aborted
-              ? `${recovered.text}\n\n[interrupted]`
-              : recovered.text;
-            await persistPartial(finalText, recovered.tokensIn ?? turn.tokensIn, recovered.tokensOut ?? turn.tokensOut, true);
-            request.log.info({ persistRowId, recovered: recovered.text.length, persisted: persistedText.length, handle: agent.handle }, 'agent chat: reconciled longer JSONL truth');
-          }
+      // The runner already reconciled the live stream with the authoritative
+      // JSONL. Record the durable ledger result, then ingest only through the
+      // guarded local memory gateway.
+      const finalStatus = turn.aborted ? 'interrupted' : (turn.timedOut ? 'failed' : 'completed');
+      const recap = await finishAgentTurn(
+        turnId,
+        finalStatus,
+        persistedText,
+        turn.timedOut ? 'interactive JSONL tail timed out' : undefined,
+      );
+      if (recap && finalStatus !== 'failed') {
+        const ingested = await ingestAgentRecap(agent.tenantId, kind, agent.handle, turnId, recap);
+        if (!ingested) {
+          request.log.warn({ turnId, handle: agent.handle }, 'guarded memory recap ingest unavailable');
         }
-      } catch (err) {
-        request.log.warn({ err, persistRowId, handle: agent.handle }, 'agent chat: final JSONL reconciliation failed');
       }
     } catch (err) {
-      request.log.error({ err, handle: agent.handle, kind }, 'agent chat turn failed');
+      const detail = err instanceof Error ? err.message : String(err);
+      request.log.error({ err, handle: agent.handle, kind }, 'fresh interactive agent turn failed');
+      if (reservation.turnId) {
+        try {
+          await finishAgentTurn(reservation.turnId, 'failed', latestText, detail);
+        } catch { /* the original failure is already logged */ }
+      }
+      if (reply.raw.headersSent) {
+        try {
+          reply.raw.write(`event: error\ndata: ${JSON.stringify({ message: detail })}\n\n`);
+        } catch { /* browser already left */ }
+      } else {
+        void reply.status(500).send({ error: 'agent_turn_failed' });
+      }
       // Don't delete the placeholder — whatever partial text was streamed
       // into it is the most accurate record of what the rascal produced.
     } finally {
-      clearInterval(heartbeat);
-      try { reply.raw.end(); } catch { /* already closed */ }
+      if (heartbeat) clearInterval(heartbeat);
+      try {
+        await getPool().query(
+          `UPDATE boss_chat_sessions SET cc_session_id = NULL, updated_at = now() WHERE id = $1`,
+          [session.id],
+        );
+      } catch (error) {
+        request.log.warn({ err: error, sessionId: session.id }, 'failed to clear legacy CLI session id');
+      }
+      const active = activeAgentTurns.get(activeKey);
+      if (active === reservation) activeAgentTurns.delete(activeKey);
+      if (reply.raw.headersSent) {
+        try { reply.raw.end(); } catch { /* already closed */ }
+      }
     }
   });
 
@@ -641,6 +820,7 @@ export function mountWorkspaceRoutes(server: FastifyInstance, opts: WorkspaceOpt
 // ── Concrete mounts ─────────────────────────────────────────────────────────
 
 export async function rascalWorkspaceRoutes(server: FastifyInstance) {
+  installAgentShellReconciler(server);
   mountWorkspaceRoutes(server, {
     mountPrefix: '/agents/rascals',
     kind: 'rascal',
@@ -654,6 +834,7 @@ export async function rascalWorkspaceRoutes(server: FastifyInstance) {
         displayName: r.displayName,
         projectDir: r.projectDir,
         model: r.model,
+        cli: 'claude',
       };
     },
   });
@@ -673,6 +854,7 @@ export async function outsiderWorkspaceRoutes(server: FastifyInstance) {
         displayName: o.displayName,
         projectDir: o.projectDir,
         model: o.model,
+        cli: o.cli,
       };
     },
   });

@@ -1,0 +1,23 @@
+--- apps/web/src/pages/Office.tsx
++++ apps/web/src/pages/Office.tsx
+@@ -745,14 +745,12 @@
+             </div>
+           </section>
+ 
+-          {import.meta.env.VITE_BUILDER === '1' && (
+-            <div
+-              className="h-[clamp(190px,28vh,280px)] min-h-0 w-full flex-shrink-0"
+-              data-testid="office-cli-panel"
+-            >
+-              <AgentActivityTile handle="office" displayName="Office EA" sessionId={null} />
+-            </div>
+-          )}
++          <div
++            className="h-[clamp(190px,28vh,280px)] min-h-0 w-full flex-shrink-0"
++            data-testid="office-cli-panel"
++          >
++            <AgentActivityTile handle="office" displayName="Office EA" sessionId={null} />
++          </div>
+         </aside>
+       </main>
+     </div>

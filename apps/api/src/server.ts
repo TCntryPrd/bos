@@ -30,6 +30,7 @@ import { codeRoutes } from './routes/code.js';
 import { pipelineRoutes } from './routes/pipeline.js';
 import { rascalsRoutes } from './routes/rascals.js';
 import { rascalWorkspaceRoutes, outsiderWorkspaceRoutes } from './routes/rascal-workspace.js';
+import { memoryGatewayRoutes } from './routes/memory-gateway.js';
 import { outsidersRoutes } from './routes/outsiders.js';
 import { metaWebhookRoutes } from './routes/webhooks/meta.js';
 import { whatsappWebhookRoutes } from './routes/webhooks/whatsapp.js';
@@ -363,6 +364,10 @@ export async function buildServer() {
 
   // Per-outsider workspace surface — same shape as the rascal workspace.
   await server.register(outsiderWorkspaceRoutes, { prefix: '/api' });
+
+  // Guarded local cognitive-memory gateway. Routes declare their full
+  // /api/aios/memory paths and enforce the separate edge token themselves.
+  await server.register(memoryGatewayRoutes);
 
   // Meta Graph API webhook receiver (Facebook Pages, Instagram, WhatsApp).
   // Public route — Meta hits us as an anonymous third party; verify-token
