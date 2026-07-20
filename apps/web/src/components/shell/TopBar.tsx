@@ -52,11 +52,13 @@ export function TopBar({ pageTitle, onMobileMenu, immersive = false }: TopBarPro
       <h1 className="text-sm font-medium text-text-primary leading-none">
         {pageTitle}
       </h1>
+      {/* Right cluster — tile-lock pill sits directly beside the user's name. */}
+      <div className="ml-auto flex items-center gap-2">
       {/* Tile lock — governs move/resize of tiles on every page. */}
       <button
         type="button"
         onClick={() => setTilesLocked(!locked)}
-        className={`ml-auto flex items-center gap-1.5 rounded-md border px-2 py-1 transition-colors ${
+        className={`flex items-center gap-1.5 rounded-md border px-2 py-1 transition-colors ${
           locked
             ? 'border-border text-text-muted hover:text-text-primary hover:bg-surface-2/60'
             : 'border-accent/50 text-accent bg-accent/10 hover:bg-accent/15'
@@ -74,7 +76,7 @@ export function TopBar({ pageTitle, onMobileMenu, immersive = false }: TopBarPro
       <button
         type="button"
         onClick={() => { if (isAdmin) navigate('/settings'); }}
-        className={`ml-auto flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors ${isAdmin ? 'hover:bg-accent/10 cursor-pointer' : 'cursor-default'}`}
+        className={`flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors ${isAdmin ? 'hover:bg-accent/10 cursor-pointer' : 'cursor-default'}`}
         aria-label={isAdmin ? 'Open Settings' : 'User'}
         title={isAdmin ? 'Settings' : name}
       >
@@ -92,6 +94,7 @@ export function TopBar({ pageTitle, onMobileMenu, immersive = false }: TopBarPro
           {name.slice(0, 1).toUpperCase()}
         </span>
       </button>
+      </div>
     </header>
   );
 }
