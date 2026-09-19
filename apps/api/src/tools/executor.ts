@@ -36,6 +36,7 @@ import { handleTasksMove, handleTasksAdvance, handleTasksBlock } from './kanban-
 import { META_TOOL_HANDLERS } from './meta.js';
 import { LINKEDIN_TOOL_HANDLERS } from './linkedin.js';
 import { EMAIL_DRAFT_TOOL_HANDLERS } from './email-drafts.js';
+import { MANAGED_AGENT_TOOL_HANDLERS } from './managed-agent.js';
 
 // ── Result size limits ────────────────────────────────────────────────────────
 // These prevent individual tool results or accumulated results from bloating
@@ -5920,6 +5921,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   ...LINKEDIN_TOOL_HANDLERS,
   // ── Email draft rating + learning ───────────────────────────────────────────
   ...EMAIL_DRAFT_TOOL_HANDLERS,
+  ...MANAGED_AGENT_TOOL_HANDLERS,
   // ── Telegram ──────────────────────────────────────────────────────────────
   boss_telegram_get_updates: handleTelegramGetUpdates,
   boss_telegram_send_message: handleTelegramSendMessage,

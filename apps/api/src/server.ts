@@ -53,6 +53,7 @@ import reviewsRoutes from './routes/reviews.js';
 import opsRoutes from './routes/ops.js';
 import googleAdminRoutes from './routes/google-admin.js';
 import costRoutes from './routes/cost.js';
+import { mcpRoutes } from './routes/mcp.js';
 import { startSlackSocketMode } from './lib/slack-socket.js';
 import { authMiddleware } from './middleware/auth.js';
 import { tenantMiddleware } from './middleware/tenant.js';
@@ -273,6 +274,9 @@ export async function buildServer() {
   await server.register(opsRoutes, { prefix: '/api/ops' });
   await server.register(googleAdminRoutes, { prefix: '/api/google' });
   await server.register(costRoutes, { prefix: '/api/cost' });
+
+  // MCP registry + Managed Agents (the MCP delegation path that replaces n8n)
+  await server.register(mcpRoutes, { prefix: '/api/mcp' });
   await server.register(gwAuthRoutes, { prefix: '/api/gw' });
 
   // Unified service CRUD (mail / calendar / tasks / files)

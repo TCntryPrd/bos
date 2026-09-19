@@ -5222,3 +5222,66 @@ ALTER TABLE ONLY public.voice_devices
 --
 
 
+
+--
+-- MCP registry + Managed Agents (added for the Mygentic MCP delegation path).
+-- CREATE TABLE IF NOT EXISTS keeps this reconcile-safe on existing installs.
+--
+
+CREATE TABLE IF NOT EXISTS public.boss_mcp_connections (
+    id                          text PRIMARY KEY,
+    name                        text NOT NULL UNIQUE,
+    transport                   text NOT NULL DEFAULT 'http',
+    server_url                  text,
+    command                     text,
+    args                        text,
+    login_url                   text,
+    token_env                   text,
+    config_path                 text,
+    description                 text,
+    enabled                     boolean NOT NULL DEFAULT true,
+    oauth_client_id             text,
+    oauth_client_secret         text,
+    oauth_authorize_endpoint    text,
+    oauth_token_endpoint        text,
+    oauth_registration_endpoint text,
+    oauth_scope                 text,
+    oauth_resource              text,
+    access_token                text,
+    refresh_token               text,
+    token_expires_at            timestamptz,
+    authenticated_at            timestamptz,
+    vault_credential_id         text,
+    created_at                  timestamptz NOT NULL DEFAULT now(),
+    updated_at                  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.boss_mcp_oauth_state (
+    state         text PRIMARY KEY,
+    connection_id text NOT NULL,
+    code_verifier text NOT NULL,
+    redirect_uri  text NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.boss_managed_agent_state (
+    key        text PRIMARY KEY,
+    value      jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.boss_managed_agent_runs (
+    id          text PRIMARY KEY,
+    agent_key   text NOT NULL,
+    session_id  text,
+    status      text NOT NULL,
+    prompt      text,
+    result      text,
+    error       text,
+    cost_usd    numeric,
+    started_at  timestamptz NOT NULL DEFAULT now(),
+    finished_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS boss_managed_agent_runs_started_idx
+    ON public.boss_managed_agent_runs (started_at DESC);
