@@ -14,7 +14,11 @@ import crypto from 'node:crypto';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
 /** Routes that skip authentication entirely. */
-const PUBLIC_PATHS = ['/health', '/health/full', '/connectors/oauth', '/api/connectors/oauth', '/api/webhooks/', '/api/gw/check'];
+const PUBLIC_PATHS = ['/health', '/health/full', '/connectors/oauth', '/api/connectors/oauth',
+  // OAuth providers redirect a plain browser here, so it carries no bearer
+  // token. The state parameter is single-use and expires in 15 minutes.
+  '/api/mcp/global/callback',
+  '/api/webhooks/', '/api/gw/check'];
 
 /**
  * IPs trusted to make internal-service-call auth bypasses when they also

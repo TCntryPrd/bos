@@ -53,6 +53,7 @@ import { ALL_GITHUB_TOOLS } from './github.js';
 import { ALL_TTS_TOOLS } from './tts.js';
 import { ALL_SELF_MOD_TOOLS } from './self-mod.js';
 import { ALL_PERSISTENT_AGENT_TOOLS } from './persistent-agents.js';
+import { ALL_MANAGED_AGENT_TOOLS } from './managed-agent.js';
 import { ALL_WEAVIATE_TOOLS } from './weaviate.js';
 import { ALL_WEB_TOOLS } from './web-search.js';
 import { ALL_CRM_TOOLS } from './crm.js';
@@ -275,6 +276,12 @@ export async function getAvailableTools(
   // ── Persistent agents (create/manage long-running agents) ──────────────
   tools.push(...ALL_PERSISTENT_AGENT_TOOLS);
 
+  // ── Managed Agents (MCP delegation — replaces the n8n fan-out path) ────
+  // Needs a real Anthropic API key; the Claude CLI session is not enough.
+  if (process.env.ANTHROPIC_API_KEY) {
+    tools.push(...ALL_MANAGED_AGENT_TOOLS);
+  }
+
   // ── Self-modification (admin only — trust filter will enforce) ──────────
   tools.push(...ALL_SELF_MOD_TOOLS);
 
@@ -292,6 +299,7 @@ export { ALL_AIRTABLE_TOOLS } from './airtable.js';
 export { ALL_MAKE_TOOLS } from './make.js';
 export { ALL_STRIPE_TOOLS } from './stripe.js';
 export { ALL_AGENT_TOOLS } from './agents.js';
+export { ALL_MANAGED_AGENT_TOOLS } from './managed-agent.js';
 export { ALL_GEMINI_TOOLS } from './gemini.js';
 export { ALL_EMAIL_AGENT_TOOLS } from './email-agent.js';
 export { executeTool } from './executor.js';
